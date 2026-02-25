@@ -56,6 +56,42 @@ pub struct TokenResponse {
     pub scope: String,
 }
 
+/// OIDC discovery document returned from /.well-known/openid-configuration
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OidcDiscoveryDocument {
+    pub issuer: String,
+    pub jwks_uri: String,
+    pub token_endpoint: String,
+    pub userinfo_endpoint: String,
+    pub grant_types_supported: Vec<String>,
+    pub response_types_supported: Vec<String>,
+    pub scopes_supported: Vec<String>,
+    pub token_endpoint_auth_methods_supported: Vec<String>,
+}
+
+/// JWKS response returned from /.well-known/jwks.json
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct JwksResponse {
+    pub keys: Vec<PublicJwk>,
+}
+
+/// Structured password grant request (e.g. for WebSocket auth flow)
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AuthTokenPasswordRequest {
+    pub username: String,
+    pub password: String,
+    pub scope: Option<String>,
+    pub client_id: Option<String>,
+}
+
+/// Structured refresh_token grant request (e.g. for WebSocket auth flow)
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AuthTokenRefreshRequest {
+    pub refresh_token: String,
+    pub scope: Option<String>,
+    pub client_id: Option<String>,
+}
+
 impl RefreshToken {
     pub fn new(
         user_ref: UserRef,
