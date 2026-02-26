@@ -25,10 +25,11 @@ impl ClientWsManager {
 
     pub async fn register_connection(
         &self,
-        conn_id: Uuid,
         sender: mpsc::UnboundedSender<ClientWsEnvelope>,
-    ) {
+    ) -> Uuid {
+        let conn_id = Uuid::new_v4();
         self.pool.register_connection(conn_id, sender).await;
+        conn_id
     }
 
     pub async fn authenticate_connection(

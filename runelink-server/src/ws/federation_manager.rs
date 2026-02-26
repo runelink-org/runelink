@@ -52,10 +52,11 @@ impl FederationWsManager {
     /// Registers a new connection with the manager.
     pub async fn register_connection(
         &self,
-        conn_id: Uuid,
         sender: mpsc::UnboundedSender<FederationWsEnvelope>,
-    ) {
+    ) -> Uuid {
+        let conn_id = Uuid::new_v4();
         self.pool.register_connection(conn_id, sender).await;
+        conn_id
     }
 
     /// Authenticates a connection for a given host.
