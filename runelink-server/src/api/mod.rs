@@ -1,4 +1,4 @@
-use crate::state::AppState;
+use crate::{state::AppState, ws};
 use axum::{
     Router,
     extract::Query,
@@ -22,6 +22,9 @@ pub fn router() -> Router<AppState> {
         .merge(auth::router())
         // Mount federation router (server-to-server endpoints)
         .nest("/federation", federation_router())
+        // Mount websocket routers
+        .route("/ws/client", get(ws::client_ws))
+        .route("/ws/federation", get(ws::federation_ws))
         // API routes
         .route("/ping", get(ping))
         .route("/users", get(users::get_all).post(users::create))
