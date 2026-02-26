@@ -1,13 +1,18 @@
 use runelink_client::{requests, util::get_api_url};
 use runelink_types::{
-    FullServerMembership, NewServerMembership, ServerMember, ServerMembership,
-    UserRef,
+    server::{
+        FullServerMembership, NewServerMembership, ServerMember,
+        ServerMembership,
+    },
+    user::UserRef,
+    ws::{ClientWsUpdate, FederationWsUpdate},
 };
 use uuid::Uuid;
 
 use crate::{
     auth::Session,
     error::{ApiError, ApiResult},
+    ops::fanout,
     queries,
     state::AppState,
 };
@@ -89,6 +94,13 @@ pub async fn create(
         updated_at: membership.updated_at,
         synced_at: membership.synced_at,
     };
+    fanout::fanout_update(
+        state,
+        fanout::resolve_server_targets(state, new_membership.server_id).await?,
+        ClientWsUpdate::MembershipUpserted(full_membership.clone()),
+        FederationWsUpdate::MembershipUpserted(full_membership.clone()),
+    )
+    .await;
     Ok(full_membership)
 }
 
@@ -192,6 +204,14 @@ pub async fn delete(
 
     // Handle local case
     if !state.config.is_remote_host(target_host) {
+        let mut targets =
+            fanout::resolve_server_targets(state, server_id).await?;
+        if !targets.local_users.contains(&user_ref) {
+            targets.local_users.push(user_ref.clone());
+        }
+        if user_ref.host != state.config.local_host() {
+            targets.remote_hosts.push(user_ref.host.clone());
+        }
         // Verify the membership exists
         queries::memberships::get_local_member_by_user_and_server(
             &state.db_pool,
@@ -201,6 +221,19 @@ pub async fn delete(
         .await?;
         queries::memberships::delete_local(&state.db_pool, server_id, user_ref)
             .await?;
+        fanout::fanout_update(
+            state,
+            targets,
+            ClientWsUpdate::MembershipDeleted {
+                server_id,
+                user_ref: session_user_ref.clone(),
+            },
+            FederationWsUpdate::MembershipDeleted {
+                server_id,
+                user_ref: session_user_ref,
+            },
+        )
+        .await;
         Ok(())
     } else {
         // Delete on remote host using federation
@@ -220,9 +253,7 @@ pub async fn delete(
         )
         .await
         .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to leave server on {host}: {e}"
-            ))
+            ApiError::Internal(format!("Failed to leave server on {host}: {e}"))
         })?;
         // Also delete from local cache if it exists
         let _ = queries::memberships::delete_remote(

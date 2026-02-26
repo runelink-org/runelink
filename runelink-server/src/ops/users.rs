@@ -1,6 +1,8 @@
-use log::warn;
 use runelink_client::{requests, util::get_api_url};
-use runelink_types::{NewUser, User, UserRef};
+use runelink_types::{
+    user::{NewUser, User, UserRef},
+    ws::{ClientWsUpdate, FederationWsUpdate},
+};
 
 use crate::{
     auth::Session,
@@ -16,6 +18,10 @@ pub async fn create(
     new_user: &NewUser,
 ) -> ApiResult<User> {
     let user = queries::users::insert(&state.db_pool, new_user).await?;
+    let _ = state
+        .client_ws_manager
+        .broadcast_update(ClientWsUpdate::UserUpserted(user.clone()))
+        .await;
     Ok(user)
 }
 
@@ -84,44 +90,28 @@ pub async fn delete_home_user(
         ));
     }
 
-    let foreign_hosts =
-        queries::memberships::get_remote_server_hosts_for_user(
-            &state.db_pool,
-            user_ref.clone(),
-        )
-        .await?;
-
-    for host in &foreign_hosts {
-        let api_url = get_api_url(host);
-        let token_result = state.key_manager.issue_federation_jwt_delegated(
-            state.config.api_url(),
-            api_url.clone(),
-            user_ref.clone(),
-        );
-        match token_result {
-            Ok(token) => {
-                let user_result = requests::users::federated::delete(
-                    &state.http_client,
-                    &api_url,
-                    &token,
-                    user_ref.clone(),
-                )
-                .await;
-                if let Err(e) = user_result {
-                    warn!(
-                        "Failed to delete user {user_ref} on foreign server {host}: {e}"
-                    );
-                }
-            }
-            Err(e) => {
-                warn!(
-                    "Failed to issue federation token for user {user_ref} on host {host}: {e}"
-                );
-            }
-        }
-    }
+    let foreign_hosts = queries::memberships::get_remote_server_hosts_for_user(
+        &state.db_pool,
+        user_ref.clone(),
+    )
+    .await?;
 
     queries::users::delete(&state.db_pool, user_ref.clone()).await?;
+    let _ = state
+        .client_ws_manager
+        .broadcast_update(ClientWsUpdate::UserDeleted {
+            user_ref: user_ref.clone(),
+        })
+        .await;
+    let _ = state
+        .federation_ws_manager
+        .send_update_to_hosts(
+            foreign_hosts,
+            FederationWsUpdate::RemoteUserDeleted {
+                user_ref: user_ref.clone(),
+            },
+        )
+        .await;
     Ok(())
 }
 
@@ -162,6 +152,12 @@ pub async fn delete_remote_user_record(
     }
 
     queries::users::delete(&state.db_pool, user_ref.clone()).await?;
+    let _ = state
+        .client_ws_manager
+        .broadcast_update(ClientWsUpdate::UserDeleted {
+            user_ref: user_ref.clone(),
+        })
+        .await;
     Ok(())
 }
 
@@ -172,11 +168,9 @@ pub async fn get_associated_hosts(
     target_host: Option<&str>,
 ) -> ApiResult<Vec<String>> {
     if !state.config.is_remote_host(target_host) {
-        let hosts = queries::users::get_associated_hosts(
-            &state.db_pool,
-            &user_ref,
-        )
-        .await?;
+        let hosts =
+            queries::users::get_associated_hosts(&state.db_pool, &user_ref)
+                .await?;
         Ok(hosts)
     } else {
         let host = target_host.unwrap();

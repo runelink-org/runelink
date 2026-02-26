@@ -1,10 +1,14 @@
 use runelink_client::{requests, util::get_api_url};
-use runelink_types::{Message, NewMessage};
+use runelink_types::{
+    message::{Message, NewMessage},
+    ws::{ClientWsUpdate, FederationWsUpdate},
+};
 use uuid::Uuid;
 
 use crate::{
     auth::Session,
     error::{ApiError, ApiResult},
+    ops::fanout,
     queries,
     state::AppState,
 };
@@ -30,6 +34,13 @@ pub async fn create(
         let message =
             queries::messages::insert(&state.db_pool, channel_id, new_message)
                 .await?;
+        fanout::fanout_update(
+            state,
+            fanout::resolve_server_targets(state, server_id).await?,
+            ClientWsUpdate::MessageUpserted(message.clone()),
+            FederationWsUpdate::MessageUpserted(message.clone()),
+        )
+        .await;
         Ok(message)
     } else {
         // Create on remote host using federation
@@ -280,6 +291,21 @@ pub async fn delete(
             ));
         }
         queries::messages::delete(&state.db_pool, message_id).await?;
+        fanout::fanout_update(
+            state,
+            fanout::resolve_server_targets(state, server_id).await?,
+            ClientWsUpdate::MessageDeleted {
+                server_id,
+                channel_id,
+                message_id,
+            },
+            FederationWsUpdate::MessageDeleted {
+                server_id,
+                channel_id,
+                message_id,
+            },
+        )
+        .await;
         Ok(())
     } else {
         // Delete on remote host using federation

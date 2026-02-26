@@ -5,20 +5,25 @@ use std::sync::Arc;
 use runelink_types::UserRef;
 use uuid::Uuid;
 
-use crate::{db::DbPool, error::ApiResult, queries};
+use crate::{config::ServerConfig, db::DbPool, error::ApiResult, queries};
 
 #[derive(Clone, Debug)]
 pub struct RoutingIndex {
     db_pool: Arc<DbPool>,
+    server_config: Arc<ServerConfig>,
 }
 
 impl RoutingIndex {
-    pub fn new(db_pool: Arc<DbPool>) -> Self {
-        Self { db_pool }
+    pub fn new(db_pool: Arc<DbPool>, server_config: Arc<ServerConfig>) -> Self {
+        Self {
+            db_pool,
+            server_config,
+        }
     }
 }
 
 impl RoutingIndex {
+    /// Get the hosts for a server (excluding the local host).
     pub async fn hosts_for_server(
         &self,
         server_id: Uuid,
@@ -28,13 +33,18 @@ impl RoutingIndex {
             server_id,
         )
         .await?;
+        let local_host = self.server_config.local_host();
         let hosts = users
             .into_iter()
             .map(|user| user.host)
-            .collect::<std::collections::BTreeSet<_>>();
-        Ok(hosts.into_iter().collect())
+            .filter(|host| host != &local_host)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        Ok(hosts)
     }
 
+    /// Get the users for a local server.
     pub async fn users_for_local_server(
         &self,
         server_id: Uuid,
@@ -46,6 +56,7 @@ impl RoutingIndex {
         .await
     }
 
+    /// Get the users for a remote server.
     pub async fn users_for_remote_server(
         &self,
         server_id: Uuid,

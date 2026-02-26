@@ -1,13 +1,17 @@
 use runelink_client::{requests, util::get_api_url};
 use runelink_types::{
-    NewServer, NewServerMembership, Server, ServerMembership, ServerRole,
-    ServerWithChannels,
+    server::{
+        NewServer, NewServerMembership, Server, ServerMembership, ServerRole,
+        ServerWithChannels,
+    },
+    ws::{ClientWsUpdate, FederationWsUpdate},
 };
 use uuid::Uuid;
 
 use crate::{
     auth::Session,
     error::{ApiError, ApiResult},
+    ops::fanout,
     queries,
     state::AppState,
 };
@@ -39,6 +43,13 @@ pub async fn create(
         };
         queries::memberships::insert_local(&state.db_pool, &new_membership)
             .await?;
+        fanout::fanout_update(
+            state,
+            fanout::resolve_server_targets(state, server.id).await?,
+            ClientWsUpdate::ServerUpserted(server.clone()),
+            FederationWsUpdate::ServerUpserted(server.clone()),
+        )
+        .await;
         Ok(server)
     } else {
         // Create on remote host using federation
@@ -201,6 +212,13 @@ pub async fn delete(
     // Handle local case
     if !state.config.is_remote_host(target_host) {
         queries::servers::delete(state, server_id).await?;
+        fanout::fanout_update(
+            state,
+            fanout::resolve_server_targets(state, server_id).await?,
+            ClientWsUpdate::ServerDeleted { server_id },
+            FederationWsUpdate::ServerDeleted { server_id },
+        )
+        .await;
         Ok(())
     } else {
         // Delete on remote host using federation
