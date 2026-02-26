@@ -4,12 +4,11 @@ use ed25519_dalek::{
         DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey,
     },
 };
-use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header};
+use jsonwebtoken::{DecodingKey, EncodingKey};
 use rand::rngs::OsRng;
-use runelink_types::{FederationClaims, UserRef, auth::PublicJwk};
+use runelink_types::auth::PublicJwk;
 use std::fs;
 use std::path::PathBuf;
-use time::Duration;
 
 use crate::error::{ApiError, ApiResult};
 
@@ -125,54 +124,5 @@ impl KeyManager {
                 path,
             })
         }
-    }
-
-    /// Issue a short-lived server-only federation JWT (no user delegation).
-    #[allow(dead_code)]
-    pub fn issue_federation_jwt_server_only(
-        &self,
-        issuer_server_id: String,
-        audience_server_id: String,
-    ) -> ApiResult<String> {
-        let lifetime = Duration::minutes(5); // Short-lived for s2s
-        let claims = FederationClaims::new_server_only(
-            issuer_server_id,
-            audience_server_id,
-            lifetime,
-        );
-
-        let token = jsonwebtoken::encode(
-            &Header::new(Algorithm::EdDSA),
-            &claims,
-            &self.private_key,
-        )
-        .map_err(|e| ApiError::Internal(format!("jwt error: {e}")))?;
-
-        Ok(token)
-    }
-
-    /// Issue a short-lived federation JWT with explicit user delegation.
-    pub fn issue_federation_jwt_delegated(
-        &self,
-        issuer_server_id: String,
-        audience_server_id: String,
-        user_ref: UserRef,
-    ) -> ApiResult<String> {
-        let lifetime = Duration::minutes(5); // Short-lived for s2s
-        let claims = FederationClaims::new_delegated(
-            issuer_server_id,
-            audience_server_id,
-            user_ref,
-            lifetime,
-        );
-
-        let token = jsonwebtoken::encode(
-            &Header::new(Algorithm::EdDSA),
-            &claims,
-            &self.private_key,
-        )
-        .map_err(|e| ApiError::Internal(format!("jwt error: {e}")))?;
-
-        Ok(token)
     }
 }

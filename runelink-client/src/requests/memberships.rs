@@ -7,10 +7,7 @@ use uuid::Uuid;
 
 use crate::error::Result;
 
-use super::{
-    delete_authed, delete_federated, fetch_json, post_json_authed,
-    post_json_federated,
-};
+use super::{delete_authed, fetch_json, post_json_authed};
 
 pub async fn fetch_by_user(
     client: &Client,
@@ -97,47 +94,4 @@ pub async fn delete(
     }
     info!("deleting server membership: {url}");
     delete_authed(client, &url, access_token).await
-}
-
-/// Federation endpoints (server-to-server authentication required).
-pub mod federated {
-    use super::*;
-
-    /// Create a remote membership via federation.
-    pub async fn create(
-        client: &Client,
-        api_url: &str,
-        token: &str,
-        new_membership: &NewServerMembership,
-    ) -> Result<FullServerMembership> {
-        let url = format!(
-            "{api_url}/federation/servers/{server_id}/users",
-            server_id = new_membership.server_id
-        );
-        info!("creating membership (federation): {url}");
-        post_json_federated::<NewServerMembership, FullServerMembership>(
-            client,
-            &url,
-            token,
-            new_membership,
-        )
-        .await
-    }
-
-    /// Delete a remote server membership via federation.
-    pub async fn delete(
-        client: &Client,
-        api_url: &str,
-        token: &str,
-        server_id: Uuid,
-        user: UserRef,
-    ) -> Result<()> {
-        let url = format!(
-            "{api_url}/federation/servers/{server_id}/users/{host}/{name}",
-            host = user.host,
-            name = user.name
-        );
-        info!("deleting server membership (federation): {url}");
-        delete_federated(client, &url, token).await
-    }
 }

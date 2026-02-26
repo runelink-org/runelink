@@ -4,7 +4,7 @@ use runelink_types::{NewUser, User, UserRef};
 
 use crate::error::Result;
 
-use super::{delete_authed, delete_federated, fetch_json, post_json_authed};
+use super::{delete_authed, fetch_json, post_json_authed};
 
 pub async fn create(
     client: &Client,
@@ -76,25 +76,4 @@ pub async fn fetch_associated_hosts(
     }
     info!("fetching user associated hosts: {url}");
     fetch_json::<Vec<String>>(client, &url).await
-}
-
-/// Federation endpoints (server-to-server authentication required).
-pub mod federated {
-    use super::*;
-
-    /// DELETE /federation/users/{host}/{name}
-    pub async fn delete(
-        client: &Client,
-        api_url: &str,
-        token: &str,
-        user: UserRef,
-    ) -> Result<()> {
-        let url = format!(
-            "{api_url}/federation/users/{host}/{name}",
-            host = user.host,
-            name = user.name
-        );
-        info!("deleting user (federation): {url}");
-        delete_federated(client, &url, token).await
-    }
 }
