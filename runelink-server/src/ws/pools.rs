@@ -9,15 +9,6 @@ use tokio::sync::{RwLock, mpsc};
 use uuid::Uuid;
 
 /// Tracks active client websocket connections and provides safe send helpers.
-///
-/// This pool only manages connection lifecycle and direct addressability
-/// (by connection id or authenticated user). It intentionally does not contain
-/// subscription state, fanout/routing decisions, persistence, or DB access.
-///
-/// Send strategy:
-/// - collect target senders under a read lock
-/// - drop lock before `send`
-/// - prune stale connections under a write lock after failed sends
 #[derive(Clone, Debug, Default)]
 pub struct ClientWsPool {
     inner: Arc<RwLock<ClientPoolState>>,
@@ -37,10 +28,12 @@ pub struct ClientConn {
 }
 
 impl ClientWsPool {
+    /// Creates a new client websocket pool.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Registers a new connection with the pool.
     pub async fn register_connection(
         &self,
         conn_id: Uuid,
@@ -56,7 +49,6 @@ impl ClientWsPool {
                 );
             }
         }
-
         state.connections.insert(
             conn_id,
             ClientConn {
@@ -67,6 +59,7 @@ impl ClientWsPool {
         );
     }
 
+    /// Authenticates a connection for a given user.
     pub async fn authenticate_connection(
         &self,
         conn_id: Uuid,
@@ -77,7 +70,6 @@ impl ClientWsPool {
             Some(conn) => conn.user_ref.replace(user_ref.clone()),
             None => return false,
         };
-
         if let Some(previous_user) = old_user {
             Self::remove_conn_from_user_index(
                 &mut state.by_user,
@@ -85,16 +77,17 @@ impl ClientWsPool {
                 conn_id,
             );
         }
-
         state.by_user.entry(user_ref).or_default().insert(conn_id);
         true
     }
 
+    /// Deregisters a connection from the pool.
     pub async fn deregister_connection(&self, conn_id: Uuid) -> bool {
         let mut state = self.inner.write().await;
         Self::remove_client_connection(&mut state, conn_id)
     }
 
+    /// Sends an envelope to the active connection for the given connection ID.
     pub async fn send_to_connection(
         &self,
         conn_id: Uuid,
@@ -107,15 +100,12 @@ impl ClientWsPool {
                 .get(&conn_id)
                 .map(|conn| conn.sender.clone())
         };
-
         let Some(sender) = sender else {
             return false;
         };
-
         if sender.send(envelope).is_ok() {
             return true;
         }
-
         let _ = self.deregister_connection(conn_id).await;
         false
     }
@@ -140,10 +130,10 @@ impl ClientWsPool {
                 })
                 .collect::<Vec<_>>()
         };
-
         Self::send_to_many_client(targets, envelope, self).await
     }
 
+    /// Broadcasts an envelope to all active connections.
     pub async fn broadcast(&self, envelope: ClientWsEnvelope) -> usize {
         let targets = {
             let state = self.inner.read().await;
@@ -153,7 +143,6 @@ impl ClientWsPool {
                 .map(|(conn_id, conn)| (*conn_id, conn.sender.clone()))
                 .collect::<Vec<_>>()
         };
-
         Self::send_to_many_client(targets, envelope, self).await
     }
 
@@ -177,7 +166,6 @@ impl ClientWsPool {
         let Some(connection) = state.connections.remove(&conn_id) else {
             return false;
         };
-
         if let Some(user_ref) = connection.user_ref {
             Self::remove_conn_from_user_index(
                 &mut state.by_user,
@@ -185,7 +173,6 @@ impl ClientWsPool {
                 conn_id,
             );
         }
-
         true
     }
 
@@ -196,7 +183,6 @@ impl ClientWsPool {
     ) -> usize {
         let mut sent = 0usize;
         let mut stale = Vec::new();
-
         for (conn_id, sender) in targets {
             if sender.send(envelope.clone()).is_ok() {
                 sent += 1;
@@ -204,7 +190,6 @@ impl ClientWsPool {
                 stale.push(conn_id);
             }
         }
-
         if !stale.is_empty() {
             let stale_set: HashSet<Uuid> = stale.into_iter().collect();
             let mut state = pool.inner.write().await;
@@ -212,27 +197,13 @@ impl ClientWsPool {
                 let _ = Self::remove_client_connection(&mut state, conn_id);
             }
         }
-
         sent
     }
 }
 
 /// Tracks active federation websocket connections and provides safe send
-/// helpers.
-///
-/// This pool manages only connection lifecycle and addressing primitives. It
-/// does not compute fanout targets, maintain subscriptions, handle replay/ack,
-/// or touch persistence.
-///
-/// Send strategy:
-/// - collect target senders under a read lock
-/// - drop lock before `send`
-/// - prune stale connections under a write lock after failed sends
-///
-/// Host send semantics:
-/// - exactly one active authenticated connection is tracked per host
-/// - `send_to_host` uses that single active connection
-/// - `send_to_hosts` sends once per unique host
+/// helpers. Maintains one authenticated federation connection per host and
+/// manages safe message delivery.
 #[derive(Clone, Debug, Default)]
 pub struct FederationWsPool {
     inner: Arc<RwLock<FederationPoolState>>,
@@ -252,10 +223,12 @@ pub struct FederationConn {
 }
 
 impl FederationWsPool {
+    /// Creates a new federation websocket pool.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Registers a new connection with the pool.
     pub async fn register_connection(
         &self,
         conn_id: Uuid,
@@ -282,6 +255,7 @@ impl FederationWsPool {
         );
     }
 
+    /// Authenticates a connection for a given host.
     pub async fn authenticate_connection(
         &self,
         conn_id: Uuid,
@@ -322,6 +296,7 @@ impl FederationWsPool {
         Self::remove_federation_connection(&mut state, conn_id)
     }
 
+    /// Sends an envelope to the active connection for the given connection ID.
     pub async fn send_to_connection(
         &self,
         conn_id: Uuid,
@@ -347,6 +322,7 @@ impl FederationWsPool {
         false
     }
 
+    /// Sends an envelope to the active connection for the given host.
     pub async fn send_to_host(
         &self,
         host: &str,
@@ -372,6 +348,7 @@ impl FederationWsPool {
         false
     }
 
+    /// Sends an envelope to the active connection for the given hosts.
     pub async fn send_to_hosts<I, S>(
         &self,
         hosts: I,
@@ -403,6 +380,7 @@ impl FederationWsPool {
         Self::send_to_many_federation(targets, envelope, self).await
     }
 
+    /// Sends an envelope to all active connections.
     pub async fn broadcast(&self, envelope: FederationWsEnvelope) -> usize {
         let targets = {
             let state = self.inner.read().await;

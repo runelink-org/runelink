@@ -1,8 +1,9 @@
 use config::ServerConfig;
 use sqlx::migrate::Migrator;
 use state::AppState;
-use std::sync::Arc;
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::RwLock};
+
+use std::{collections::HashMap, sync::Arc};
 
 use crate::key_manager::KeyManager;
 
@@ -17,7 +18,7 @@ mod key_manager;
 mod ops;
 mod queries;
 mod state;
-mod ws_pools;
+mod ws;
 
 // Embed all sql migrations in binary
 static MIGRATOR: Migrator = sqlx::migrate!();
@@ -40,12 +41,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config: Arc::new(config.clone()),
         db_pool: Arc::new(db::get_pool(&config).await?),
         http_client: reqwest::Client::new(),
+        client_ws_manager: ws::ClientWsManager::new(),
+        federation_ws_manager: ws::FederationWsManager::new(),
         key_manager: KeyManager::load_or_generate(config.key_dir.clone())?,
-        client_ws_pool: ws_pools::ClientWsPool::new(),
-        federation_ws_pool: ws_pools::FederationWsPool::new(),
-        jwks_cache: Arc::new(tokio::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
+        jwks_cache: Arc::new(RwLock::new(HashMap::new())),
     };
 
     MIGRATOR.run(app_state.db_pool.as_ref()).await?;
