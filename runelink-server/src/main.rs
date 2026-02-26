@@ -17,6 +17,7 @@ mod key_manager;
 mod ops;
 mod queries;
 mod state;
+mod ws_pools;
 
 // Embed all sql migrations in binary
 static MIGRATOR: Migrator = sqlx::migrate!();
@@ -33,22 +34,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .init();
 
-    let config = Arc::new(ServerConfig::from_env()?);
-    let pool = Arc::new(db::get_pool(config.as_ref()).await?);
-    let http_client = reqwest::Client::new();
-    let key_manager = KeyManager::load_or_generate(config.key_dir.clone())?;
+    let config = ServerConfig::from_env()?;
 
     let app_state = AppState {
-        config: config.clone(),
-        db_pool: pool.clone(),
-        http_client,
-        key_manager,
+        config: Arc::new(config.clone()),
+        db_pool: Arc::new(db::get_pool(&config).await?),
+        http_client: reqwest::Client::new(),
+        key_manager: KeyManager::load_or_generate(config.key_dir.clone())?,
+        client_ws_pool: ws_pools::ClientWsPool::new(),
+        federation_ws_pool: ws_pools::FederationWsPool::new(),
         jwks_cache: Arc::new(tokio::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
     };
 
-    MIGRATOR.run(pool.as_ref()).await?;
+    MIGRATOR.run(app_state.db_pool.as_ref()).await?;
     log::info!("Migrations are up to date.");
 
     let app = api::router().with_state(app_state);
