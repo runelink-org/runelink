@@ -1,7 +1,10 @@
-use runelink_client::{requests, util::get_api_url};
+use runelink_client::util::get_api_url;
 use runelink_types::{
     user::{NewUser, User, UserRef},
-    ws::{ClientWsUpdate, FederationWsUpdate},
+    ws::{
+        ClientWsUpdate, FederationWsReply, FederationWsRequest,
+        FederationWsUpdate,
+    },
 };
 
 use crate::{
@@ -10,6 +13,7 @@ use crate::{
     queries,
     state::AppState,
 };
+use super::federation;
 
 /// Create a new user.
 pub async fn create(
@@ -35,15 +39,18 @@ pub async fn get_all(
         Ok(users)
     } else {
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
-        let users =
-            requests::users::fetch_all(&state.http_client, &api_url, None)
-                .await
-                .map_err(|e| {
-                    ApiError::Internal(format!(
-                        "Failed to fetch users from {host}: {e}"
-                    ))
-                })?;
+        let reply = federation::request(
+            state,
+            host,
+            None,
+            FederationWsRequest::UsersGetAll,
+        )
+        .await?;
+        let FederationWsReply::UsersGetAll(users) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for users.get_all"
+            )));
+        };
         Ok(users)
     }
 }
@@ -58,20 +65,19 @@ pub async fn get_by_ref(
         let user = queries::users::get_by_ref(&state.db_pool, user_ref).await?;
         Ok(user)
     } else {
-        let api_url = get_api_url(&user_ref.host);
         let host = user_ref.host.clone();
-        let user = requests::users::fetch_by_ref(
-            &state.http_client,
-            &api_url,
-            user_ref,
+        let reply = federation::request(
+            state,
+            &host,
+            None,
+            FederationWsRequest::UsersGetByRef { user_ref },
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to fetch user from {}: {e}",
-                host
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::UsersGetByRef(user) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for users.get_by_ref"
+            )));
+        };
         Ok(user)
     }
 }
@@ -174,19 +180,18 @@ pub async fn get_associated_hosts(
         Ok(hosts)
     } else {
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
-        let hosts = requests::users::fetch_associated_hosts(
-            &state.http_client,
-            &api_url,
-            user_ref,
+        let reply = federation::request(
+            state,
+            host,
             None,
+            FederationWsRequest::UsersGetAssociatedHosts { user_ref },
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to fetch user associated hosts from {host}: {e}"
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::UsersGetAssociatedHosts(hosts) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for users.get_associated_hosts"
+            )));
+        };
         Ok(hosts)
     }
 }

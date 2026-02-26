@@ -1,11 +1,13 @@
-use runelink_client::{requests, util::get_api_url};
 use runelink_types::{
     channel::{Channel, NewChannel},
-    ws::{ClientWsUpdate, FederationWsUpdate},
+    ws::{
+        ClientWsUpdate, FederationWsReply, FederationWsRequest,
+        FederationWsUpdate,
+    },
 };
 use uuid::Uuid;
 
-use super::fanout;
+use super::{fanout, federation};
 
 use crate::{
     auth::Session,
@@ -38,31 +40,27 @@ pub async fn create(
     } else {
         // Create on remote host using federation
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
         let user_ref = session.user_ref.clone().ok_or_else(|| {
             ApiError::Internal(
                 "User reference required for federated channel creation"
                     .to_string(),
             )
         })?;
-        let token = state.key_manager.issue_federation_jwt_delegated(
-            state.config.api_url(),
-            api_url.clone(),
-            user_ref.clone(),
-        )?;
-        let channel = requests::channels::federated::create(
-            &state.http_client,
-            &api_url,
-            &token,
-            server_id,
-            new_channel,
+        let reply = federation::request(
+            state,
+            host,
+            Some(user_ref),
+            FederationWsRequest::ChannelsCreate {
+                server_id,
+                new_channel: new_channel.clone(),
+            },
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to create channel on {host}: {e}"
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::ChannelsCreate(channel) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for channels.create"
+            )));
+        };
         Ok(channel)
     }
 }
@@ -80,29 +78,24 @@ pub async fn get_all(
     } else {
         // Fetch from remote host using federation
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
         let user_ref = session.user_ref.clone().ok_or_else(|| {
             ApiError::Internal(
                 "User reference required for federated channel fetching"
                     .to_string(),
             )
         })?;
-        let token = state.key_manager.issue_federation_jwt_delegated(
-            state.config.api_url(),
-            api_url.clone(),
-            user_ref,
-        )?;
-        let channels = requests::channels::federated::fetch_all(
-            &state.http_client,
-            &api_url,
-            &token,
+        let reply = federation::request(
+            state,
+            host,
+            Some(user_ref),
+            FederationWsRequest::ChannelsGetAll,
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to fetch channels from {host}: {e}"
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::ChannelsGetAll(channels) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for channels.get_all"
+            )));
+        };
         Ok(channels)
     }
 }
@@ -120,30 +113,24 @@ pub async fn get_by_server(
     } else {
         // Fetch from remote host using federation
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
         let user_ref = session.user_ref.clone().ok_or_else(|| {
             ApiError::Internal(
                 "User reference required for federated channel fetching"
                     .to_string(),
             )
         })?;
-        let token = state.key_manager.issue_federation_jwt_delegated(
-            state.config.api_url(),
-            api_url.clone(),
-            user_ref,
-        )?;
-        let channels = requests::channels::federated::fetch_by_server(
-            &state.http_client,
-            &api_url,
-            &token,
-            server_id,
+        let reply = federation::request(
+            state,
+            host,
+            Some(user_ref),
+            FederationWsRequest::ChannelsGetByServer { server_id },
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to fetch channels from {host}: {e}"
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::ChannelsGetByServer(channels) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for channels.get_by_server"
+            )));
+        };
         Ok(channels)
     }
 }
@@ -164,31 +151,27 @@ pub async fn get_by_id(
     } else {
         // Fetch from remote host using federation
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
         let user_ref = session.user_ref.clone().ok_or_else(|| {
             ApiError::Internal(
                 "User reference required for federated channel fetching"
                     .to_string(),
             )
         })?;
-        let token = state.key_manager.issue_federation_jwt_delegated(
-            state.config.api_url(),
-            api_url.clone(),
-            user_ref,
-        )?;
-        let channel = requests::channels::federated::fetch_by_id(
-            &state.http_client,
-            &api_url,
-            &token,
-            server_id,
-            channel_id,
+        let reply = federation::request(
+            state,
+            host,
+            Some(user_ref),
+            FederationWsRequest::ChannelsGetById {
+                server_id,
+                channel_id,
+            },
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to fetch channel from {host}: {e}"
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::ChannelsGetById(channel) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for channels.get_by_id"
+            )));
+        };
         Ok(channel)
     }
 }
@@ -229,31 +212,27 @@ pub async fn delete(
     } else {
         // Delete on remote host using federation
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
         let user_ref = session.user_ref.clone().ok_or_else(|| {
             ApiError::Internal(
                 "User reference required for federated channel deletion"
                     .to_string(),
             )
         })?;
-        let token = state.key_manager.issue_federation_jwt_delegated(
-            state.config.api_url(),
-            api_url.clone(),
-            user_ref,
-        )?;
-        requests::channels::federated::delete(
-            &state.http_client,
-            &api_url,
-            &token,
-            server_id,
-            channel_id,
+        let reply = federation::request(
+            state,
+            host,
+            Some(user_ref),
+            FederationWsRequest::ChannelsDelete {
+                server_id,
+                channel_id,
+            },
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to delete channel on {host}: {e}"
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::ChannelsDelete = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for channels.delete"
+            )));
+        };
         Ok(())
     }
 }

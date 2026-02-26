@@ -1,14 +1,17 @@
-use runelink_client::{requests, util::get_api_url};
 use runelink_types::{
     server::{
         FullServerMembership, NewServerMembership, ServerMember,
         ServerMembership,
     },
     user::UserRef,
-    ws::{ClientWsUpdate, FederationWsUpdate},
+    ws::{
+        ClientWsUpdate, FederationWsReply, FederationWsRequest,
+        FederationWsUpdate,
+    },
 };
 use uuid::Uuid;
 
+use super::federation;
 use crate::{
     auth::Session,
     error::{ApiError, ApiResult},
@@ -35,19 +38,22 @@ pub async fn create(
                 "User host in membership does not match local host".into(),
             ));
         }
-        let server_api_url = get_api_url(&new_membership.server_host);
-        let token = state.key_manager.issue_federation_jwt_delegated(
-            state.config.api_url(),
-            server_api_url.clone(),
-            new_membership.user_ref.clone(),
-        )?;
-        let membership = requests::memberships::federated::create(
-            &state.http_client,
-            &server_api_url,
-            &token,
-            new_membership,
+        let host = new_membership.server_host.as_str();
+        let reply = federation::request(
+            state,
+            host,
+            Some(new_membership.user_ref.clone()),
+            FederationWsRequest::MembershipsCreate {
+                server_id: new_membership.server_id,
+                new_membership: new_membership.clone(),
+            },
         )
         .await?;
+        let FederationWsReply::MembershipsCreate(membership) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for memberships.create"
+            )));
+        };
         let user = membership.user.clone();
         // Cache the remote server and membership locally
         queries::servers::upsert_remote(&state.db_pool, &membership.server)
@@ -65,13 +71,21 @@ pub async fn create(
     if new_membership.user_ref.host != state.config.local_host() {
         let user = session.lookup_user(state).await?;
         if user.is_none() {
-            let api_url = get_api_url(&new_membership.user_ref.host);
-            let user = requests::users::fetch_by_ref(
-                &state.http_client,
-                &api_url,
-                new_membership.user_ref.clone(),
+            let host = new_membership.user_ref.host.as_str();
+            let reply = federation::request(
+                state,
+                host,
+                None,
+                FederationWsRequest::UsersGetByRef {
+                    user_ref: new_membership.user_ref.clone(),
+                },
             )
             .await?;
+            let FederationWsReply::UsersGetByRef(user) = reply else {
+                return Err(ApiError::Internal(format!(
+                    "Unexpected federation reply from {host} for users.get_by_ref"
+                )));
+            };
             queries::users::upsert_remote(&state.db_pool, &user).await?;
         }
     }
@@ -121,19 +135,19 @@ pub async fn get_members_by_server(
     } else {
         // Fetch from remote host (public endpoint, no auth needed)
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
-        let members = requests::memberships::fetch_members_by_server(
-            &state.http_client,
-            &api_url,
-            server_id,
+        let reply = federation::request(
+            state,
+            host,
             None,
+            FederationWsRequest::MembershipsGetMembersByServer { server_id },
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to fetch members from {host}: {e}"
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::MembershipsGetMembersByServer(members) = reply
+        else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for memberships.get_members_by_server"
+            )));
+        };
         Ok(members)
     }
 }
@@ -157,20 +171,22 @@ pub async fn get_member_by_user_and_server(
     } else {
         // Fetch from remote host (public endpoint, no auth needed)
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
-        let member = requests::memberships::fetch_member_by_user_and_server(
-            &state.http_client,
-            &api_url,
-            server_id,
-            user_ref,
+        let reply = federation::request(
+            state,
+            host,
             None,
+            FederationWsRequest::MembershipsGetByUserAndServer {
+                server_id,
+                user_ref,
+            },
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to fetch member from {host}: {e}"
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::MembershipsGetByUserAndServer(member) = reply
+        else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for memberships.get_by_user_and_server"
+            )));
+        };
         Ok(member)
     }
 }
@@ -238,23 +254,21 @@ pub async fn delete(
     } else {
         // Delete on remote host using federation
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
-        let token = state.key_manager.issue_federation_jwt_delegated(
-            state.config.api_url(),
-            api_url.clone(),
-            user_ref.clone(),
-        )?;
-        requests::memberships::federated::delete(
-            &state.http_client,
-            &api_url,
-            &token,
-            server_id,
-            user_ref.clone(),
+        let reply = federation::request(
+            state,
+            host,
+            Some(user_ref.clone()),
+            FederationWsRequest::MembershipsDelete {
+                server_id,
+                user_ref: user_ref.clone(),
+            },
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!("Failed to leave server on {host}: {e}"))
-        })?;
+        .await?;
+        let FederationWsReply::MembershipsDelete = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for memberships.delete"
+            )));
+        };
         // Also delete from local cache if it exists
         let _ = queries::memberships::delete_remote(
             &state.db_pool,

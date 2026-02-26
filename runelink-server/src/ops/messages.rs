@@ -1,10 +1,13 @@
-use runelink_client::{requests, util::get_api_url};
 use runelink_types::{
     message::{Message, NewMessage},
-    ws::{ClientWsUpdate, FederationWsUpdate},
+    ws::{
+        ClientWsUpdate, FederationWsReply, FederationWsRequest,
+        FederationWsUpdate,
+    },
 };
 use uuid::Uuid;
 
+use super::federation;
 use crate::{
     auth::Session,
     error::{ApiError, ApiResult},
@@ -45,32 +48,28 @@ pub async fn create(
     } else {
         // Create on remote host using federation
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
         let user_ref = session.user_ref.as_ref().ok_or_else(|| {
             ApiError::Internal(
                 "User reference required for federated message creation"
                     .to_string(),
             )
         })?;
-        let token = state.key_manager.issue_federation_jwt_delegated(
-            state.config.api_url(),
-            api_url.clone(),
-            user_ref.clone(),
-        )?;
-        let message = requests::messages::federated::create(
-            &state.http_client,
-            &api_url,
-            &token,
-            server_id,
-            channel_id,
-            new_message,
+        let reply = federation::request(
+            state,
+            host,
+            Some(user_ref.clone()),
+            FederationWsRequest::MessagesCreate {
+                server_id,
+                channel_id,
+                new_message: new_message.clone(),
+            },
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to create message on {host}: {e}"
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::MessagesCreate(message) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for messages.create"
+            )));
+        };
         Ok(message)
     }
 }
@@ -88,29 +87,24 @@ pub async fn get_all(
     } else {
         // Fetch from remote host using federation
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
         let user_ref = session.user_ref.as_ref().ok_or_else(|| {
             ApiError::Internal(
                 "User reference required for federated message fetching"
                     .to_string(),
             )
         })?;
-        let token = state.key_manager.issue_federation_jwt_delegated(
-            state.config.api_url(),
-            api_url.clone(),
-            user_ref.clone(),
-        )?;
-        let messages = requests::messages::federated::fetch_all(
-            &state.http_client,
-            &api_url,
-            &token,
+        let reply = federation::request(
+            state,
+            host,
+            Some(user_ref.clone()),
+            FederationWsRequest::MessagesGetAll,
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to fetch messages from {host}: {e}"
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::MessagesGetAll(messages) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for messages.get_all"
+            )));
+        };
         Ok(messages)
     }
 }
@@ -130,30 +124,24 @@ pub async fn get_by_server(
     } else {
         // Fetch from remote host using federation
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
         let user_ref = session.user_ref.as_ref().ok_or_else(|| {
             ApiError::Internal(
                 "User reference required for federated message fetching"
                     .to_string(),
             )
         })?;
-        let token = state.key_manager.issue_federation_jwt_delegated(
-            state.config.api_url(),
-            api_url.clone(),
-            user_ref.clone(),
-        )?;
-        let messages = requests::messages::federated::fetch_by_server(
-            &state.http_client,
-            &api_url,
-            &token,
-            server_id,
+        let reply = federation::request(
+            state,
+            host,
+            Some(user_ref.clone()),
+            FederationWsRequest::MessagesGetByServer { server_id },
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to fetch messages from {host}: {e}"
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::MessagesGetByServer(messages) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for messages.get_by_server"
+            )));
+        };
         Ok(messages)
     }
 }
@@ -175,31 +163,27 @@ pub async fn get_by_channel(
     } else {
         // Fetch from remote host using federation
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
         let user_ref = session.user_ref.as_ref().ok_or_else(|| {
             ApiError::Internal(
                 "User reference required for federated message fetching"
                     .to_string(),
             )
         })?;
-        let token = state.key_manager.issue_federation_jwt_delegated(
-            state.config.api_url(),
-            api_url.clone(),
-            user_ref.clone(),
-        )?;
-        let messages = requests::messages::federated::fetch_by_channel(
-            &state.http_client,
-            &api_url,
-            &token,
-            server_id,
-            channel_id,
+        let reply = federation::request(
+            state,
+            host,
+            Some(user_ref.clone()),
+            FederationWsRequest::MessagesGetByChannel {
+                server_id,
+                channel_id,
+            },
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to fetch messages from {host}: {e}"
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::MessagesGetByChannel(messages) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for messages.get_by_channel"
+            )));
+        };
         Ok(messages)
     }
 }
@@ -233,32 +217,28 @@ pub async fn get_by_id(
     } else {
         // Fetch from remote host using federation
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
         let user_ref = session.user_ref.as_ref().ok_or_else(|| {
             ApiError::Internal(
                 "User reference required for federated message fetching"
                     .to_string(),
             )
         })?;
-        let token = state.key_manager.issue_federation_jwt_delegated(
-            state.config.api_url(),
-            api_url.clone(),
-            user_ref.clone(),
-        )?;
-        let message = requests::messages::federated::fetch_by_id(
-            &state.http_client,
-            &api_url,
-            &token,
-            server_id,
-            channel_id,
-            message_id,
+        let reply = federation::request(
+            state,
+            host,
+            Some(user_ref.clone()),
+            FederationWsRequest::MessagesGetById {
+                server_id,
+                channel_id,
+                message_id,
+            },
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to fetch message from {host}: {e}"
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::MessagesGetById(message) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for messages.get_by_id"
+            )));
+        };
         Ok(message)
     }
 }
@@ -310,32 +290,28 @@ pub async fn delete(
     } else {
         // Delete on remote host using federation
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
         let user_ref = session.user_ref.as_ref().ok_or_else(|| {
             ApiError::Internal(
                 "User reference required for federated message deletion"
                     .to_string(),
             )
         })?;
-        let token = state.key_manager.issue_federation_jwt_delegated(
-            state.config.api_url(),
-            api_url.clone(),
-            user_ref.clone(),
-        )?;
-        requests::messages::federated::delete(
-            &state.http_client,
-            &api_url,
-            &token,
-            server_id,
-            channel_id,
-            message_id,
+        let reply = federation::request(
+            state,
+            host,
+            Some(user_ref.clone()),
+            FederationWsRequest::MessagesDelete {
+                server_id,
+                channel_id,
+                message_id,
+            },
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to delete message on {host}: {e}"
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::MessagesDelete = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for messages.delete"
+            )));
+        };
         Ok(())
     }
 }
