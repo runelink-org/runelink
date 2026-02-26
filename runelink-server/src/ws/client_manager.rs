@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+use std::borrow::Borrow;
+
 use runelink_types::{
     user::UserRef,
     ws::{ClientWsEnvelope, ClientWsReply, ClientWsUpdate, WsError},
@@ -72,6 +74,26 @@ impl ClientWsManager {
         self.pool
             .send_to_user(
                 user_ref,
+                ClientWsEnvelope::Update {
+                    event_id: Uuid::new_v4(),
+                    update,
+                },
+            )
+            .await
+    }
+
+    pub async fn send_update_to_users<I, S>(
+        &self,
+        users: I,
+        update: ClientWsUpdate,
+    ) -> usize
+    where
+        I: IntoIterator<Item = S>,
+        S: Borrow<UserRef>,
+    {
+        self.pool
+            .send_to_users(
+                users,
                 ClientWsEnvelope::Update {
                     event_id: Uuid::new_v4(),
                     update,

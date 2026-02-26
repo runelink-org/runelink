@@ -1,9 +1,15 @@
 #![allow(dead_code)]
 
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::{
+    borrow::Borrow,
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
-use runelink_types::{ClientWsEnvelope, FederationWsEnvelope, UserRef};
+use runelink_types::{
+    user::UserRef,
+    ws::{ClientWsEnvelope, FederationWsEnvelope},
+};
 use time::OffsetDateTime;
 use tokio::sync::{RwLock, mpsc};
 use uuid::Uuid;
@@ -139,6 +145,41 @@ impl ClientWsPool {
                         .connections
                         .get(conn_id)
                         .map(|conn| (*conn_id, conn.sender.clone()))
+                })
+                .collect::<Vec<_>>()
+        };
+        Self::send_to_many_client(targets, envelope, self).await
+    }
+
+    /// Sends an envelope to the active connections for the given users.
+    pub async fn send_to_users<I, S>(
+        &self,
+        users: I,
+        envelope: ClientWsEnvelope,
+    ) -> usize
+    where
+        I: IntoIterator<Item = S>,
+        S: Borrow<UserRef>,
+    {
+        let users = users
+            .into_iter()
+            .map(|user| user.borrow().clone())
+            .collect::<HashSet<UserRef>>();
+        let targets = {
+            let state = self.inner.read().await;
+            let mut conn_ids = HashSet::new();
+            for user in users {
+                if let Some(user_conn_ids) = state.by_user.get(&user) {
+                    conn_ids.extend(user_conn_ids.iter().copied());
+                }
+            }
+            conn_ids
+                .into_iter()
+                .filter_map(|conn_id| {
+                    state
+                        .connections
+                        .get(&conn_id)
+                        .map(|conn| (conn_id, conn.sender.clone()))
                 })
                 .collect::<Vec<_>>()
         };
@@ -397,7 +438,6 @@ impl FederationWsPool {
             }
             out
         };
-
         Self::send_to_many_federation(targets, envelope, self).await
     }
 
@@ -431,7 +471,6 @@ impl FederationWsPool {
         let Some(connection) = state.connections.remove(&conn_id) else {
             return false;
         };
-
         if let Some(host) = connection.host {
             Self::remove_conn_from_host_index(
                 &mut state.by_host,
@@ -439,7 +478,6 @@ impl FederationWsPool {
                 conn_id,
             );
         }
-
         true
     }
 
@@ -450,7 +488,6 @@ impl FederationWsPool {
     ) -> usize {
         let mut sent = 0usize;
         let mut stale = Vec::new();
-
         for (conn_id, sender) in targets {
             if sender.send(envelope.clone()).is_ok() {
                 sent += 1;
@@ -458,7 +495,6 @@ impl FederationWsPool {
                 stale.push(conn_id);
             }
         }
-
         if !stale.is_empty() {
             let stale_set: HashSet<Uuid> = stale.into_iter().collect();
             let mut state = pool.inner.write().await;
@@ -466,7 +502,6 @@ impl FederationWsPool {
                 let _ = Self::remove_federation_connection(&mut state, conn_id);
             }
         }
-
         sent
     }
 }

@@ -118,8 +118,12 @@ pub async fn handle_federation_message(
                 log::warn!("Unmatched federation websocket response envelope");
             }
         }
-        FederationWsEnvelope::Update { .. } => {
-            todo!("Handle federation websocket update envelope");
+        FederationWsEnvelope::Update { update, .. } => {
+            if let Err(error) =
+                federation::handle_federation_update(state, update).await
+            {
+                log::warn!("Failed handling federation websocket update: {error}");
+            }
         }
     }
 }

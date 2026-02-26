@@ -18,6 +18,7 @@ use crate::{
 
 use super::shared::authorize_client;
 
+/// Handle a client websocket request.
 pub(super) async fn handle_client_request(
     state: &AppState,
     conn_id: Uuid,
@@ -523,6 +524,7 @@ pub(super) async fn handle_client_request(
     }
 }
 
+/// Extract the client authentication from an access token.
 fn client_auth_from_access_token(
     state: &AppState,
     access_token: &str,
