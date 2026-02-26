@@ -36,15 +36,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .init();
 
     let config = ServerConfig::from_env()?;
+    let db_pool = Arc::new(db::get_pool(&config).await?);
 
     let app_state = AppState {
         config: Arc::new(config.clone()),
-        db_pool: Arc::new(db::get_pool(&config).await?),
+        db_pool: db_pool.clone(),
         http_client: reqwest::Client::new(),
         client_ws_manager: ws::ClientWsManager::new(),
         federation_ws_manager: ws::FederationWsManager::new(),
         key_manager: KeyManager::load_or_generate(config.key_dir.clone())?,
         jwks_cache: Arc::new(RwLock::new(HashMap::new())),
+        routing_index: ws::RoutingIndex::new(db_pool),
     };
 
     MIGRATOR.run(app_state.db_pool.as_ref()).await?;

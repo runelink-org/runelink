@@ -274,6 +274,41 @@ pub async fn get_members_by_server(
     .collect()
 }
 
+pub async fn get_local_user_refs_by_server(
+    pool: &DbPool,
+    server_id: Uuid,
+) -> ApiResult<Vec<UserRef>> {
+    let members = get_members_by_server(pool, server_id).await?;
+    Ok(members
+        .into_iter()
+        .map(|member| member.user.as_ref())
+        .collect())
+}
+
+pub async fn get_remote_user_refs_by_server(
+    pool: &DbPool,
+    server_id: Uuid,
+) -> ApiResult<Vec<UserRef>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT DISTINCT
+            ursm.user_name,
+            ursm.user_host
+        FROM user_remote_server_memberships ursm
+        WHERE ursm.remote_server_id = $1
+        ORDER BY user_name, user_host
+        "#,
+        server_id,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| UserRef::new(row.user_name, row.user_host))
+        .collect())
+}
+
 pub async fn get_local_by_user_and_server(
     state: &AppState,
     server_id: Uuid,
