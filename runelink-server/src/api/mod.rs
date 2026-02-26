@@ -1,10 +1,5 @@
 use crate::{state::AppState, ws};
-use axum::{
-    Router,
-    extract::Query,
-    response::IntoResponse,
-    routing::{delete, get, post},
-};
+use axum::{Router, extract::Query, response::IntoResponse, routing::get};
 use log::info;
 use serde::Deserialize;
 
@@ -20,8 +15,6 @@ pub fn router() -> Router<AppState> {
     Router::new()
         // Mount auth router (includes OIDC discovery and auth endpoints)
         .merge(auth::router())
-        // Mount federation router (server-to-server endpoints)
-        .nest("/federation", federation_router())
         // Mount websocket routers
         .route("/ws/client", get(ws::client_ws))
         .route("/ws/federation", get(ws::federation_ws))
@@ -80,52 +73,6 @@ pub fn router() -> Router<AppState> {
             get(memberships::get_by_user_and_server)
                 .delete(memberships::delete),
         )
-}
-
-/// Creates a router for all federation endpoints (server-to-server).
-pub fn federation_router() -> Router<AppState> {
-    Router::new()
-        .route(
-            "/servers/{server_id}/users",
-            post(memberships::federated::create),
-        )
-        .route(
-            "/servers/{server_id}/users/{host}/{name}",
-            delete(memberships::federated::delete),
-        )
-        .route("/servers", post(servers::federated::create))
-        .route("/servers/{server_id}", delete(servers::federated::delete))
-        .route(
-            "/servers/{server_id}/with_channels",
-            get(servers::federated::get_with_channels),
-        )
-        .route(
-            "/servers/{server_id}/channels",
-            post(channels::federated::create)
-                .get(channels::federated::get_by_server),
-        )
-        .route("/channels", get(channels::federated::get_all))
-        .route(
-            "/servers/{server_id}/channels/{channel_id}",
-            get(channels::federated::get_by_id)
-                .delete(channels::federated::delete),
-        )
-        .route("/messages", get(messages::federated::get_all))
-        .route(
-            "/servers/{server_id}/messages",
-            get(messages::federated::get_by_server),
-        )
-        .route(
-            "/servers/{server_id}/channels/{channel_id}/messages",
-            post(messages::federated::create)
-                .get(messages::federated::get_by_channel),
-        )
-        .route(
-            "/servers/{server_id}/channels/{channel_id}/messages/{message_id}",
-            get(messages::federated::get_by_id)
-                .delete(messages::federated::delete),
-        )
-        .route("/users/{host}/{name}", delete(users::federated::delete))
 }
 
 #[derive(Deserialize, Debug)]
