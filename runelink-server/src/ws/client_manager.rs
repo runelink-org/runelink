@@ -44,6 +44,10 @@ impl ClientWsManager {
         self.pool.deregister_connection(conn_id).await
     }
 
+    pub async fn authenticated_user_ref(&self, conn_id: Uuid) -> Option<UserRef> {
+        self.pool.authenticated_user_ref(conn_id).await
+    }
+
     pub async fn send_update_to_connection(
         &self,
         conn_id: Uuid,

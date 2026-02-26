@@ -110,6 +110,18 @@ impl ClientWsPool {
         false
     }
 
+    /// Returns the authenticated user for a connection, if any.
+    pub async fn authenticated_user_ref(
+        &self,
+        conn_id: Uuid,
+    ) -> Option<UserRef> {
+        let state = self.inner.read().await;
+        state
+            .connections
+            .get(&conn_id)
+            .and_then(|conn| conn.user_ref.clone())
+    }
+
     pub async fn send_to_user(
         &self,
         user_ref: &UserRef,
@@ -320,6 +332,15 @@ impl FederationWsPool {
 
         let _ = self.deregister_connection(conn_id).await;
         false
+    }
+
+    /// Returns the authenticated host for a connection, if any.
+    pub async fn authenticated_host(&self, conn_id: Uuid) -> Option<String> {
+        let state = self.inner.read().await;
+        state
+            .connections
+            .get(&conn_id)
+            .and_then(|conn| conn.host.clone())
     }
 
     /// Sends an envelope to the active connection for the given host.

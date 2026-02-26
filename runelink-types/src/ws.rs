@@ -162,7 +162,7 @@ pub enum ClientWsRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum ClientWsReply {
-    Ping,
+    Pong,
     OidcDiscovery(OidcDiscoveryDocument),
     OidcJwks(JwksResponse),
     ConnectionState(ClientWsConnectionState),

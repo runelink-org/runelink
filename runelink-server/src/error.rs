@@ -4,6 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use runelink_client::Error as ClientError;
+use runelink_types::ws::WsError;
 use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinError;
@@ -90,5 +91,26 @@ impl IntoResponse for ApiError {
             error: self.to_string(),
         });
         (status, body).into_response()
+    }
+}
+
+impl From<ApiError> for WsError {
+    fn from(error: ApiError) -> Self {
+        let code = match error {
+            ApiError::AuthError(_) => "auth_error",
+            ApiError::BadRequest(_) => "bad_request",
+            ApiError::NotFound => "not_found",
+            ApiError::UniqueViolation => "conflict",
+            ApiError::DbConnectionError(_)
+            | ApiError::DatabaseError(_)
+            | ApiError::Internal(_)
+            | ApiError::Unknown(_)
+            | ApiError::Client(_) => "internal_error",
+        };
+        WsError {
+            code: code.to_string(),
+            message: error.to_string(),
+            details: None,
+        }
     }
 }

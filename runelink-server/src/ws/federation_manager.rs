@@ -73,6 +73,10 @@ impl FederationWsManager {
         self.pool.deregister_connection(conn_id).await
     }
 
+    pub async fn authenticated_host(&self, conn_id: Uuid) -> Option<String> {
+        self.pool.authenticated_host(conn_id).await
+    }
+
     /// Sends a request to the given host and waits for a reply with a timeout.
     pub async fn send_request_to_host(
         &self,
