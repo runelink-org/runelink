@@ -1,3 +1,4 @@
+use log::info;
 use runelink_types::{
     user::UserRef,
     ws::{
@@ -37,6 +38,7 @@ pub(super) async fn handle_federation_update(
     state: &AppState,
     update: FederationWsUpdate,
 ) -> ApiResult<()> {
+    info!("WS federation: update={:#?}", update);
     match update {
         FederationWsUpdate::MembershipUpserted(membership) => {
             fanout_remote_server_update(
@@ -162,6 +164,7 @@ pub(super) async fn handle_federation_request(
     delegated_user_ref: Option<UserRef>,
     request: FederationWsRequest,
 ) -> ApiResult<FederationWsReply> {
+    info!("WS federation: request={:#?}", request);
     match request {
         FederationWsRequest::ConnectionState => {
             let state = match state

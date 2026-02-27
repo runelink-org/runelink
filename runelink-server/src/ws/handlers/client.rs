@@ -1,4 +1,5 @@
 use jsonwebtoken::{Algorithm, Validation};
+use log::info;
 use runelink_types::{
     auth::{ClientAccessClaims, JwksResponse, OidcDiscoveryDocument},
     user::UserRef,
@@ -18,12 +19,35 @@ use crate::{
 
 use super::shared::authorize_client;
 
+/// Extract the client authentication from an access token.
+fn client_auth_from_access_token(
+    state: &AppState,
+    access_token: &str,
+) -> ApiResult<ClientAuth> {
+    let server_id = state.config.api_url();
+    let mut validation = Validation::new(Algorithm::EdDSA);
+    validation.set_audience(std::slice::from_ref(&server_id));
+    validation.set_issuer(std::slice::from_ref(&server_id));
+
+    let data = jsonwebtoken::decode::<ClientAccessClaims>(
+        access_token,
+        &state.key_manager.decoding_key,
+        &validation,
+    )
+    .map_err(|_| ApiError::AuthError("Invalid or expired token".into()))?;
+
+    Ok(ClientAuth {
+        claims: data.claims,
+    })
+}
+
 /// Handle a client websocket request.
 pub(super) async fn handle_client_request(
     state: &AppState,
     conn_id: Uuid,
     request: ClientWsRequest,
 ) -> ApiResult<ClientWsReply> {
+    info!("WS client: request={:#?}", request);
     match request {
         ClientWsRequest::Ping => Ok(ClientWsReply::Pong),
 
@@ -522,26 +546,4 @@ pub(super) async fn handle_client_request(
             Ok(ClientWsReply::MessagesDelete)
         }
     }
-}
-
-/// Extract the client authentication from an access token.
-fn client_auth_from_access_token(
-    state: &AppState,
-    access_token: &str,
-) -> ApiResult<ClientAuth> {
-    let server_id = state.config.api_url();
-    let mut validation = Validation::new(Algorithm::EdDSA);
-    validation.set_audience(std::slice::from_ref(&server_id));
-    validation.set_issuer(std::slice::from_ref(&server_id));
-
-    let data = jsonwebtoken::decode::<ClientAccessClaims>(
-        access_token,
-        &state.key_manager.decoding_key,
-        &validation,
-    )
-    .map_err(|_| ApiError::AuthError("Invalid or expired token".into()))?;
-
-    Ok(ClientAuth {
-        claims: data.claims,
-    })
 }
