@@ -1,0 +1,14 @@
+# Copy this file to `runelink-server/config.toml` and edit values locally.
+#
+# Default single-server setup.
+# Add another `[[servers]]` block for local federation testing.
+# If there is more than one entry, the server will infer cluster mode and
+# start all configured instances in one process.
+# In cluster mode, each server must use a unique `port` and unique
+# `database_url` (reusing either will fail config validation).
+
+[[servers]]
+local_host = "localhost"
+port = 7000
+database_url = "postgres://postgres:postgres@localhost/runelink"
+key_dir = "/home/your-user/.local/share/runelink/keys"

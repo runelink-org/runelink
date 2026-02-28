@@ -4,6 +4,7 @@ target/
 
 # Environmental variables
 *.env
+runelink-server/config.toml
 
 # Personal notes
 NOTES/
