@@ -118,7 +118,6 @@ impl RawServerConfig {
                 reason: "local_host cannot be empty".to_string(),
             });
         }
-
         let database_url = self.database_url.trim().to_string();
         if database_url.is_empty() {
             return Err(ConfigError::InvalidServerEntry {
@@ -126,11 +125,8 @@ impl RawServerConfig {
                 reason: "database_url cannot be empty".to_string(),
             });
         }
-
-        let key_dir = self
-            .key_dir
-            .unwrap_or_else(|| default_key_dir(&local_host, self.port));
-
+        let key_dir =
+            self.key_dir.unwrap_or_else(|| default_key_dir(self.port));
         Ok(ServerConfig {
             local_host_raw: local_host,
             database_url,
@@ -144,30 +140,10 @@ fn default_port() -> u16 {
     7000
 }
 
-fn default_key_dir(local_host: &str, port: u16) -> PathBuf {
+fn default_key_dir(port: u16) -> PathBuf {
     let mut path = dirs_next::home_dir().expect("failed to get home directory");
-    path.extend([
-        ".local",
-        "share",
-        "runelink",
-        "keys",
-        &sanitize_path_part(local_host),
-        &port.to_string(),
-    ]);
+    path.extend([".local", "share", "runelink", "keys", &port.to_string()]);
     path
-}
-
-fn sanitize_path_part(input: &str) -> String {
-    input
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }
 
 fn validate_unique_resources(configs: &[ServerConfig]) -> ConfigResult<()> {
