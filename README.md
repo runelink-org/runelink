@@ -96,23 +96,25 @@ Most commands will prompt you for any missing values (host, IDs, message body, e
 
 If you want to host your own RuneLink server, run `runelink-server` (Axum + Postgres).
 
-`runelink-server` reads configuration from environment variables (see `runelink-server/src/config.rs`):
+`runelink-server` reads configuration from TOML.
 
-- **Required**
-  - `LOCAL_HOST` (example: `localhost`)
-  - `DATABASE_URL` (Postgres connection string; can point to a local Postgres instance or a remote Postgres server). Example: `postgres://postgres:postgres@localhost/runelink`
-- **Optional**
-  - `PORT` (default: `7000`)
-  - `KEY_DIR` (default: `~/.local/share/runelink/keys`)
-
-Create your local `.env` first:
+Create your local config from the example:
 
 ```bash
-cd runelink-server
-cp .env.example .env
+cp runelink-server/config.example.toml runelink-server/config.toml
 ```
 
-Edit `.env` and update `DATABASE_URL` to point at your Postgres database (local or remote), then install `sqlx-cli` and run migrations:
+Single-server config syntax:
+
+```toml
+[[servers]]
+local_host = "localhost"
+port = 7000
+database_url = "postgres://postgres:postgres@localhost/runelink"
+key_dir = "/home/your-user/.local/share/runelink/keys/localhost/7000"
+```
+
+Then update `database_url` and any other values for your environment, install `sqlx-cli`, and run migrations:
 
 ```bash
 cargo install sqlx-cli --no-default-features --features postgres,rustls
@@ -124,6 +126,8 @@ Start the server:
 ```bash
 cargo run
 ```
+
+If your config contains multiple `[[servers]]` entries, `runelink-server` will infer cluster mode and start multiple server instances in one process.
 
 You can verify it's up with:
 
