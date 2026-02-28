@@ -116,6 +116,8 @@ key_dir = "/home/your-user/.local/share/runelink/keys/localhost/7000"
 
 Then update `database_url` and any other values for your environment, install `sqlx-cli`, and run migrations:
 
+`runelink-server` runtime config comes from TOML, but `sqlx` tooling (CLI/query checking) reads `DATABASE_URL` from env/`.env`. Copy `runelink-server/.env.example` to `runelink-server/.env` for local tooling, or pass `--database-url` to `sqlx` commands.
+
 ```bash
 cargo install sqlx-cli --no-default-features --features postgres,rustls
 sqlx migrate run
