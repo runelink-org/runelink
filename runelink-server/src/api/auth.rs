@@ -17,8 +17,9 @@ use jsonwebtoken::{Algorithm, Header};
 use log::info;
 use reqwest::StatusCode;
 use runelink_types::{
-    ClientAccessClaims, NewUser, RefreshToken, SignupRequest, TokenRequest,
-    TokenResponse, UserRef, UserRole,
+    ClientAccessClaims, JwksResponse, NewUser, OidcDiscoveryDocument,
+    RefreshToken, SignupRequest, TokenRequest, TokenResponse, UserRef,
+    UserRole,
 };
 use serde_json::json;
 use time::{Duration, OffsetDateTime};
@@ -43,29 +44,27 @@ pub fn router() -> Router<AppState> {
 /// Discovery endpoint for OIDC
 pub async fn discovery(
     State(state): State<AppState>,
-) -> Json<serde_json::Value> {
+) -> Json<OidcDiscoveryDocument> {
     info!("GET /.well-known/openid-configuration");
     let issuer = state.config.api_url();
-    let jwks_uri = format!("{}/.well-known/jwks.json", issuer);
-    let token_endpoint = format!("{}/auth/token", issuer);
-    let userinfo_endpoint = format!("{}/auth/userinfo", issuer);
-    Json(json!({
-        "issuer": issuer,
-        "jwks_uri": jwks_uri,
-        "token_endpoint": token_endpoint,
-        "userinfo_endpoint": userinfo_endpoint,
-        "grant_types_supported": ["password", "refresh_token"],
-        "response_types_supported": [],
-        "scopes_supported": [],
-        "token_endpoint_auth_methods_supported": ["none"]
-    }))
+    Json(OidcDiscoveryDocument {
+        issuer: issuer.clone(),
+        jwks_uri: format!("{issuer}/.well-known/jwks.json"),
+        token_endpoint: format!("{issuer}/auth/token"),
+        userinfo_endpoint: format!("{issuer}/auth/userinfo"),
+        grant_types_supported: vec!["password".into(), "refresh_token".into()],
+        response_types_supported: vec![],
+        scopes_supported: vec![],
+        token_endpoint_auth_methods_supported: vec!["none".into()],
+    })
 }
 
 /// JWKS endpoint publishing public keys
-pub async fn jwks(State(state): State<AppState>) -> Json<serde_json::Value> {
+pub async fn jwks(State(state): State<AppState>) -> Json<JwksResponse> {
     info!("GET /.well-known/jwks.json");
-    let keys = vec![state.key_manager.public_jwk.clone()];
-    Json(json!({ "keys": keys }))
+    Json(JwksResponse {
+        keys: vec![state.key_manager.public_jwk.clone()],
+    })
 }
 
 pub async fn token(
@@ -201,7 +200,7 @@ pub async fn userinfo() -> Json<serde_json::Value> {
     // TODO: Implement userinfo endpoint with actual user data
     Json(json!({
         "error": "not_implemented",
-        "error_description": "Userinfo endpoint not yet implemented"
+        "message": "Userinfo endpoint not yet implemented"
     }))
 }
 
@@ -211,7 +210,7 @@ pub async fn register_client() -> Json<serde_json::Value> {
     // TODO: Implement client registration, generating client_id
     Json(json!({
         "error": "not_implemented",
-        "error_description": "Client registration not yet implemented"
+        "message": "Client registration not yet implemented"
     }))
 }
 

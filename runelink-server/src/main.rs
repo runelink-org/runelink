@@ -1,11 +1,9 @@
-use config::ServerConfig;
-use sqlx::migrate::Migrator;
-use state::AppState;
-use std::sync::Arc;
-use tokio::net::TcpListener;
-use tokio::task::JoinSet;
+use std::{collections::HashMap, sync::Arc};
 
-use crate::key_manager::KeyManager;
+use sqlx::migrate::Migrator;
+use tokio::{net::TcpListener, sync::RwLock, task::JoinSet};
+
+use crate::{config::ServerConfig, key_manager::KeyManager, state::AppState};
 
 mod api;
 mod auth;
@@ -18,6 +16,7 @@ mod key_manager;
 mod ops;
 mod queries;
 mod state;
+mod ws;
 
 // Embed all sql migrations in binary
 static MIGRATOR: Migrator = sqlx::migrate!();
@@ -46,25 +45,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         log::info!("Starting single server instance");
     }
 
-    let http_client = reqwest::Client::new();
     let mut join_set = JoinSet::new();
 
     for config in server_configs {
         let config = Arc::new(config);
-        let pool = Arc::new(db::get_pool(config.as_ref()).await?);
-        let key_manager = KeyManager::load_or_generate(config.key_dir.clone())?;
+        let db_pool = Arc::new(db::get_pool(&config).await?);
 
         let app_state = AppState {
             config: config.clone(),
-            db_pool: pool.clone(),
-            http_client: http_client.clone(),
-            key_manager,
-            jwks_cache: Arc::new(tokio::sync::RwLock::new(
-                std::collections::HashMap::new(),
-            )),
+            db_pool: db_pool.clone(),
+            http_client: reqwest::Client::new(),
+            client_ws_manager: ws::ClientWsManager::new(),
+            federation_ws_manager: ws::FederationWsManager::new(),
+            key_manager: KeyManager::load_or_generate(config.key_dir.clone())?,
+            jwks_cache: Arc::new(RwLock::new(HashMap::new())),
+            routing_index: ws::RoutingIndex::new(
+                db_pool.clone(),
+                config.clone(),
+            ),
         };
 
-        MIGRATOR.run(pool.as_ref()).await?;
+        MIGRATOR.run(db_pool.as_ref()).await?;
         log::info!(
             "Migrations are up to date for {}.",
             config.local_host_with_explicit_port()

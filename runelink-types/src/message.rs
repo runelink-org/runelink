@@ -1,9 +1,9 @@
-use crate::{UserRef, user::User};
-
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use time::OffsetDateTime;
 use uuid::Uuid;
+
+use crate::user::{User, UserRef};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Message {

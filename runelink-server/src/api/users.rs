@@ -103,30 +103,3 @@ pub async fn delete(
     ops::users::delete_home_user(&state, &session, &user_ref).await?;
     Ok(StatusCode::NO_CONTENT)
 }
-
-/// Federation endpoints (server-to-server authentication required).
-pub mod federated {
-    use super::*;
-
-    /// DELETE /federation/users/{host}/{name}
-    pub async fn delete(
-        State(state): State<AppState>,
-        headers: HeaderMap,
-        Path((host, name)): Path<(String, String)>,
-    ) -> ApiResult<impl IntoResponse> {
-        let user_ref = UserRef::new(name, host);
-        info!(
-            "DELETE /federation/users/{}/{}",
-            user_ref.host, user_ref.name
-        );
-        let session = authorize(
-            &state,
-            Principal::from_federation_headers(&headers, &state).await?,
-            ops::users::auth::federated::delete(user_ref.clone()),
-        )
-        .await?;
-        ops::users::delete_remote_user_record(&state, &session, &user_ref)
-            .await?;
-        Ok(StatusCode::NO_CONTENT)
-    }
-}

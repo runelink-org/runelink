@@ -5,10 +5,7 @@ use uuid::Uuid;
 
 use crate::{error::Result, requests};
 
-use super::{
-    delete_authed, delete_federated, fetch_json, fetch_json_federated,
-    post_json_authed, post_json_federated,
-};
+use super::{delete_authed, fetch_json, fetch_json_authed, post_json_authed};
 
 pub async fn create(
     client: &Client,
@@ -67,6 +64,21 @@ pub async fn fetch_by_user(
     Ok(servers)
 }
 
+pub async fn fetch_with_channels(
+    client: &Client,
+    api_url: &str,
+    access_token: &str,
+    server_id: Uuid,
+    target_host: Option<&str>,
+) -> Result<ServerWithChannels> {
+    let mut url = format!("{api_url}/servers/{server_id}/with_channels");
+    if let Some(host) = target_host {
+        url = format!("{url}?target_host={host}");
+    }
+    info!("fetching server with channels (federation): {url}");
+    fetch_json_authed::<ServerWithChannels>(client, &url, access_token).await
+}
+
 pub async fn delete(
     client: &Client,
     api_url: &str,
@@ -80,49 +92,4 @@ pub async fn delete(
     }
     info!("deleting server: {url}");
     delete_authed(client, &url, access_token).await
-}
-
-/// Federation endpoints (server-to-server authentication required).
-pub mod federated {
-    use super::*;
-
-    /// POST /federation/servers
-    pub async fn create(
-        client: &Client,
-        api_url: &str,
-        token: &str,
-        new_server: &NewServer,
-    ) -> Result<Server> {
-        let url = format!("{api_url}/federation/servers");
-        info!("creating server (federation): {url}");
-        post_json_federated::<NewServer, Server>(
-            client, &url, token, new_server,
-        )
-        .await
-    }
-
-    /// GET /federation/servers/{server_id}/with_channels
-    pub async fn fetch_with_channels(
-        client: &Client,
-        api_url: &str,
-        token: &str,
-        server_id: Uuid,
-    ) -> Result<ServerWithChannels> {
-        let url =
-            format!("{api_url}/federation/servers/{server_id}/with_channels");
-        info!("fetching server with channels (federation): {url}");
-        fetch_json_federated::<ServerWithChannels>(client, &url, token).await
-    }
-
-    /// DELETE /federation/servers/{server_id}
-    pub async fn delete(
-        client: &Client,
-        api_url: &str,
-        token: &str,
-        server_id: Uuid,
-    ) -> Result<()> {
-        let url = format!("{api_url}/federation/servers/{server_id}");
-        info!("deleting server (federation): {url}");
-        delete_federated(client, &url, token).await
-    }
 }

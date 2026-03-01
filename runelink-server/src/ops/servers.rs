@@ -1,13 +1,20 @@
-use runelink_client::{requests, util::get_api_url};
 use runelink_types::{
-    NewServer, NewServerMembership, Server, ServerMembership, ServerRole,
-    ServerWithChannels,
+    server::{
+        NewServer, NewServerMembership, Server, ServerMembership, ServerRole,
+        ServerWithChannels,
+    },
+    ws::{
+        ClientWsUpdate, FederationWsReply, FederationWsRequest,
+        FederationWsUpdate,
+    },
 };
 use uuid::Uuid;
 
+use super::federation;
 use crate::{
     auth::Session,
     error::{ApiError, ApiResult},
+    ops::fanout,
     queries,
     state::AppState,
 };
@@ -39,34 +46,35 @@ pub async fn create(
         };
         queries::memberships::insert_local(&state.db_pool, &new_membership)
             .await?;
+        fanout::fanout_update(
+            state,
+            fanout::resolve_server_targets(state, server.id).await?,
+            ClientWsUpdate::ServerUpserted(server.clone()),
+            FederationWsUpdate::ServerUpserted(server.clone()),
+        )
+        .await;
         Ok(server)
     } else {
         // Create on remote host using federation
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
         let user_ref = session.user_ref.clone().ok_or_else(|| {
             ApiError::Internal(
                 "User reference required for federated server creation"
                     .to_string(),
             )
         })?;
-        let token = state.key_manager.issue_federation_jwt_delegated(
-            state.config.api_url(),
-            api_url.clone(),
-            user_ref.clone(),
-        )?;
-        let server = requests::servers::federated::create(
-            &state.http_client,
-            &api_url,
-            &token,
-            new_server,
+        let reply = federation::request(
+            state,
+            host,
+            Some(user_ref.clone()),
+            FederationWsRequest::ServersCreate(new_server.clone()),
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to create server on {host}: {e}"
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::ServersCreate(server) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for servers.create"
+            )));
+        };
         // Cache the remote server and creator's admin membership on the home server.
         queries::servers::upsert_remote(&state.db_pool, &server).await?;
         let remote_membership = ServerMembership {
@@ -91,22 +99,23 @@ pub async fn get_all(
     if !state.config.is_remote_host(target_host) {
         // Handle local case
         // TODO: add visibility specification for servers
-        // We could then have an admin endpoint for all servers
-        // and a public endpoint for only public servers
         let servers = queries::servers::get_all(state).await?;
         Ok(servers)
     } else {
         // Fetch from remote host
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
-        let servers =
-            requests::servers::fetch_all(&state.http_client, &api_url, None)
-                .await
-                .map_err(|e| {
-                    ApiError::Internal(format!(
-                        "Failed to fetch servers from {host}: {e}"
-                    ))
-                })?;
+        let reply = federation::request(
+            state,
+            host,
+            None,
+            FederationWsRequest::ServersGetAll,
+        )
+        .await?;
+        let FederationWsReply::ServersGetAll(servers) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for servers.get_all"
+            )));
+        };
         Ok(servers)
     }
 }
@@ -125,19 +134,18 @@ pub async fn get_by_id(
     } else {
         // Fetch from remote host
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
-        let server = requests::servers::fetch_by_id(
-            &state.http_client,
-            &api_url,
-            server_id,
+        let reply = federation::request(
+            state,
+            host,
             None,
+            FederationWsRequest::ServersGetById { server_id },
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to fetch server from {host}: {e}"
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::ServersGetById(server) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for servers.get_by_id"
+            )));
+        };
         Ok(server)
     }
 }
@@ -162,31 +170,26 @@ pub async fn get_with_channels(
     } else {
         // Fetch from remote host using federation
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
         let user_ref = session.user_ref.clone().ok_or_else(|| {
             ApiError::Internal(
                 "User reference required for federated server fetching"
                     .to_string(),
             )
         })?;
-        let token = state.key_manager.issue_federation_jwt_delegated(
-            state.config.api_url(),
-            api_url.clone(),
-            user_ref,
-        )?;
-        let server_with_channels =
-            requests::servers::federated::fetch_with_channels(
-                &state.http_client,
-                &api_url,
-                &token,
-                server_id,
-            )
-            .await
-            .map_err(|e| {
-                ApiError::Internal(format!(
-                    "Failed to fetch server with channels from {host}: {e}"
-                ))
-            })?;
+        let reply = federation::request(
+            state,
+            host,
+            Some(user_ref),
+            FederationWsRequest::ServersGetWithChannels { server_id },
+        )
+        .await?;
+        let FederationWsReply::ServersGetWithChannels(server_with_channels) =
+            reply
+        else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for servers.get_with_channels"
+            )));
+        };
         Ok(server_with_channels)
     }
 }
@@ -201,34 +204,35 @@ pub async fn delete(
     // Handle local case
     if !state.config.is_remote_host(target_host) {
         queries::servers::delete(state, server_id).await?;
+        fanout::fanout_update(
+            state,
+            fanout::resolve_server_targets(state, server_id).await?,
+            ClientWsUpdate::ServerDeleted { server_id },
+            FederationWsUpdate::ServerDeleted { server_id },
+        )
+        .await;
         Ok(())
     } else {
         // Delete on remote host using federation
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
         let user_ref = session.user_ref.clone().ok_or_else(|| {
             ApiError::Internal(
                 "User reference required for federated server deletion"
                     .to_string(),
             )
         })?;
-        let token = state.key_manager.issue_federation_jwt_delegated(
-            state.config.api_url(),
-            api_url.clone(),
-            user_ref,
-        )?;
-        requests::servers::federated::delete(
-            &state.http_client,
-            &api_url,
-            &token,
-            server_id,
+        let reply = federation::request(
+            state,
+            host,
+            Some(user_ref),
+            FederationWsRequest::ServersDelete { server_id },
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to delete server on {host}: {e}"
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::ServersDelete = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for servers.delete"
+            )));
+        };
         Ok(())
     }
 }

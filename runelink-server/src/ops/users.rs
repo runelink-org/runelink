@@ -1,6 +1,11 @@
-use log::warn;
-use runelink_client::{requests, util::get_api_url};
-use runelink_types::{NewUser, User, UserRef};
+use runelink_client::util::get_api_url;
+use runelink_types::{
+    user::{NewUser, User, UserRef},
+    ws::{
+        ClientWsUpdate, FederationWsReply, FederationWsRequest,
+        FederationWsUpdate,
+    },
+};
 
 use crate::{
     auth::Session,
@@ -8,6 +13,7 @@ use crate::{
     queries,
     state::AppState,
 };
+use super::federation;
 
 /// Create a new user.
 pub async fn create(
@@ -16,6 +22,10 @@ pub async fn create(
     new_user: &NewUser,
 ) -> ApiResult<User> {
     let user = queries::users::insert(&state.db_pool, new_user).await?;
+    let _ = state
+        .client_ws_manager
+        .broadcast_update(ClientWsUpdate::UserUpserted(user.clone()))
+        .await;
     Ok(user)
 }
 
@@ -29,15 +39,18 @@ pub async fn get_all(
         Ok(users)
     } else {
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
-        let users =
-            requests::users::fetch_all(&state.http_client, &api_url, None)
-                .await
-                .map_err(|e| {
-                    ApiError::Internal(format!(
-                        "Failed to fetch users from {host}: {e}"
-                    ))
-                })?;
+        let reply = federation::request(
+            state,
+            host,
+            None,
+            FederationWsRequest::UsersGetAll,
+        )
+        .await?;
+        let FederationWsReply::UsersGetAll(users) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for users.get_all"
+            )));
+        };
         Ok(users)
     }
 }
@@ -52,20 +65,19 @@ pub async fn get_by_ref(
         let user = queries::users::get_by_ref(&state.db_pool, user_ref).await?;
         Ok(user)
     } else {
-        let api_url = get_api_url(&user_ref.host);
         let host = user_ref.host.clone();
-        let user = requests::users::fetch_by_ref(
-            &state.http_client,
-            &api_url,
-            user_ref,
+        let reply = federation::request(
+            state,
+            &host,
+            None,
+            FederationWsRequest::UsersGetByRef { user_ref },
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to fetch user from {}: {e}",
-                host
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::UsersGetByRef(user) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for users.get_by_ref"
+            )));
+        };
         Ok(user)
     }
 }
@@ -84,44 +96,28 @@ pub async fn delete_home_user(
         ));
     }
 
-    let foreign_hosts =
-        queries::memberships::get_remote_server_hosts_for_user(
-            &state.db_pool,
-            user_ref.clone(),
-        )
-        .await?;
-
-    for host in &foreign_hosts {
-        let api_url = get_api_url(host);
-        let token_result = state.key_manager.issue_federation_jwt_delegated(
-            state.config.api_url(),
-            api_url.clone(),
-            user_ref.clone(),
-        );
-        match token_result {
-            Ok(token) => {
-                let user_result = requests::users::federated::delete(
-                    &state.http_client,
-                    &api_url,
-                    &token,
-                    user_ref.clone(),
-                )
-                .await;
-                if let Err(e) = user_result {
-                    warn!(
-                        "Failed to delete user {user_ref} on foreign server {host}: {e}"
-                    );
-                }
-            }
-            Err(e) => {
-                warn!(
-                    "Failed to issue federation token for user {user_ref} on host {host}: {e}"
-                );
-            }
-        }
-    }
+    let foreign_hosts = queries::memberships::get_remote_server_hosts_for_user(
+        &state.db_pool,
+        user_ref.clone(),
+    )
+    .await?;
 
     queries::users::delete(&state.db_pool, user_ref.clone()).await?;
+    let _ = state
+        .client_ws_manager
+        .broadcast_update(ClientWsUpdate::UserDeleted {
+            user_ref: user_ref.clone(),
+        })
+        .await;
+    let _ = state
+        .federation_ws_manager
+        .send_update_to_hosts(
+            foreign_hosts,
+            FederationWsUpdate::RemoteUserDeleted {
+                user_ref: user_ref.clone(),
+            },
+        )
+        .await;
     Ok(())
 }
 
@@ -162,6 +158,12 @@ pub async fn delete_remote_user_record(
     }
 
     queries::users::delete(&state.db_pool, user_ref.clone()).await?;
+    let _ = state
+        .client_ws_manager
+        .broadcast_update(ClientWsUpdate::UserDeleted {
+            user_ref: user_ref.clone(),
+        })
+        .await;
     Ok(())
 }
 
@@ -172,27 +174,24 @@ pub async fn get_associated_hosts(
     target_host: Option<&str>,
 ) -> ApiResult<Vec<String>> {
     if !state.config.is_remote_host(target_host) {
-        let hosts = queries::users::get_associated_hosts(
-            &state.db_pool,
-            &user_ref,
-        )
-        .await?;
+        let hosts =
+            queries::users::get_associated_hosts(&state.db_pool, &user_ref)
+                .await?;
         Ok(hosts)
     } else {
         let host = target_host.unwrap();
-        let api_url = get_api_url(host);
-        let hosts = requests::users::fetch_associated_hosts(
-            &state.http_client,
-            &api_url,
-            user_ref,
+        let reply = federation::request(
+            state,
+            host,
             None,
+            FederationWsRequest::UsersGetAssociatedHosts { user_ref },
         )
-        .await
-        .map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to fetch user associated hosts from {host}: {e}"
-            ))
-        })?;
+        .await?;
+        let FederationWsReply::UsersGetAssociatedHosts(hosts) = reply else {
+            return Err(ApiError::Internal(format!(
+                "Unexpected federation reply from {host} for users.get_associated_hosts"
+            )));
+        };
         Ok(hosts)
     }
 }

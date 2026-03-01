@@ -4,8 +4,8 @@ use uuid::Uuid;
 
 use crate::{
     cli::select::{
-        ServerSelectionType, get_channel_selection_with_inputs,
-        get_server_selection,
+        ChannelSelection, ServerSelectionType,
+        get_channel_selection_with_inputs, get_server_selection,
     },
     error::CliError,
 };
@@ -221,37 +221,41 @@ pub async fn handle_channel_commands(
             let _account = ctx.account.ok_or(CliError::MissingAccount)?;
             let api_url = ctx.home_api_url()?;
             let access_token = ctx.get_access_token().await?;
-            let (server_id, channel_id, server_host) =
+            let selection =
                 match (delete_args.server_id, delete_args.channel_id) {
                     (Some(server_id), Some(channel_id)) => {
                         // Both IDs provided, use them directly
-                        (server_id, channel_id, None)
+                        let host = match &delete_args.host {
+                            Some(host) => host.to_string(),
+                            None => ctx.home_host()?.to_string(),
+                        };
+                        ChannelSelection {
+                            host,
+                            server_id,
+                            channel_id,
+                        }
                     }
                     _ => {
                         // Need to select server and/or channel
-                        let (server, channel) =
-                            get_channel_selection_with_inputs(
-                                ctx,
-                                delete_args.channel_id,
-                                delete_args.server_id,
-                            )
-                            .await?;
-                        (server.id, channel.id, Some(server.host.clone()))
+                        get_channel_selection_with_inputs(
+                            ctx,
+                            delete_args.channel_id,
+                            delete_args.server_id,
+                            delete_args.host.as_deref(),
+                        )
+                        .await?
                     }
                 };
-            let target_host = server_host
-                .as_deref()
-                .or_else(|| delete_args.host.as_deref());
             requests::channels::delete(
                 ctx.client,
                 &api_url,
                 &access_token,
-                server_id,
-                channel_id,
-                target_host,
+                selection.server_id,
+                selection.channel_id,
+                Some(&selection.host),
             )
             .await?;
-            println!("Deleted channel: {channel_id}");
+            println!("Deleted channel: {}", selection.channel_id);
         }
     };
     Ok(())
