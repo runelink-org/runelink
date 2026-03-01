@@ -224,6 +224,10 @@ impl FederationWsManager {
         &self,
         envelope: FederationWsEnvelope,
     ) -> bool {
+        info!(
+            "Resolving federation websocket response envelope: {:#?}",
+            envelope
+        );
         let (request_id, outcome) = match envelope {
             FederationWsEnvelope::Reply {
                 request_id, reply, ..
@@ -289,7 +293,9 @@ impl FederationWsManager {
             ) {
                 Ok(token) => token,
                 Err(error) => {
-                    warn!("Failed creating federation token for {host}: {error}");
+                    warn!(
+                        "Failed creating federation token for {host}: {error}"
+                    );
                     return false;
                 }
             };
@@ -317,7 +323,9 @@ impl FederationWsManager {
             let stream = match connect_async(request).await {
                 Ok((stream, _)) => stream,
                 Err(error) => {
-                    warn!("Failed opening federation websocket to {host}: {error}");
+                    warn!(
+                        "Failed opening federation websocket to {host}: {error}"
+                    );
                     return false;
                 }
             };

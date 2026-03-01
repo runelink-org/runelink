@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::{
     error::{ApiError, ApiResult},
-    ops, queries,
+    ops,
     state::AppState,
 };
 
@@ -116,15 +116,10 @@ pub(super) async fn handle_federation_update(
             .await?;
         }
 
-        FederationWsUpdate::MessageUpserted(message) => {
-            let channel = queries::channels::get_by_id(
-                &state.db_pool,
-                message.channel_id,
-            )
-            .await?;
+        FederationWsUpdate::MessageUpserted { server_id, message } => {
             fanout_remote_server_update(
                 state,
-                channel.server_id,
+                server_id,
                 ClientWsUpdate::MessageUpserted(message),
             )
             .await?;

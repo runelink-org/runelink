@@ -7,6 +7,7 @@ use axum::{
     response::IntoResponse,
 };
 use futures_util::{SinkExt, StreamExt};
+use runelink_client::util::host_from_issuer;
 use runelink_types::{
     user::UserRef,
     ws::{ClientWsEnvelope, FederationWsEnvelope},
@@ -20,14 +21,6 @@ use uuid::Uuid;
 
 use super::handlers::{handle_client_message, handle_federation_message};
 use crate::{auth::Principal, state::AppState};
-
-fn host_from_issuer(issuer: &str) -> String {
-    issuer
-        .trim_start_matches("http://")
-        .trim_start_matches("https://")
-        .trim_end_matches('/')
-        .to_string()
-}
 
 pub enum FederationSocket {
     Inbound(WebSocket),

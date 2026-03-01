@@ -369,7 +369,10 @@ pub enum FederationWsUpdate {
         server_id: Uuid,
         channel_id: Uuid,
     },
-    MessageUpserted(Message),
+    MessageUpserted {
+        server_id: Uuid,
+        message: Message,
+    },
     MessageDeleted {
         server_id: Uuid,
         channel_id: Uuid,

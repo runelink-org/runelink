@@ -41,7 +41,10 @@ pub async fn create(
             state,
             fanout::resolve_server_targets(state, server_id).await?,
             ClientWsUpdate::MessageUpserted(message.clone()),
-            FederationWsUpdate::MessageUpserted(message.clone()),
+            FederationWsUpdate::MessageUpserted {
+                server_id,
+                message: message.clone(),
+            },
         )
         .await;
         Ok(message)

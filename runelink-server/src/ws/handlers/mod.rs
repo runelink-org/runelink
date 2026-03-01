@@ -122,7 +122,9 @@ pub async fn handle_federation_message(
             if let Err(error) =
                 federation::handle_federation_update(state, update).await
             {
-                log::warn!("Failed handling federation websocket update: {error}");
+                log::warn!(
+                    "Failed handling federation websocket update: {error}"
+                );
             }
         }
     }
