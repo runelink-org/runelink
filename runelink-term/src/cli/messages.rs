@@ -35,6 +35,9 @@ pub struct MessageListArgs {
     /// Optional: Filter messages by Channel ID
     #[clap(long)]
     pub channel_id: Option<Uuid>,
+    /// The host of the server
+    #[clap(long)]
+    pub host: Option<String>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -97,6 +100,7 @@ pub async fn handle_message_commands(
                 ctx,
                 list_args.channel_id,
                 list_args.server_id,
+                list_args.host.as_deref(),
             )
             .await?;
             let api_url = ctx.home_api_url()?;
@@ -143,6 +147,7 @@ pub async fn handle_message_commands(
                 ctx,
                 send_args.channel_id,
                 send_args.server_id,
+                send_args.host.as_deref(),
             )
             .await?;
             let body = unwrap_or_prompt(send_args.body.clone(), "Message")?;

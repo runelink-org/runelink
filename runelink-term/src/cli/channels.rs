@@ -234,6 +234,7 @@ pub async fn handle_channel_commands(
                                 ctx,
                                 delete_args.channel_id,
                                 delete_args.server_id,
+                                delete_args.host.as_deref(),
                             )
                             .await?;
                         (server.id, channel.id, Some(server.host.clone()))

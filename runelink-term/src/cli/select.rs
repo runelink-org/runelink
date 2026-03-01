@@ -170,11 +170,7 @@ pub async fn get_server_selection(
                 None
             };
             let (all_servers_result, member_servers_result) = tokio::join!(
-                requests::servers::fetch_all(
-                    ctx.client,
-                    &api_url,
-                    target_host
-                ),
+                requests::servers::fetch_all(ctx.client, &api_url, target_host),
                 requests::servers::fetch_by_user(
                     ctx.client,
                     &api_url,
@@ -242,13 +238,14 @@ pub async fn get_channel_selection_with_inputs(
     ctx: &mut CliContext<'_>,
     channel_id: Option<Uuid>,
     server_id: Option<Uuid>,
+    host: Option<&str>,
 ) -> Result<(Server, Channel), CliError> {
     let api_url = ctx.home_api_url()?;
     match (channel_id, server_id) {
         (Some(channel_id), Some(server_id)) => {
             let access_token = ctx.get_access_token().await?;
             let server = requests::servers::fetch_by_id(
-                ctx.client, &api_url, server_id, None,
+                ctx.client, &api_url, server_id, host,
             )
             .await?;
             let channel = requests::channels::fetch_by_id(
@@ -267,7 +264,7 @@ pub async fn get_channel_selection_with_inputs(
         )),
         (None, Some(server_id)) => {
             let server = requests::servers::fetch_by_id(
-                ctx.client, &api_url, server_id, None,
+                ctx.client, &api_url, server_id, host,
             )
             .await?;
             let channel = get_channel_selection(
