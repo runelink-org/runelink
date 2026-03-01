@@ -31,3 +31,5 @@ ed25519-dalek = { version = "2.2.0", features = ["rand_core", "pkcs8"] }
 dirs-next = "2.0.0"
 log = "0.4.28"
 env_logger = "0.11.8"
+futures-util = "0.3.32"
+tokio-tungstenite = "0.28.0"

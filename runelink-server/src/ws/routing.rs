@@ -1,8 +1,6 @@
-#![allow(dead_code)]
-
 use std::sync::Arc;
 
-use runelink_types::UserRef;
+use runelink_types::user::UserRef;
 use uuid::Uuid;
 
 use crate::{config::ServerConfig, db::DbPool, error::ApiResult, queries};

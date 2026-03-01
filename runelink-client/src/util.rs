@@ -27,6 +27,16 @@ pub fn get_api_url(host: &str) -> String {
     format!("http://{host_with_port}")
 }
 
+pub fn get_client_ws_url(host: &str) -> String {
+    let host_with_port = pad_host(host);
+    format!("ws://{host_with_port}/ws/client")
+}
+
+pub fn get_federation_ws_url(host: &str) -> String {
+    let host_with_port = pad_host(host);
+    format!("ws://{host_with_port}/ws/federation")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

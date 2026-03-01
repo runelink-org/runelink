@@ -99,8 +99,6 @@ pub async fn get_all(
     if !state.config.is_remote_host(target_host) {
         // Handle local case
         // TODO: add visibility specification for servers
-        // We could then have an admin endpoint for all servers
-        // and a public endpoint for only public servers
         let servers = queries::servers::get_all(state).await?;
         Ok(servers)
     } else {

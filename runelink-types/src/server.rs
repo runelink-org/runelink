@@ -1,10 +1,12 @@
-use crate::user::User;
-use crate::{UserRef, channel::Channel};
-
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use time::OffsetDateTime;
 use uuid::Uuid;
+
+use crate::{
+    channel::Channel,
+    user::{User, UserRef},
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]

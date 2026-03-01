@@ -15,14 +15,14 @@ pub(super) async fn request(
     delegated_user_ref: Option<UserRef>,
     request: FederationWsRequest,
 ) -> ApiResult<FederationWsReply> {
-    state
-        .federation_ws_manager
-        .send_request_to_host(
-            host,
-            delegated_user_ref,
-            request,
-            REQUEST_TIMEOUT,
-        )
+    let request_future = Box::pin(state.federation_ws_manager.send_request_to_host(
+        state,
+        host,
+        delegated_user_ref,
+        request,
+        REQUEST_TIMEOUT,
+    ));
+    request_future
         .await
         .map_err(|error| error.into_api_error(host))
 }

@@ -1,13 +1,20 @@
-use crate::{
-    AuthTokenPasswordRequest, AuthTokenRefreshRequest, Channel,
-    FullServerMembership, JwksResponse, Message, NewChannel, NewMessage,
-    NewServer, NewServerMembership, NewUser, OidcDiscoveryDocument, Server,
-    ServerMember, ServerMembership, ServerWithChannels, SignupRequest,
-    TokenResponse, User, UserRef,
-};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
+
+use crate::{
+    auth::{
+        AuthTokenPasswordRequest, AuthTokenRefreshRequest, JwksResponse,
+        OidcDiscoveryDocument, SignupRequest, TokenResponse,
+    },
+    channel::{Channel, NewChannel},
+    message::{Message, NewMessage},
+    server::{
+        FullServerMembership, NewServer, NewServerMembership, Server,
+        ServerMember, ServerMembership, ServerWithChannels,
+    },
+    user::{NewUser, User, UserRef},
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct WsError {
@@ -22,14 +29,14 @@ pub struct AuthTokenAccessRequest {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "state", rename_all = "snake_case")]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ClientWsConnectionState {
     Unauthenticated,
     Authenticated { user_ref: UserRef },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "state", rename_all = "snake_case")]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum FederationWsConnectionState {
     Unauthenticated,
     Authenticated { host: String },
@@ -37,7 +44,7 @@ pub enum FederationWsConnectionState {
 
 /// Request enum for websocket client traffic. Variants map to existing API endpoints.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "action", rename_all = "snake_case")]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ClientWsRequest {
     Ping,
     OidcDiscovery,
@@ -160,7 +167,7 @@ pub enum ClientWsRequest {
 
 /// Reply enum for websocket client traffic. Variants map 1:1 with request outcomes.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "result", rename_all = "snake_case")]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ClientWsReply {
     Pong,
     OidcDiscovery(OidcDiscoveryDocument),
@@ -199,7 +206,7 @@ pub enum ClientWsReply {
 
 /// Request enum for federation websocket traffic.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "action", rename_all = "snake_case")]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum FederationWsRequest {
     ConnectionState,
     UsersGetAll,
@@ -284,7 +291,7 @@ pub enum FederationWsRequest {
 
 /// Reply enum for federation websocket traffic. Variants map 1:1 with request outcomes.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "result", rename_all = "snake_case")]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum FederationWsReply {
     ConnectionState(FederationWsConnectionState),
     UsersGetAll(Vec<User>),
@@ -316,7 +323,7 @@ pub enum FederationWsReply {
 
 /// Client websocket updates are push-only events and do not map 1:1 with requests.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "event", rename_all = "snake_case")]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ClientWsUpdate {
     UserUpserted(User),
     UserDeleted {
@@ -346,7 +353,7 @@ pub enum ClientWsUpdate {
 
 /// Federation websocket updates are push-only events
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "event", rename_all = "snake_case")]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum FederationWsUpdate {
     MembershipUpserted(FullServerMembership),
     MembershipDeleted {
@@ -374,7 +381,7 @@ pub enum FederationWsUpdate {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ClientWsEnvelope {
     Request {
         request_id: Uuid,
@@ -397,7 +404,7 @@ pub enum ClientWsEnvelope {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum FederationWsEnvelope {
     Request {
         request_id: Uuid,

@@ -1,23 +1,34 @@
 #![allow(dead_code)]
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    collections::HashMap, future::Future, pin::Pin, sync::Arc,
+    time::Duration as StdDuration,
+};
 
+use jsonwebtoken::{Algorithm, Header};
+use log::{info, warn};
+use runelink_client::util::{get_api_url, get_federation_ws_url, pad_host};
 use runelink_types::{
+    FederationClaims,
     user::UserRef,
     ws::{
         FederationWsEnvelope, FederationWsReply, FederationWsRequest,
         FederationWsUpdate, WsError,
     },
 };
+use time::Duration;
 use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio_tungstenite::{
+    connect_async, tungstenite::client::IntoClientRequest,
+};
 use uuid::Uuid;
 
 use super::{
     error::{FederationRequestError, FederationRequestResult},
     pools::FederationWsPool,
+    socket_loops::{FederationSocket, federation_socket_loop},
 };
+use crate::state::AppState;
 
 type PendingFederationReplySender =
     oneshot::Sender<Result<FederationWsReply, WsError>>;
@@ -80,11 +91,17 @@ impl FederationWsManager {
     /// Sends a request to the given host and waits for a reply with a timeout.
     pub async fn send_request_to_host(
         &self,
+        state: &AppState,
         host: &str,
         delegated_user_ref: Option<UserRef>,
         request: FederationWsRequest,
-        timeout: Duration,
+        timeout: StdDuration,
     ) -> FederationRequestResult<FederationWsReply> {
+        let host = pad_host(host);
+        if !self.ensure_connection(state, &host).await {
+            return Err(FederationRequestError::HostUnavailable { host });
+        }
+
         let request_id = Uuid::new_v4();
         let event_id = Uuid::new_v4();
         let envelope = FederationWsEnvelope::Request {
@@ -94,16 +111,17 @@ impl FederationWsManager {
             request,
         };
         let (tx, rx) = oneshot::channel();
-        let mut pending = self.pending.lock().await;
-        pending.insert(request_id, tx);
+        {
+            let mut pending = self.pending.lock().await;
+            pending.insert(request_id, tx);
+        }
 
-        let sent = self.pool.send_to_host(host, envelope).await;
+        let sent = self.pool.send_to_host(&host, envelope).await;
         if !sent {
+            warn!("Failed to send federation request to {host}");
             let mut pending = self.pending.lock().await;
             pending.remove(&request_id);
-            return Err(FederationRequestError::HostUnavailable {
-                host: host.to_owned(),
-            });
+            return Err(FederationRequestError::HostUnavailable { host });
         }
 
         let result = tokio::time::timeout(timeout, rx).await;
@@ -120,10 +138,7 @@ impl FederationWsManager {
             Err(_) => {
                 let mut pending = self.pending.lock().await;
                 pending.remove(&request_id);
-                Err(FederationRequestError::Timeout {
-                    host: host.to_owned(),
-                    request_id,
-                })
+                Err(FederationRequestError::Timeout { host, request_id })
             }
         }
     }
@@ -241,5 +256,94 @@ impl FederationWsManager {
                 update,
             })
             .await
+    }
+
+    async fn ensure_connection(&self, state: &AppState, host: &str) -> bool {
+        if self.pool.has_host(host).await {
+            return true;
+        }
+
+        if !self.connect_to_host(state, host).await {
+            return false;
+        }
+
+        self.pool.has_host(host).await
+    }
+
+    fn connect_to_host<'a>(
+        &'a self,
+        state: &'a AppState,
+        host: &'a str,
+    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+        Box::pin(async move {
+            info!("Opening federation websocket to {host}");
+            let claims = FederationClaims::new_server_only(
+                state.config.api_url(),
+                get_api_url(host),
+                Duration::minutes(5),
+            );
+            let token = match jsonwebtoken::encode(
+                &Header::new(Algorithm::EdDSA),
+                &claims,
+                &state.key_manager.private_key,
+            ) {
+                Ok(token) => token,
+                Err(error) => {
+                    warn!("Failed creating federation token for {host}: {error}");
+                    return false;
+                }
+            };
+            let ws_url = get_federation_ws_url(host);
+            let mut request = match ws_url.as_str().into_client_request() {
+                Ok(request) => request,
+                Err(error) => {
+                    warn!(
+                        "Failed building federation websocket request for {host}: {error}"
+                    );
+                    return false;
+                }
+            };
+            let auth_header = match format!("Bearer {token}").parse() {
+                Ok(value) => value,
+                Err(error) => {
+                    warn!(
+                        "Failed building federation auth header for {host}: {error}"
+                    );
+                    return false;
+                }
+            };
+            request.headers_mut().insert("Authorization", auth_header);
+
+            let stream = match connect_async(request).await {
+                Ok((stream, _)) => stream,
+                Err(error) => {
+                    warn!("Failed opening federation websocket to {host}: {error}");
+                    return false;
+                }
+            };
+
+            let (sender, outbound_rx) =
+                mpsc::unbounded_channel::<FederationWsEnvelope>();
+            let conn_id = self.register_connection(sender).await;
+            let _ = self
+                .authenticate_connection(conn_id, host.to_string())
+                .await;
+            let state = state.clone();
+            let host = host.to_string();
+
+            let loop_task: Pin<Box<dyn Future<Output = ()> + Send>> =
+                Box::pin(async move {
+                    federation_socket_loop(
+                        state,
+                        conn_id,
+                        FederationSocket::Outbound(stream),
+                        outbound_rx,
+                    )
+                    .await;
+                    info!("Federation websocket closed for {host}");
+                });
+            tokio::spawn(loop_task);
+            true
+        })
     }
 }

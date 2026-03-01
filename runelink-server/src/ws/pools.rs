@@ -384,6 +384,15 @@ impl FederationWsPool {
             .and_then(|conn| conn.host.clone())
     }
 
+    /// Returns whether the given host currently has an authenticated connection.
+    pub async fn has_host(&self, host: &str) -> bool {
+        let state = self.inner.read().await;
+        let Some(conn_id) = state.by_host.get(host).copied() else {
+            return false;
+        };
+        state.connections.contains_key(&conn_id)
+    }
+
     /// Sends an envelope to the active connection for the given host.
     pub async fn send_to_host(
         &self,
