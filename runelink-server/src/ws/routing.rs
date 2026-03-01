@@ -26,7 +26,7 @@ impl RoutingIndex {
         &self,
         server_id: Uuid,
     ) -> ApiResult<Vec<String>> {
-        let users = queries::memberships::get_local_user_refs_by_server(
+        let users = queries::memberships::get_user_refs_by_local_server(
             self.db_pool.as_ref(),
             server_id,
         )
@@ -47,11 +47,17 @@ impl RoutingIndex {
         &self,
         server_id: Uuid,
     ) -> ApiResult<Vec<UserRef>> {
-        queries::memberships::get_local_user_refs_by_server(
+        let server_users = queries::memberships::get_user_refs_by_local_server(
             self.db_pool.as_ref(),
             server_id,
         )
-        .await
+        .await?;
+        let local_host = self.server_config.local_host();
+        let local_users = server_users
+            .into_iter()
+            .filter(|user| user.host == local_host)
+            .collect::<Vec<_>>();
+        Ok(local_users)
     }
 
     /// Get the users for a remote server.
@@ -59,7 +65,7 @@ impl RoutingIndex {
         &self,
         server_id: Uuid,
     ) -> ApiResult<Vec<UserRef>> {
-        queries::memberships::get_remote_user_refs_by_server(
+        queries::memberships::get_user_refs_by_remote_server(
             self.db_pool.as_ref(),
             server_id,
         )

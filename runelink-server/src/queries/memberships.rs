@@ -274,7 +274,7 @@ pub async fn get_members_by_server(
     .collect()
 }
 
-pub async fn get_local_user_refs_by_server(
+pub async fn get_user_refs_by_local_server(
     pool: &DbPool,
     server_id: Uuid,
 ) -> ApiResult<Vec<UserRef>> {
@@ -285,7 +285,7 @@ pub async fn get_local_user_refs_by_server(
         .collect())
 }
 
-pub async fn get_remote_user_refs_by_server(
+pub async fn get_user_refs_by_remote_server(
     pool: &DbPool,
     server_id: Uuid,
 ) -> ApiResult<Vec<UserRef>> {
