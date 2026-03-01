@@ -96,7 +96,7 @@ pub async fn handle_message_commands(
         MessageCommands::List(list_args) => {
             ctx.account.ok_or(CliError::MissingAccount)?;
             let account = ctx.account.ok_or(CliError::MissingAccount)?;
-            let (server, channel) = get_channel_selection_with_inputs(
+            let selection = get_channel_selection_with_inputs(
                 ctx,
                 list_args.channel_id,
                 list_args.server_id,
@@ -105,8 +105,8 @@ pub async fn handle_message_commands(
             .await?;
             let api_url = ctx.home_api_url()?;
             let access_token = ctx.get_access_token().await?;
-            let target_host = if server.host != account.user_ref.host {
-                Some(server.host.as_str())
+            let target_host = if selection.host != account.user_ref.host {
+                Some(selection.host.as_str())
             } else {
                 None
             };
@@ -114,8 +114,8 @@ pub async fn handle_message_commands(
                 ctx.client,
                 &api_url,
                 &access_token,
-                server.id,
-                channel.id,
+                selection.server_id,
+                selection.channel_id,
                 target_host,
             )
             .await?;
@@ -143,7 +143,7 @@ pub async fn handle_message_commands(
 
         MessageCommands::Send(send_args) => {
             let account = ctx.account.ok_or(CliError::MissingAccount)?;
-            let (server, channel) = get_channel_selection_with_inputs(
+            let selection = get_channel_selection_with_inputs(
                 ctx,
                 send_args.channel_id,
                 send_args.server_id,
@@ -157,19 +157,17 @@ pub async fn handle_message_commands(
                 author: account.user_ref.clone(),
                 body,
             };
-            let target_host = send_args.host.as_deref().or_else(|| {
-                if server.host != account.user_ref.host {
-                    Some(server.host.as_str())
-                } else {
-                    None
-                }
-            });
+            let target_host = if selection.host != account.user_ref.host {
+                Some(selection.host.as_str())
+            } else {
+                None
+            };
             let message = requests::messages::create(
                 ctx.client,
                 &api_url,
                 &access_token,
-                server.id,
-                channel.id,
+                selection.server_id,
+                selection.channel_id,
                 &new_message,
                 target_host,
             )

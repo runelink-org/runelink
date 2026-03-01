@@ -205,11 +205,18 @@ pub async fn get_server_selection(
     Ok(server.clone())
 }
 
+#[derive(Debug, Clone)]
+pub struct ChannelSelection {
+    pub host: String,
+    pub server_id: Uuid,
+    pub channel_id: Uuid,
+}
+
 pub async fn get_channel_selection(
     ctx: &mut CliContext<'_>,
     server_id: Uuid,
-    server_host: Option<&str>,
-) -> Result<Channel, CliError> {
+    server_host: &str,
+) -> Result<ChannelSelection, CliError> {
     let api_url = ctx.home_api_url()?;
     let access_token = ctx.get_access_token().await?;
     let channels = requests::channels::fetch_by_server(
@@ -217,7 +224,7 @@ pub async fn get_channel_selection(
         &api_url,
         &access_token,
         server_id,
-        server_host,
+        Some(server_host),
     )
     .await?;
     if channels.is_empty() {
@@ -231,7 +238,11 @@ pub async fn get_channel_selection(
         select_inline(&channels, "Select channel", Channel::to_string)?
             .ok_or(CliError::Cancellation)?;
     println!();
-    Ok(channel.clone())
+    Ok(ChannelSelection {
+        host: server_host.to_string(),
+        server_id,
+        channel_id: channel.id,
+    })
 }
 
 pub async fn get_channel_selection_with_inputs(
@@ -239,53 +250,28 @@ pub async fn get_channel_selection_with_inputs(
     channel_id: Option<Uuid>,
     server_id: Option<Uuid>,
     host: Option<&str>,
-) -> Result<(Server, Channel), CliError> {
-    let api_url = ctx.home_api_url()?;
+) -> Result<ChannelSelection, CliError> {
+    let host = match host {
+        Some(host) => host.to_string(),
+        None => ctx.home_host()?.to_string(),
+    };
     match (channel_id, server_id) {
-        (Some(channel_id), Some(server_id)) => {
-            let access_token = ctx.get_access_token().await?;
-            let server = requests::servers::fetch_by_id(
-                ctx.client, &api_url, server_id, host,
-            )
-            .await?;
-            let channel = requests::channels::fetch_by_id(
-                ctx.client,
-                &api_url,
-                &access_token,
-                server_id,
-                channel_id,
-                Some(server.host.as_str()),
-            )
-            .await?;
-            Ok((server, channel))
-        }
+        (Some(channel_id), Some(server_id)) => Ok(ChannelSelection {
+            host,
+            server_id,
+            channel_id,
+        }),
         (Some(_channel_id), None) => Err(CliError::MissingContext(
             "Server ID must be passed with channel ID.".into(),
         )),
         (None, Some(server_id)) => {
-            let server = requests::servers::fetch_by_id(
-                ctx.client, &api_url, server_id, host,
-            )
-            .await?;
-            let channel = get_channel_selection(
-                ctx,
-                server.id,
-                Some(server.host.as_str()),
-            )
-            .await?;
-            Ok((server, channel))
+            get_channel_selection(ctx, server_id, host.as_str()).await
         }
         (None, None) => {
             let server =
                 get_server_selection(&*ctx, ServerSelectionType::MemberOnly)
                     .await?;
-            let channel = get_channel_selection(
-                ctx,
-                server.id,
-                Some(server.host.as_str()),
-            )
-            .await?;
-            Ok((server, channel))
+            get_channel_selection(ctx, server.id, server.host.as_str()).await
         }
     }
 }

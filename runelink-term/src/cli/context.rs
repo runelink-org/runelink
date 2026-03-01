@@ -19,6 +19,10 @@ impl<'a> CliContext<'a> {
         self.account.try_get_api_url()
     }
 
+    pub fn home_host(&self) -> Result<&str, CliError> {
+        self.account.try_get_host()
+    }
+
     pub async fn get_access_token(&mut self) -> Result<String, CliError> {
         let account = self.account.ok_or(CliError::MissingAccount)?;
         let api_url = self.home_api_url()?;
