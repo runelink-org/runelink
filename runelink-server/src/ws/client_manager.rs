@@ -10,6 +10,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use super::pools::ClientWsPool;
+use crate::ids::ConnId;
 
 /// High-level manager for client websocket connections.
 ///
@@ -28,31 +29,34 @@ impl ClientWsManager {
     pub async fn register_connection(
         &self,
         sender: mpsc::UnboundedSender<ClientWsEnvelope>,
-    ) -> Uuid {
-        let conn_id = Uuid::new_v4();
+    ) -> ConnId {
+        let conn_id = ConnId::new();
         self.pool.register_connection(conn_id, sender).await;
         conn_id
     }
 
     pub async fn authenticate_connection(
         &self,
-        conn_id: Uuid,
+        conn_id: ConnId,
         user_ref: UserRef,
     ) -> bool {
         self.pool.authenticate_connection(conn_id, user_ref).await
     }
 
-    pub async fn deregister_connection(&self, conn_id: Uuid) -> bool {
+    pub async fn deregister_connection(&self, conn_id: ConnId) -> bool {
         self.pool.deregister_connection(conn_id).await
     }
 
-    pub async fn authenticated_user_ref(&self, conn_id: Uuid) -> Option<UserRef> {
+    pub async fn authenticated_user_ref(
+        &self,
+        conn_id: ConnId,
+    ) -> Option<UserRef> {
         self.pool.authenticated_user_ref(conn_id).await
     }
 
     pub async fn send_update_to_connection(
         &self,
-        conn_id: Uuid,
+        conn_id: ConnId,
         update: ClientWsUpdate,
     ) -> bool {
         self.pool
@@ -104,7 +108,7 @@ impl ClientWsManager {
 
     pub async fn send_reply_to_connection(
         &self,
-        conn_id: Uuid,
+        conn_id: ConnId,
         request_id: Uuid,
         reply: ClientWsReply,
     ) -> bool {
@@ -122,7 +126,7 @@ impl ClientWsManager {
 
     pub async fn send_error_to_connection(
         &self,
-        conn_id: Uuid,
+        conn_id: ConnId,
         request_id: Option<Uuid>,
         error: WsError,
     ) -> bool {

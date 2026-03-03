@@ -3,13 +3,12 @@ mod federation;
 mod shared;
 
 use runelink_types::ws::{ClientWsEnvelope, FederationWsEnvelope};
-use uuid::Uuid;
 
-use crate::state::AppState;
+use crate::{ids::ConnId, state::AppState};
 
 pub async fn handle_client_message(
     state: &AppState,
-    conn_id: Uuid,
+    conn_id: ConnId,
     message: ClientWsEnvelope,
 ) {
     match message {
@@ -62,7 +61,7 @@ pub async fn handle_client_message(
 
 pub async fn handle_federation_message(
     state: &AppState,
-    conn_id: Uuid,
+    conn_id: ConnId,
     message: FederationWsEnvelope,
 ) {
     match message {

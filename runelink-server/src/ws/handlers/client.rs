@@ -8,16 +8,15 @@ use runelink_types::{
         ClientWsRequest,
     },
 };
-use uuid::Uuid;
 
+use super::shared::authorize_client;
 use crate::{
     bearer_auth::ClientAuth,
     error::{ApiError, ApiResult},
+    ids::ConnId,
     ops,
     state::AppState,
 };
-
-use super::shared::authorize_client;
 
 /// Extract the client authentication from an access token.
 fn client_auth_from_access_token(
@@ -44,7 +43,7 @@ fn client_auth_from_access_token(
 /// Handle a client websocket request.
 pub(super) async fn handle_client_request(
     state: &AppState,
-    conn_id: Uuid,
+    conn_id: ConnId,
     request: ClientWsRequest,
 ) -> ApiResult<ClientWsReply> {
     info!("WS client: request={:#?}", request);

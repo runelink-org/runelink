@@ -12,7 +12,8 @@ use runelink_types::{
 };
 use time::OffsetDateTime;
 use tokio::sync::{RwLock, mpsc};
-use uuid::Uuid;
+
+use crate::ids::ConnId;
 
 /// Tracks active client websocket connections and provides safe send helpers.
 #[derive(Clone, Debug, Default)]
@@ -22,8 +23,8 @@ pub struct ClientWsPool {
 
 #[derive(Debug, Default)]
 struct ClientPoolState {
-    connections: HashMap<Uuid, ClientConn>,
-    by_user: HashMap<UserRef, HashSet<Uuid>>,
+    connections: HashMap<ConnId, ClientConn>,
+    by_user: HashMap<UserRef, HashSet<ConnId>>,
 }
 
 #[derive(Clone, Debug)]
@@ -42,7 +43,7 @@ impl ClientWsPool {
     /// Registers a new connection with the pool.
     pub async fn register_connection(
         &self,
-        conn_id: Uuid,
+        conn_id: ConnId,
         sender: mpsc::UnboundedSender<ClientWsEnvelope>,
     ) {
         let mut state = self.inner.write().await;
@@ -68,7 +69,7 @@ impl ClientWsPool {
     /// Authenticates a connection for a given user.
     pub async fn authenticate_connection(
         &self,
-        conn_id: Uuid,
+        conn_id: ConnId,
         user_ref: UserRef,
     ) -> bool {
         let mut state = self.inner.write().await;
@@ -88,7 +89,7 @@ impl ClientWsPool {
     }
 
     /// Deregisters a connection from the pool.
-    pub async fn deregister_connection(&self, conn_id: Uuid) -> bool {
+    pub async fn deregister_connection(&self, conn_id: ConnId) -> bool {
         let mut state = self.inner.write().await;
         Self::remove_client_connection(&mut state, conn_id)
     }
@@ -96,7 +97,7 @@ impl ClientWsPool {
     /// Sends an envelope to the active connection for the given connection ID.
     pub async fn send_to_connection(
         &self,
-        conn_id: Uuid,
+        conn_id: ConnId,
         envelope: ClientWsEnvelope,
     ) -> bool {
         let sender = {
@@ -119,7 +120,7 @@ impl ClientWsPool {
     /// Returns the authenticated user for a connection, if any.
     pub async fn authenticated_user_ref(
         &self,
-        conn_id: Uuid,
+        conn_id: ConnId,
     ) -> Option<UserRef> {
         let state = self.inner.read().await;
         state
@@ -200,9 +201,9 @@ impl ClientWsPool {
     }
 
     fn remove_conn_from_user_index(
-        by_user: &mut HashMap<UserRef, HashSet<Uuid>>,
+        by_user: &mut HashMap<UserRef, HashSet<ConnId>>,
         user_ref: &UserRef,
-        conn_id: Uuid,
+        conn_id: ConnId,
     ) {
         if let Some(conn_ids) = by_user.get_mut(user_ref) {
             conn_ids.remove(&conn_id);
@@ -214,7 +215,7 @@ impl ClientWsPool {
 
     fn remove_client_connection(
         state: &mut ClientPoolState,
-        conn_id: Uuid,
+        conn_id: ConnId,
     ) -> bool {
         let Some(connection) = state.connections.remove(&conn_id) else {
             return false;
@@ -230,12 +231,12 @@ impl ClientWsPool {
     }
 
     async fn send_to_many_client(
-        targets: Vec<(Uuid, mpsc::UnboundedSender<ClientWsEnvelope>)>,
+        targets: Vec<(ConnId, mpsc::UnboundedSender<ClientWsEnvelope>)>,
         envelope: ClientWsEnvelope,
         pool: &ClientWsPool,
     ) -> usize {
         let mut sent = 0usize;
-        let mut stale = Vec::new();
+        let mut stale = Vec::<ConnId>::new();
         for (conn_id, sender) in targets {
             if sender.send(envelope.clone()).is_ok() {
                 sent += 1;
@@ -244,7 +245,7 @@ impl ClientWsPool {
             }
         }
         if !stale.is_empty() {
-            let stale_set: HashSet<Uuid> = stale.into_iter().collect();
+            let stale_set = stale.into_iter().collect::<HashSet<_>>();
             let mut state = pool.inner.write().await;
             for conn_id in stale_set {
                 let _ = Self::remove_client_connection(&mut state, conn_id);
@@ -264,8 +265,8 @@ pub struct FederationWsPool {
 
 #[derive(Debug, Default)]
 struct FederationPoolState {
-    connections: HashMap<Uuid, FederationConn>,
-    by_host: HashMap<String, Uuid>,
+    connections: HashMap<ConnId, FederationConn>,
+    by_host: HashMap<String, ConnId>,
 }
 
 #[derive(Clone, Debug)]
@@ -284,7 +285,7 @@ impl FederationWsPool {
     /// Registers a new connection with the pool.
     pub async fn register_connection(
         &self,
-        conn_id: Uuid,
+        conn_id: ConnId,
         sender: mpsc::UnboundedSender<FederationWsEnvelope>,
     ) {
         let mut state = self.inner.write().await;
@@ -311,7 +312,7 @@ impl FederationWsPool {
     /// Authenticates a connection for a given host.
     pub async fn authenticate_connection(
         &self,
-        conn_id: Uuid,
+        conn_id: ConnId,
         host: String,
     ) -> bool {
         let mut state = self.inner.write().await;
@@ -344,7 +345,7 @@ impl FederationWsPool {
         true
     }
 
-    pub async fn deregister_connection(&self, conn_id: Uuid) -> bool {
+    pub async fn deregister_connection(&self, conn_id: ConnId) -> bool {
         let mut state = self.inner.write().await;
         Self::remove_federation_connection(&mut state, conn_id)
     }
@@ -352,7 +353,7 @@ impl FederationWsPool {
     /// Sends an envelope to the active connection for the given connection ID.
     pub async fn send_to_connection(
         &self,
-        conn_id: Uuid,
+        conn_id: ConnId,
         envelope: FederationWsEnvelope,
     ) -> bool {
         let sender = {
@@ -376,7 +377,7 @@ impl FederationWsPool {
     }
 
     /// Returns the authenticated host for a connection, if any.
-    pub async fn authenticated_host(&self, conn_id: Uuid) -> Option<String> {
+    pub async fn authenticated_host(&self, conn_id: ConnId) -> Option<String> {
         let state = self.inner.read().await;
         state
             .connections
@@ -464,9 +465,9 @@ impl FederationWsPool {
     }
 
     fn remove_conn_from_host_index(
-        by_host: &mut HashMap<String, Uuid>,
+        by_host: &mut HashMap<String, ConnId>,
         host: &str,
-        conn_id: Uuid,
+        conn_id: ConnId,
     ) {
         if by_host.get(host).copied() == Some(conn_id) {
             by_host.remove(host);
@@ -475,7 +476,7 @@ impl FederationWsPool {
 
     fn remove_federation_connection(
         state: &mut FederationPoolState,
-        conn_id: Uuid,
+        conn_id: ConnId,
     ) -> bool {
         let Some(connection) = state.connections.remove(&conn_id) else {
             return false;
@@ -491,12 +492,12 @@ impl FederationWsPool {
     }
 
     async fn send_to_many_federation(
-        targets: Vec<(Uuid, mpsc::UnboundedSender<FederationWsEnvelope>)>,
+        targets: Vec<(ConnId, mpsc::UnboundedSender<FederationWsEnvelope>)>,
         envelope: FederationWsEnvelope,
         pool: &FederationWsPool,
     ) -> usize {
         let mut sent = 0usize;
-        let mut stale = Vec::new();
+        let mut stale = Vec::<ConnId>::new();
         for (conn_id, sender) in targets {
             if sender.send(envelope.clone()).is_ok() {
                 sent += 1;
@@ -505,7 +506,7 @@ impl FederationWsPool {
             }
         }
         if !stale.is_empty() {
-            let stale_set: HashSet<Uuid> = stale.into_iter().collect();
+            let stale_set = stale.into_iter().collect::<HashSet<_>>();
             let mut state = pool.inner.write().await;
             for conn_id in stale_set {
                 let _ = Self::remove_federation_connection(&mut state, conn_id);

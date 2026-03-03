@@ -11,6 +11,7 @@ mod bearer_auth;
 mod config;
 mod db;
 mod error;
+mod ids;
 mod jwks_resolver;
 mod key_manager;
 mod ops;

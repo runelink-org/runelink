@@ -1,18 +1,18 @@
 use runelink_client::util::get_api_url;
 use runelink_types::{ClientAccessClaims, FederationClaims, UserRef};
 use time::Duration;
-use uuid::Uuid;
 
 use crate::{
     auth::{Principal, Requirement, Session, authorize},
     bearer_auth::{ClientAuth, FederationAuth},
     error::{ApiError, ApiResult},
+    ids::ConnId,
     state::AppState,
 };
 
 pub(super) async fn authorize_client(
     state: &AppState,
-    conn_id: Uuid,
+    conn_id: ConnId,
     requirement: Requirement,
 ) -> ApiResult<Session> {
     let user_ref = state
@@ -38,7 +38,7 @@ pub(super) async fn authorize_client(
 
 pub(super) async fn authorize_federation(
     state: &AppState,
-    conn_id: Uuid,
+    conn_id: ConnId,
     delegated_user_ref: Option<UserRef>,
     requirement: Requirement,
 ) -> ApiResult<Session> {

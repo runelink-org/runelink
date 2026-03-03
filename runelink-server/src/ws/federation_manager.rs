@@ -28,7 +28,7 @@ use super::{
     pools::FederationWsPool,
     socket_loops::{FederationSocket, federation_socket_loop},
 };
-use crate::state::AppState;
+use crate::{ids::ConnId, state::AppState};
 
 type PendingFederationReplySender =
     oneshot::Sender<Result<FederationWsReply, WsError>>;
@@ -64,8 +64,8 @@ impl FederationWsManager {
     pub async fn register_connection(
         &self,
         sender: mpsc::UnboundedSender<FederationWsEnvelope>,
-    ) -> Uuid {
-        let conn_id = Uuid::new_v4();
+    ) -> ConnId {
+        let conn_id = ConnId::new();
         self.pool.register_connection(conn_id, sender).await;
         conn_id
     }
@@ -73,18 +73,18 @@ impl FederationWsManager {
     /// Authenticates a connection for a given host.
     pub async fn authenticate_connection(
         &self,
-        conn_id: Uuid,
+        conn_id: ConnId,
         host: String,
     ) -> bool {
         self.pool.authenticate_connection(conn_id, host).await
     }
 
     /// Deregisters a connection from the manager.
-    pub async fn deregister_connection(&self, conn_id: Uuid) -> bool {
+    pub async fn deregister_connection(&self, conn_id: ConnId) -> bool {
         self.pool.deregister_connection(conn_id).await
     }
 
-    pub async fn authenticated_host(&self, conn_id: Uuid) -> Option<String> {
+    pub async fn authenticated_host(&self, conn_id: ConnId) -> Option<String> {
         self.pool.authenticated_host(conn_id).await
     }
 
@@ -184,7 +184,7 @@ impl FederationWsManager {
     /// Sends a reply to the given connection.
     pub async fn send_reply_to_connection(
         &self,
-        conn_id: Uuid,
+        conn_id: ConnId,
         request_id: Uuid,
         reply: FederationWsReply,
     ) -> bool {
@@ -203,7 +203,7 @@ impl FederationWsManager {
     /// Sends an error to the given connection.
     pub async fn send_error_to_connection(
         &self,
-        conn_id: Uuid,
+        conn_id: ConnId,
         request_id: Option<Uuid>,
         error: WsError,
     ) -> bool {

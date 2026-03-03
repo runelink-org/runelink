@@ -8,13 +8,13 @@ use runelink_types::{
 };
 use uuid::Uuid;
 
+use super::shared::authorize_federation;
 use crate::{
     error::{ApiError, ApiResult},
+    ids::ConnId,
     ops,
     state::AppState,
 };
-
-use super::shared::authorize_federation;
 
 /// Fanout a remote server update to the local users (best effort).
 async fn fanout_remote_server_update(
@@ -155,7 +155,7 @@ pub(super) async fn handle_federation_update(
 /// Handle a federation websocket request.
 pub(super) async fn handle_federation_request(
     state: &AppState,
-    conn_id: Uuid,
+    conn_id: ConnId,
     delegated_user_ref: Option<UserRef>,
     request: FederationWsRequest,
 ) -> ApiResult<FederationWsReply> {

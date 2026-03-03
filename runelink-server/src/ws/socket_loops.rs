@@ -17,10 +17,9 @@ use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
     tungstenite::protocol::Message as WsMessage,
 };
-use uuid::Uuid;
 
 use super::handlers::{handle_client_message, handle_federation_message};
-use crate::{auth::Principal, state::AppState};
+use crate::{auth::Principal, ids::ConnId, state::AppState};
 
 pub enum FederationSocket {
     Inbound(WebSocket),
@@ -200,7 +199,7 @@ async fn federation_ws_upgrade_loop(
 
 pub async fn federation_socket_loop(
     state: AppState,
-    conn_id: Uuid,
+    conn_id: ConnId,
     mut socket: FederationSocket,
     mut outbound_rx: mpsc::UnboundedReceiver<FederationWsEnvelope>,
 ) {
