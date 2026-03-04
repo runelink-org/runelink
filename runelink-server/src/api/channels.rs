@@ -1,18 +1,21 @@
-use crate::{
-    auth::{Principal, authorize},
-    error::ApiResult,
-    ops,
-    state::AppState,
-};
 use axum::{
     extract::{Json, Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
 use log::info;
-use runelink_types::NewChannel;
+use runelink_types::{
+    channel::{ChannelId, NewChannel},
+    server::ServerId,
+};
 use serde::Deserialize;
-use uuid::Uuid;
+
+use crate::{
+    auth::{Principal, authorize},
+    error::ApiResult,
+    ops,
+    state::AppState,
+};
 
 #[derive(Deserialize, Debug)]
 pub struct ChannelQueryParams {
@@ -23,7 +26,7 @@ pub struct ChannelQueryParams {
 pub async fn create(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(server_id): Path<Uuid>,
+    Path(server_id): Path<ServerId>,
     Query(params): Query<ChannelQueryParams>,
     Json(new_channel): Json<NewChannel>,
 ) -> ApiResult<impl IntoResponse> {
@@ -61,12 +64,9 @@ pub async fn get_all(
         ops::channels::auth::get_all(),
     )
     .await?;
-    let channels = ops::channels::get_all(
-        &state,
-        &session,
-        params.target_host.as_deref(),
-    )
-    .await?;
+    let channels =
+        ops::channels::get_all(&state, &session, params.target_host.as_deref())
+            .await?;
     Ok((StatusCode::OK, Json(channels)))
 }
 
@@ -74,7 +74,7 @@ pub async fn get_all(
 pub async fn get_by_server(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(server_id): Path<Uuid>,
+    Path(server_id): Path<ServerId>,
     Query(params): Query<ChannelQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
@@ -101,7 +101,7 @@ pub async fn get_by_server(
 pub async fn get_by_id(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((server_id, channel_id)): Path<(Uuid, Uuid)>,
+    Path((server_id, channel_id)): Path<(ServerId, ChannelId)>,
     Query(params): Query<ChannelQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
@@ -129,7 +129,7 @@ pub async fn get_by_id(
 pub async fn delete(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((server_id, channel_id)): Path<(Uuid, Uuid)>,
+    Path((server_id, channel_id)): Path<(ServerId, ChannelId)>,
     Query(params): Query<ChannelQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(

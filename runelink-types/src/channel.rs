@@ -1,13 +1,16 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use time::OffsetDateTime;
-use uuid::Uuid;
+
+use crate::ids::ServerId;
+
+pub use crate::ids::ChannelId;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
 pub struct Channel {
-    pub id: Uuid,
-    pub server_id: Uuid,
+    pub id: ChannelId,
+    pub server_id: ServerId,
     pub title: String,
     pub description: Option<String>,
     #[serde(with = "time::serde::rfc3339")]

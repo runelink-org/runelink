@@ -1,18 +1,21 @@
-use crate::{
-    auth::{Principal, authorize},
-    error::{ApiError, ApiResult},
-    ops,
-    state::AppState,
-};
 use axum::{
     extract::{Json, Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
 use log::info;
-use runelink_types::{NewServerMembership, UserRef};
+use runelink_types::{
+    server::{NewServerMembership, ServerId},
+    user::UserRef,
+};
 use serde::Deserialize;
-use uuid::Uuid;
+
+use crate::{
+    auth::{Principal, authorize},
+    error::{ApiError, ApiResult},
+    ops,
+    state::AppState,
+};
 
 #[derive(Deserialize, Debug)]
 pub struct MembershipQueryParams {
@@ -22,7 +25,7 @@ pub struct MembershipQueryParams {
 /// GET /servers/{server_id}/users
 pub async fn get_members_by_server(
     State(state): State<AppState>,
-    Path(server_id): Path<Uuid>,
+    Path(server_id): Path<ServerId>,
     Query(params): Query<MembershipQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
@@ -41,7 +44,7 @@ pub async fn get_members_by_server(
 /// GET /servers/{server_id}/users/{host}/{name}
 pub async fn get_by_user_and_server(
     State(state): State<AppState>,
-    Path((server_id, host, name)): Path<(Uuid, String, String)>,
+    Path((server_id, host, name)): Path<(ServerId, String, String)>,
     Query(params): Query<MembershipQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
@@ -62,7 +65,7 @@ pub async fn get_by_user_and_server(
 pub async fn create(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(server_id): Path<Uuid>,
+    Path(server_id): Path<ServerId>,
     Json(new_membership): Json<NewServerMembership>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
@@ -100,7 +103,7 @@ pub async fn get_by_user(
 pub async fn delete(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((server_id, host, name)): Path<(Uuid, String, String)>,
+    Path((server_id, host, name)): Path<(ServerId, String, String)>,
     Query(params): Query<MembershipQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(

@@ -1,14 +1,18 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use time::OffsetDateTime;
-use uuid::Uuid;
 
-use crate::user::{User, UserRef};
+use crate::{
+    ids::ChannelId,
+    user::{User, UserRef},
+};
+
+pub use crate::ids::MessageId;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Message {
-    pub id: Uuid,
-    pub channel_id: Uuid,
+    pub id: MessageId,
+    pub channel_id: ChannelId,
     pub author: Option<User>,
     pub body: String,
     #[serde(with = "time::serde::rfc3339")]

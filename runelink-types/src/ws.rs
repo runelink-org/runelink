@@ -1,20 +1,21 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use uuid::Uuid;
 
 use crate::{
     auth::{
         AuthTokenPasswordRequest, AuthTokenRefreshRequest, JwksResponse,
         OidcDiscoveryDocument, SignupRequest, TokenResponse,
     },
-    channel::{Channel, NewChannel},
-    message::{Message, NewMessage},
+    channel::{Channel, ChannelId, NewChannel},
+    message::{Message, MessageId, NewMessage},
     server::{
-        FullServerMembership, NewServer, NewServerMembership, Server,
+        FullServerMembership, NewServer, NewServerMembership, Server, ServerId,
         ServerMember, ServerMembership, ServerWithChannels,
     },
     user::{NewUser, User, UserRef},
 };
+
+pub use crate::ids::{EventId, RequestId};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct WsError {
@@ -75,20 +76,20 @@ pub enum ClientWsRequest {
         user_ref: UserRef,
     },
     MembershipsGetMembersByServer {
-        server_id: Uuid,
+        server_id: ServerId,
         target_host: Option<String>,
     },
     MembershipsGetByUserAndServer {
-        server_id: Uuid,
+        server_id: ServerId,
         user_ref: UserRef,
         target_host: Option<String>,
     },
     MembershipsCreate {
-        server_id: Uuid,
+        server_id: ServerId,
         new_membership: NewServerMembership,
     },
     MembershipsDelete {
-        server_id: Uuid,
+        server_id: ServerId,
         user_ref: UserRef,
         target_host: Option<String>,
     },
@@ -100,19 +101,19 @@ pub enum ClientWsRequest {
         target_host: Option<String>,
     },
     ServersGetById {
-        server_id: Uuid,
+        server_id: ServerId,
         target_host: Option<String>,
     },
     ServersGetWithChannels {
-        server_id: Uuid,
+        server_id: ServerId,
         target_host: Option<String>,
     },
     ServersDelete {
-        server_id: Uuid,
+        server_id: ServerId,
         target_host: Option<String>,
     },
     ChannelsCreate {
-        server_id: Uuid,
+        server_id: ServerId,
         new_channel: NewChannel,
         target_host: Option<String>,
     },
@@ -120,22 +121,22 @@ pub enum ClientWsRequest {
         target_host: Option<String>,
     },
     ChannelsGetByServer {
-        server_id: Uuid,
+        server_id: ServerId,
         target_host: Option<String>,
     },
     ChannelsGetById {
-        server_id: Uuid,
-        channel_id: Uuid,
+        server_id: ServerId,
+        channel_id: ChannelId,
         target_host: Option<String>,
     },
     ChannelsDelete {
-        server_id: Uuid,
-        channel_id: Uuid,
+        server_id: ServerId,
+        channel_id: ChannelId,
         target_host: Option<String>,
     },
     MessagesCreate {
-        server_id: Uuid,
-        channel_id: Uuid,
+        server_id: ServerId,
+        channel_id: ChannelId,
         new_message: NewMessage,
         target_host: Option<String>,
     },
@@ -143,24 +144,24 @@ pub enum ClientWsRequest {
         target_host: Option<String>,
     },
     MessagesGetByServer {
-        server_id: Uuid,
+        server_id: ServerId,
         target_host: Option<String>,
     },
     MessagesGetByChannel {
-        server_id: Uuid,
-        channel_id: Uuid,
+        server_id: ServerId,
+        channel_id: ChannelId,
         target_host: Option<String>,
     },
     MessagesGetById {
-        server_id: Uuid,
-        channel_id: Uuid,
-        message_id: Uuid,
+        server_id: ServerId,
+        channel_id: ChannelId,
+        message_id: MessageId,
         target_host: Option<String>,
     },
     MessagesDelete {
-        server_id: Uuid,
-        channel_id: Uuid,
-        message_id: Uuid,
+        server_id: ServerId,
+        channel_id: ChannelId,
+        message_id: MessageId,
         target_host: Option<String>,
     },
 }
@@ -220,72 +221,72 @@ pub enum FederationWsRequest {
         user_ref: UserRef,
     },
     MembershipsCreate {
-        server_id: Uuid,
+        server_id: ServerId,
         new_membership: NewServerMembership,
     },
     MembershipsGetByUser {
         user_ref: UserRef,
     },
     MembershipsDelete {
-        server_id: Uuid,
+        server_id: ServerId,
         user_ref: UserRef,
     },
     MembershipsGetMembersByServer {
-        server_id: Uuid,
+        server_id: ServerId,
     },
     MembershipsGetByUserAndServer {
-        server_id: Uuid,
+        server_id: ServerId,
         user_ref: UserRef,
     },
     ServersCreate(NewServer),
     ServersDelete {
-        server_id: Uuid,
+        server_id: ServerId,
     },
     ServersGetAll,
     ServersGetById {
-        server_id: Uuid,
+        server_id: ServerId,
     },
     ServersGetWithChannels {
-        server_id: Uuid,
+        server_id: ServerId,
     },
     ChannelsCreate {
-        server_id: Uuid,
+        server_id: ServerId,
         new_channel: NewChannel,
     },
     ChannelsGetAll,
     ChannelsGetByServer {
-        server_id: Uuid,
+        server_id: ServerId,
     },
     ChannelsGetById {
-        server_id: Uuid,
-        channel_id: Uuid,
+        server_id: ServerId,
+        channel_id: ChannelId,
     },
     ChannelsDelete {
-        server_id: Uuid,
-        channel_id: Uuid,
+        server_id: ServerId,
+        channel_id: ChannelId,
     },
     MessagesCreate {
-        server_id: Uuid,
-        channel_id: Uuid,
+        server_id: ServerId,
+        channel_id: ChannelId,
         new_message: NewMessage,
     },
     MessagesGetAll,
     MessagesGetByServer {
-        server_id: Uuid,
+        server_id: ServerId,
     },
     MessagesGetByChannel {
-        server_id: Uuid,
-        channel_id: Uuid,
+        server_id: ServerId,
+        channel_id: ChannelId,
     },
     MessagesGetById {
-        server_id: Uuid,
-        channel_id: Uuid,
-        message_id: Uuid,
+        server_id: ServerId,
+        channel_id: ChannelId,
+        message_id: MessageId,
     },
     MessagesDelete {
-        server_id: Uuid,
-        channel_id: Uuid,
-        message_id: Uuid,
+        server_id: ServerId,
+        channel_id: ChannelId,
+        message_id: MessageId,
     },
 }
 
@@ -331,23 +332,23 @@ pub enum ClientWsUpdate {
     },
     MembershipUpserted(FullServerMembership),
     MembershipDeleted {
-        server_id: Uuid,
+        server_id: ServerId,
         user_ref: UserRef,
     },
     ServerUpserted(Server),
     ServerDeleted {
-        server_id: Uuid,
+        server_id: ServerId,
     },
     ChannelUpserted(Channel),
     ChannelDeleted {
-        server_id: Uuid,
-        channel_id: Uuid,
+        server_id: ServerId,
+        channel_id: ChannelId,
     },
     MessageUpserted(Message),
     MessageDeleted {
-        server_id: Uuid,
-        channel_id: Uuid,
-        message_id: Uuid,
+        server_id: ServerId,
+        channel_id: ChannelId,
+        message_id: MessageId,
     },
 }
 
@@ -357,26 +358,26 @@ pub enum ClientWsUpdate {
 pub enum FederationWsUpdate {
     MembershipUpserted(FullServerMembership),
     MembershipDeleted {
-        server_id: Uuid,
+        server_id: ServerId,
         user_ref: UserRef,
     },
     ServerUpserted(Server),
     ServerDeleted {
-        server_id: Uuid,
+        server_id: ServerId,
     },
     ChannelUpserted(Channel),
     ChannelDeleted {
-        server_id: Uuid,
-        channel_id: Uuid,
+        server_id: ServerId,
+        channel_id: ChannelId,
     },
     MessageUpserted {
-        server_id: Uuid,
+        server_id: ServerId,
         message: Message,
     },
     MessageDeleted {
-        server_id: Uuid,
-        channel_id: Uuid,
-        message_id: Uuid,
+        server_id: ServerId,
+        channel_id: ChannelId,
+        message_id: MessageId,
     },
     RemoteUserDeleted {
         user_ref: UserRef,
@@ -387,21 +388,21 @@ pub enum FederationWsUpdate {
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ClientWsEnvelope {
     Request {
-        request_id: Uuid,
+        request_id: RequestId,
         request: ClientWsRequest,
     },
     Reply {
-        request_id: Uuid,
-        event_id: Uuid,
+        request_id: RequestId,
+        event_id: EventId,
         reply: ClientWsReply,
     },
     Error {
-        request_id: Option<Uuid>,
-        event_id: Uuid,
+        request_id: Option<RequestId>,
+        event_id: EventId,
         error: WsError,
     },
     Update {
-        event_id: Uuid,
+        event_id: EventId,
         update: ClientWsUpdate,
     },
 }
@@ -410,23 +411,23 @@ pub enum ClientWsEnvelope {
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum FederationWsEnvelope {
     Request {
-        request_id: Uuid,
-        event_id: Uuid,
+        request_id: RequestId,
+        event_id: EventId,
         delegated_user_ref: Option<UserRef>,
         request: FederationWsRequest,
     },
     Reply {
-        request_id: Uuid,
-        event_id: Uuid,
+        request_id: RequestId,
+        event_id: EventId,
         reply: FederationWsReply,
     },
     Error {
-        request_id: Option<Uuid>,
-        event_id: Uuid,
+        request_id: Option<RequestId>,
+        event_id: EventId,
         error: WsError,
     },
     Update {
-        event_id: Uuid,
+        event_id: EventId,
         update: FederationWsUpdate,
     },
 }

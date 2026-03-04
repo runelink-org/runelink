@@ -1,17 +1,19 @@
 #![allow(dead_code)]
 
+use axum::http::HeaderMap;
+use runelink_client::util::get_api_url;
+use runelink_types::{
+    auth::FederationClaims,
+    server::{ServerId, ServerMembership, ServerRole},
+    user::{User, UserRef, UserRole},
+};
+
 use crate::{
     bearer_auth::{ClientAuth, FederationAuth},
     error::{ApiError, ApiResult},
     queries,
     state::AppState,
 };
-use axum::http::HeaderMap;
-use runelink_client::util::get_api_url;
-use runelink_types::{
-    FederationClaims, ServerMembership, ServerRole, User, UserRef, UserRole,
-};
-use uuid::Uuid;
 
 /// Macro to construct an `And` requirement.
 /// Example: `and!(Requirement::Client, Requirement::User(user_ref))`
@@ -74,9 +76,9 @@ pub enum Requirement {
     /// Must be a host admin.
     HostAdmin,
     /// Must be a member of the referenced server.
-    ServerMember(Uuid),
+    ServerMember(ServerId),
     /// Must be an admin of the referenced server.
-    ServerAdmin(Uuid),
+    ServerAdmin(ServerId),
     /// A requirement that will always be satisfied.
     Always,
     /// A requirement that will never be satisfied.
@@ -249,7 +251,7 @@ impl<'a> AuthContext<'a> {
 
     async fn get_membership(
         &mut self,
-        server_id: Uuid,
+        server_id: ServerId,
     ) -> ApiResult<Option<&ServerMembership>> {
         if self.memberships.is_none() {
             let Some(user_ref) = self.user_ref.as_ref() else {

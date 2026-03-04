@@ -1,7 +1,10 @@
 use log::info;
 use reqwest::Client;
-use runelink_types::{Message, NewMessage};
-use uuid::Uuid;
+use runelink_types::{
+    channel::ChannelId,
+    message::{Message, MessageId, NewMessage},
+    server::ServerId,
+};
 
 use crate::error::Result;
 
@@ -11,8 +14,8 @@ pub async fn create(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: Uuid,
-    channel_id: Uuid,
+    server_id: ServerId,
+    channel_id: ChannelId,
     new_message: &NewMessage,
     target_host: Option<&str>,
 ) -> Result<Message> {
@@ -51,7 +54,7 @@ pub async fn fetch_by_server(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: Uuid,
+    server_id: ServerId,
     target_host: Option<&str>,
 ) -> Result<Vec<Message>> {
     let mut url = format!("{api_url}/servers/{server_id}/messages");
@@ -66,8 +69,8 @@ pub async fn fetch_by_channel(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: Uuid,
-    channel_id: Uuid,
+    server_id: ServerId,
+    channel_id: ChannelId,
     target_host: Option<&str>,
 ) -> Result<Vec<Message>> {
     let mut url =
@@ -83,9 +86,9 @@ pub async fn fetch_by_id(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: Uuid,
-    channel_id: Uuid,
-    message_id: Uuid,
+    server_id: ServerId,
+    channel_id: ChannelId,
+    message_id: MessageId,
     target_host: Option<&str>,
 ) -> Result<Message> {
     let mut url = format!(
@@ -102,9 +105,9 @@ pub async fn delete(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: Uuid,
-    channel_id: Uuid,
-    message_id: Uuid,
+    server_id: ServerId,
+    channel_id: ChannelId,
+    message_id: MessageId,
     target_host: Option<&str>,
 ) -> Result<()> {
     let mut url = format!(

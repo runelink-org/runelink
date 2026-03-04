@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
-use runelink_types::user::UserRef;
-use uuid::Uuid;
+use runelink_types::{server::ServerId, user::UserRef};
 
 use crate::{config::ServerConfig, db::DbPool, error::ApiResult, queries};
 
@@ -24,7 +23,7 @@ impl RoutingIndex {
     /// Get the hosts for a server (excluding the local host).
     pub async fn hosts_for_server(
         &self,
-        server_id: Uuid,
+        server_id: ServerId,
     ) -> ApiResult<Vec<String>> {
         let users = queries::memberships::get_user_refs_by_local_server(
             self.db_pool.as_ref(),
@@ -45,7 +44,7 @@ impl RoutingIndex {
     /// Get the users for a local server.
     pub async fn users_for_local_server(
         &self,
-        server_id: Uuid,
+        server_id: ServerId,
     ) -> ApiResult<Vec<UserRef>> {
         let server_users = queries::memberships::get_user_refs_by_local_server(
             self.db_pool.as_ref(),
@@ -63,7 +62,7 @@ impl RoutingIndex {
     /// Get the users for a remote server.
     pub async fn users_for_remote_server(
         &self,
-        server_id: Uuid,
+        server_id: ServerId,
     ) -> ApiResult<Vec<UserRef>> {
         queries::memberships::get_user_refs_by_remote_server(
             self.db_pool.as_ref(),

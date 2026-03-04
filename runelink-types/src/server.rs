@@ -1,17 +1,18 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use time::OffsetDateTime;
-use uuid::Uuid;
 
 use crate::{
     channel::Channel,
     user::{User, UserRef},
 };
 
+pub use crate::ids::ServerId;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
 pub struct Server {
-    pub id: Uuid,
+    pub id: ServerId,
     pub host: String,
     pub title: String,
     pub description: Option<String>,
@@ -84,7 +85,7 @@ pub struct ServerMember {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NewServerMembership {
     pub user_ref: UserRef,
-    pub server_id: Uuid,
+    pub server_id: ServerId,
     pub server_host: String,
     pub role: ServerRole,
 }

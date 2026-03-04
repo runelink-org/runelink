@@ -1,14 +1,13 @@
 use runelink_types::{
     server::{
-        NewServer, NewServerMembership, Server, ServerMembership, ServerRole,
-        ServerWithChannels,
+        NewServer, NewServerMembership, Server, ServerId, ServerMembership,
+        ServerRole, ServerWithChannels,
     },
     ws::{
         ClientWsUpdate, FederationWsReply, FederationWsRequest,
         FederationWsUpdate,
     },
 };
-use uuid::Uuid;
 
 use super::federation;
 use crate::{
@@ -123,7 +122,7 @@ pub async fn get_all(
 /// Get a server by ID (public).
 pub async fn get_by_id(
     state: &AppState,
-    server_id: Uuid,
+    server_id: ServerId,
     target_host: Option<&str>,
 ) -> ApiResult<Server> {
     if !state.config.is_remote_host(target_host) {
@@ -154,7 +153,7 @@ pub async fn get_by_id(
 pub async fn get_with_channels(
     state: &AppState,
     session: &Session,
-    server_id: Uuid,
+    server_id: ServerId,
     target_host: Option<&str>,
 ) -> ApiResult<ServerWithChannels> {
     if !state.config.is_remote_host(target_host) {
@@ -198,7 +197,7 @@ pub async fn get_with_channels(
 pub async fn delete(
     state: &AppState,
     session: &Session,
-    server_id: Uuid,
+    server_id: ServerId,
     target_host: Option<&str>,
 ) -> ApiResult<()> {
     // Handle local case
@@ -247,11 +246,11 @@ pub mod auth {
         Req::Always.or_admin().client_only()
     }
 
-    pub fn get_with_channels(server_id: Uuid) -> Req {
+    pub fn get_with_channels(server_id: ServerId) -> Req {
         Req::ServerMember(server_id).or_admin().client_only()
     }
 
-    pub fn delete(server_id: Uuid) -> Req {
+    pub fn delete(server_id: ServerId) -> Req {
         Req::ServerAdmin(server_id).or_admin().client_only()
     }
 
@@ -263,11 +262,11 @@ pub mod auth {
             Req::Always.federated_only()
         }
 
-        pub fn get_with_channels(server_id: Uuid) -> Req {
+        pub fn get_with_channels(server_id: ServerId) -> Req {
             Req::ServerMember(server_id).federated_only()
         }
 
-        pub fn delete(server_id: Uuid) -> Req {
+        pub fn delete(server_id: ServerId) -> Req {
             Req::ServerAdmin(server_id).federated_only()
         }
     }

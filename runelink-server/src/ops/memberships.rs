@@ -1,6 +1,6 @@
 use runelink_types::{
     server::{
-        FullServerMembership, NewServerMembership, ServerMember,
+        FullServerMembership, NewServerMembership, ServerId, ServerMember,
         ServerMembership,
     },
     user::UserRef,
@@ -9,7 +9,6 @@ use runelink_types::{
         FederationWsUpdate,
     },
 };
-use uuid::Uuid;
 
 use super::federation;
 use crate::{
@@ -121,7 +120,7 @@ pub async fn create(
 /// Get all members of a server (public).
 pub async fn get_members_by_server(
     state: &AppState,
-    server_id: Uuid,
+    server_id: ServerId,
     target_host: Option<&str>,
 ) -> ApiResult<Vec<ServerMember>> {
     // Handle local case
@@ -155,7 +154,7 @@ pub async fn get_members_by_server(
 /// Get a specific server member (public).
 pub async fn get_member_by_user_and_server(
     state: &AppState,
-    server_id: Uuid,
+    server_id: ServerId,
     user_ref: UserRef,
     target_host: Option<&str>,
 ) -> ApiResult<ServerMember> {
@@ -205,7 +204,7 @@ pub async fn get_by_user(
 pub async fn delete(
     state: &AppState,
     session: &mut Session,
-    server_id: Uuid,
+    server_id: ServerId,
     user_ref: UserRef,
     target_host: Option<&str>,
 ) -> ApiResult<()> {
@@ -286,13 +285,13 @@ pub mod auth {
     use crate::auth::Requirement as Req;
     use crate::or;
 
-    pub fn create(_server_id: Uuid) -> Req {
+    pub fn create(_server_id: ServerId) -> Req {
         // TODO: make this admin only and create an invite system
         // Servers should also be public or private
         Req::Always.or_admin().client_only()
     }
 
-    pub fn delete(server_id: Uuid, user_ref: UserRef) -> Req {
+    pub fn delete(server_id: ServerId, user_ref: UserRef) -> Req {
         or!(Req::User(user_ref), Req::ServerAdmin(server_id))
             .or_admin()
             .client_only()
@@ -301,11 +300,11 @@ pub mod auth {
     pub mod federated {
         use super::*;
 
-        pub fn create(_server_id: Uuid, user_ref: UserRef) -> Req {
+        pub fn create(_server_id: ServerId, user_ref: UserRef) -> Req {
             Req::FederatedUser(user_ref).federated_only()
         }
 
-        pub fn delete(_server_id: Uuid, user_ref: UserRef) -> Req {
+        pub fn delete(_server_id: ServerId, user_ref: UserRef) -> Req {
             Req::FederatedUser(user_ref).federated_only()
         }
     }

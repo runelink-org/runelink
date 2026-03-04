@@ -1,9 +1,11 @@
 use log::info;
 use reqwest::Client;
 use runelink_types::{
-    FullServerMembership, NewServerMembership, ServerMembership, UserRef,
+    server::{
+        FullServerMembership, NewServerMembership, ServerId, ServerMembership,
+    },
+    user::UserRef,
 };
-use uuid::Uuid;
 
 use crate::error::Result;
 
@@ -26,7 +28,7 @@ pub async fn fetch_by_user(
 pub async fn fetch_members_by_server(
     client: &Client,
     api_url: &str,
-    server_id: Uuid,
+    server_id: ServerId,
     target_host: Option<&str>,
 ) -> Result<Vec<runelink_types::ServerMember>> {
     let mut url = format!("{api_url}/servers/{server_id}/users");
@@ -40,7 +42,7 @@ pub async fn fetch_members_by_server(
 pub async fn fetch_member_by_user_and_server(
     client: &Client,
     api_url: &str,
-    server_id: Uuid,
+    server_id: ServerId,
     user: UserRef,
     target_host: Option<&str>,
 ) -> Result<runelink_types::ServerMember> {
@@ -80,7 +82,7 @@ pub async fn delete(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: Uuid,
+    server_id: ServerId,
     user: UserRef,
     target_host: Option<&str>,
 ) -> Result<()> {

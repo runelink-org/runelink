@@ -1,7 +1,9 @@
 use log::info;
 use reqwest::Client;
-use runelink_types::{NewServer, Server, ServerWithChannels, UserRef};
-use uuid::Uuid;
+use runelink_types::{
+    server::{NewServer, Server, ServerId, ServerWithChannels},
+    user::UserRef,
+};
 
 use crate::{error::Result, requests};
 
@@ -38,7 +40,7 @@ pub async fn fetch_all(
 pub async fn fetch_by_id(
     client: &Client,
     api_url: &str,
-    server_id: Uuid,
+    server_id: ServerId,
     target_host: Option<&str>,
 ) -> Result<Server> {
     let mut url = format!("{api_url}/servers/{server_id}");
@@ -68,7 +70,7 @@ pub async fn fetch_with_channels(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: Uuid,
+    server_id: ServerId,
     target_host: Option<&str>,
 ) -> Result<ServerWithChannels> {
     let mut url = format!("{api_url}/servers/{server_id}/with_channels");
@@ -83,7 +85,7 @@ pub async fn delete(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: Uuid,
+    server_id: ServerId,
     target_host: Option<&str>,
 ) -> Result<()> {
     let mut url = format!("{api_url}/servers/{server_id}");

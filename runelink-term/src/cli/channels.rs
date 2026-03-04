@@ -1,6 +1,8 @@
 use runelink_client::requests;
-use runelink_types::NewChannel;
-use uuid::Uuid;
+use runelink_types::{
+    channel::{ChannelId, NewChannel},
+    server::ServerId,
+};
 
 use crate::{
     cli::select::{
@@ -37,7 +39,7 @@ pub enum ChannelCommands {
 pub struct ChannelListArgs {
     /// Optional: Filter channels by Server ID
     #[clap(long)]
-    pub server_id: Option<Uuid>,
+    pub server_id: Option<ServerId>,
     /// Include channels from all servers you are a member of
     #[clap(short, long)]
     pub all: bool,
@@ -50,13 +52,13 @@ pub struct ChannelListArgs {
 pub struct ChannelGetArgs {
     /// The ID of the server
     #[clap(long)]
-    pub server_id: Uuid,
+    pub server_id: ServerId,
     /// The host of the server
     #[clap(long)]
     pub host: Option<String>,
     /// The ID of the channel
     #[clap(long)]
-    pub channel_id: Uuid,
+    pub channel_id: ChannelId,
 }
 
 #[derive(clap::Args, Debug)]
@@ -72,7 +74,7 @@ pub struct ChannelCreateArgs {
     pub no_description: bool,
     /// The server ID
     #[clap(long)]
-    pub server_id: Option<Uuid>,
+    pub server_id: Option<ServerId>,
     /// The host of the server
     #[clap(long)]
     pub host: Option<String>,
@@ -82,10 +84,10 @@ pub struct ChannelCreateArgs {
 pub struct ChannelDeleteArgs {
     /// The ID of the server
     #[clap(long)]
-    pub server_id: Option<Uuid>,
+    pub server_id: Option<ServerId>,
     /// The ID of the channel to delete
     #[clap(long)]
-    pub channel_id: Option<Uuid>,
+    pub channel_id: Option<ChannelId>,
     /// The host of the server
     #[clap(long)]
     pub host: Option<String>,

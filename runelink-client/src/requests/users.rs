@@ -1,6 +1,6 @@
 use log::info;
 use reqwest::Client;
-use runelink_types::{NewUser, User, UserRef};
+use runelink_types::user::{NewUser, User, UserRef};
 
 use crate::error::Result;
 

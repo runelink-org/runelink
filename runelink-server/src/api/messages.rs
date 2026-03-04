@@ -1,18 +1,22 @@
-use crate::{
-    auth::{Principal, authorize},
-    error::ApiResult,
-    ops,
-    state::AppState,
-};
 use axum::{
     extract::{Json, Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
 use log::info;
-use runelink_types::NewMessage;
+use runelink_types::{
+    channel::ChannelId,
+    message::{MessageId, NewMessage},
+    server::ServerId,
+};
 use serde::Deserialize;
-use uuid::Uuid;
+
+use crate::{
+    auth::{Principal, authorize},
+    error::ApiResult,
+    ops,
+    state::AppState,
+};
 
 #[derive(Deserialize, Debug)]
 pub struct MessageQueryParams {
@@ -23,7 +27,7 @@ pub struct MessageQueryParams {
 pub async fn create(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((server_id, channel_id)): Path<(Uuid, Uuid)>,
+    Path((server_id, channel_id)): Path<(ServerId, ChannelId)>,
     Query(params): Query<MessageQueryParams>,
     Json(new_message): Json<NewMessage>,
 ) -> ApiResult<impl IntoResponse> {
@@ -62,12 +66,9 @@ pub async fn get_all(
         ops::messages::auth::get_all(),
     )
     .await?;
-    let messages = ops::messages::get_all(
-        &state,
-        &session,
-        params.target_host.as_deref(),
-    )
-    .await?;
+    let messages =
+        ops::messages::get_all(&state, &session, params.target_host.as_deref())
+            .await?;
     Ok((StatusCode::OK, Json(messages)))
 }
 
@@ -75,7 +76,7 @@ pub async fn get_all(
 pub async fn get_by_server(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(server_id): Path<Uuid>,
+    Path(server_id): Path<ServerId>,
     Query(params): Query<MessageQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
@@ -102,7 +103,7 @@ pub async fn get_by_server(
 pub async fn get_by_channel(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((server_id, channel_id)): Path<(Uuid, Uuid)>,
+    Path((server_id, channel_id)): Path<(ServerId, ChannelId)>,
     Query(params): Query<MessageQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
@@ -130,7 +131,11 @@ pub async fn get_by_channel(
 pub async fn get_by_id(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((server_id, channel_id, message_id)): Path<(Uuid, Uuid, Uuid)>,
+    Path((server_id, channel_id, message_id)): Path<(
+        ServerId,
+        ChannelId,
+        MessageId,
+    )>,
     Query(params): Query<MessageQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
@@ -159,7 +164,11 @@ pub async fn get_by_id(
 pub async fn delete(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((server_id, channel_id, message_id)): Path<(Uuid, Uuid, Uuid)>,
+    Path((server_id, channel_id, message_id)): Path<(
+        ServerId,
+        ChannelId,
+        MessageId,
+    )>,
     Query(params): Query<MessageQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(

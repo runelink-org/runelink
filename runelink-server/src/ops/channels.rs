@@ -1,11 +1,11 @@
 use runelink_types::{
-    channel::{Channel, NewChannel},
+    channel::{Channel, ChannelId, NewChannel},
+    server::ServerId,
     ws::{
         ClientWsUpdate, FederationWsReply, FederationWsRequest,
         FederationWsUpdate,
     },
 };
-use uuid::Uuid;
 
 use super::{fanout, federation};
 
@@ -20,7 +20,7 @@ use crate::{
 pub async fn create(
     state: &AppState,
     session: &Session,
-    server_id: Uuid,
+    server_id: ServerId,
     new_channel: &NewChannel,
     target_host: Option<&str>,
 ) -> ApiResult<Channel> {
@@ -104,7 +104,7 @@ pub async fn get_all(
 pub async fn get_by_server(
     state: &AppState,
     session: &Session,
-    server_id: Uuid,
+    server_id: ServerId,
     target_host: Option<&str>,
 ) -> ApiResult<Vec<Channel>> {
     if !state.config.is_remote_host(target_host) {
@@ -139,8 +139,8 @@ pub async fn get_by_server(
 pub async fn get_by_id(
     state: &AppState,
     session: &Session,
-    server_id: Uuid,
-    channel_id: Uuid,
+    server_id: ServerId,
+    channel_id: ChannelId,
     target_host: Option<&str>,
 ) -> ApiResult<Channel> {
     if !state.config.is_remote_host(target_host) {
@@ -180,8 +180,8 @@ pub async fn get_by_id(
 pub async fn delete(
     state: &AppState,
     session: &Session,
-    server_id: Uuid,
-    channel_id: Uuid,
+    server_id: ServerId,
+    channel_id: ChannelId,
     target_host: Option<&str>,
 ) -> ApiResult<()> {
     // Handle local case
@@ -242,7 +242,7 @@ pub mod auth {
     use super::*;
     use crate::auth::Requirement as Req;
 
-    pub fn create(server_id: Uuid) -> Req {
+    pub fn create(server_id: ServerId) -> Req {
         Req::ServerAdmin(server_id).or_admin().client_only()
     }
 
@@ -250,22 +250,22 @@ pub mod auth {
         Req::HostAdmin.client_only()
     }
 
-    pub fn get_by_server(server_id: Uuid) -> Req {
+    pub fn get_by_server(server_id: ServerId) -> Req {
         Req::ServerMember(server_id).or_admin().client_only()
     }
 
-    pub fn get_by_id(server_id: Uuid) -> Req {
+    pub fn get_by_id(server_id: ServerId) -> Req {
         Req::ServerMember(server_id).or_admin().client_only()
     }
 
-    pub fn delete(server_id: Uuid) -> Req {
+    pub fn delete(server_id: ServerId) -> Req {
         Req::ServerAdmin(server_id).or_admin().client_only()
     }
 
     pub mod federated {
         use super::*;
 
-        pub fn create(server_id: Uuid) -> Req {
+        pub fn create(server_id: ServerId) -> Req {
             Req::ServerAdmin(server_id).federated_only()
         }
 
@@ -273,15 +273,15 @@ pub mod auth {
             Req::Never.federated_only()
         }
 
-        pub fn get_by_server(server_id: Uuid) -> Req {
+        pub fn get_by_server(server_id: ServerId) -> Req {
             Req::ServerMember(server_id).federated_only()
         }
 
-        pub fn get_by_id(server_id: Uuid) -> Req {
+        pub fn get_by_id(server_id: ServerId) -> Req {
             Req::ServerMember(server_id).federated_only()
         }
 
-        pub fn delete(server_id: Uuid) -> Req {
+        pub fn delete(server_id: ServerId) -> Req {
             Req::ServerAdmin(server_id).federated_only()
         }
     }

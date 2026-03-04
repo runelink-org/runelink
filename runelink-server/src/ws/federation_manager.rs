@@ -10,6 +10,7 @@ use log::{info, warn};
 use runelink_client::util::{get_api_url, get_federation_ws_url, pad_host};
 use runelink_types::{
     FederationClaims,
+    ids::{EventId, RequestId},
     user::UserRef,
     ws::{
         FederationWsEnvelope, FederationWsReply, FederationWsRequest,
@@ -21,7 +22,6 @@ use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_tungstenite::{
     connect_async, tungstenite::client::IntoClientRequest,
 };
-use uuid::Uuid;
 
 use super::{
     error::{FederationRequestError, FederationRequestResult},
@@ -41,7 +41,7 @@ type PendingFederationReplySender =
 #[derive(Clone, Debug)]
 pub struct FederationWsManager {
     pool: FederationWsPool,
-    pending: Arc<Mutex<HashMap<Uuid, PendingFederationReplySender>>>,
+    pending: Arc<Mutex<HashMap<RequestId, PendingFederationReplySender>>>,
 }
 
 impl Default for FederationWsManager {
@@ -102,8 +102,8 @@ impl FederationWsManager {
             return Err(FederationRequestError::HostUnavailable { host });
         }
 
-        let request_id = Uuid::new_v4();
-        let event_id = Uuid::new_v4();
+        let request_id = RequestId::new();
+        let event_id = EventId::new();
         let envelope = FederationWsEnvelope::Request {
             request_id,
             event_id,
@@ -153,7 +153,7 @@ impl FederationWsManager {
             .send_to_host(
                 host,
                 FederationWsEnvelope::Update {
-                    event_id: Uuid::new_v4(),
+                    event_id: EventId::new(),
                     update,
                 },
             )
@@ -174,7 +174,7 @@ impl FederationWsManager {
             .send_to_hosts(
                 hosts,
                 FederationWsEnvelope::Update {
-                    event_id: Uuid::new_v4(),
+                    event_id: EventId::new(),
                     update,
                 },
             )
@@ -185,7 +185,7 @@ impl FederationWsManager {
     pub async fn send_reply_to_connection(
         &self,
         conn_id: ConnId,
-        request_id: Uuid,
+        request_id: RequestId,
         reply: FederationWsReply,
     ) -> bool {
         self.pool
@@ -193,7 +193,7 @@ impl FederationWsManager {
                 conn_id,
                 FederationWsEnvelope::Reply {
                     request_id,
-                    event_id: Uuid::new_v4(),
+                    event_id: EventId::new(),
                     reply,
                 },
             )
@@ -204,7 +204,7 @@ impl FederationWsManager {
     pub async fn send_error_to_connection(
         &self,
         conn_id: ConnId,
-        request_id: Option<Uuid>,
+        request_id: Option<RequestId>,
         error: WsError,
     ) -> bool {
         self.pool
@@ -212,7 +212,7 @@ impl FederationWsManager {
                 conn_id,
                 FederationWsEnvelope::Error {
                     request_id,
-                    event_id: Uuid::new_v4(),
+                    event_id: EventId::new(),
                     error,
                 },
             )
@@ -256,7 +256,7 @@ impl FederationWsManager {
     pub async fn broadcast_update(&self, update: FederationWsUpdate) -> usize {
         self.pool
             .broadcast(FederationWsEnvelope::Update {
-                event_id: Uuid::new_v4(),
+                event_id: EventId::new(),
                 update,
             })
             .await

@@ -1,13 +1,15 @@
 #![allow(dead_code)]
 
 use runelink_types::{
-    NewServerMembership, Server, ServerMember, ServerMembership, ServerRole,
-    User, UserRef,
+    server::{
+        NewServerMembership, Server, ServerId, ServerMember, ServerMembership,
+        ServerRole,
+    },
+    user::{User, UserRef},
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, types::Json};
 use time::OffsetDateTime;
-use uuid::Uuid;
 
 use crate::{
     config::ServerConfig,
@@ -43,7 +45,7 @@ impl TryFrom<ServerMemberRow> for ServerMember {
 
 #[derive(sqlx::FromRow, Debug)]
 struct ServerMembershipRow {
-    server_id: Option<Uuid>,
+    server_id: Option<ServerId>,
     server_title: Option<String>,
     server_description: Option<String>,
     server_host_from_db: Option<String>,
@@ -98,7 +100,7 @@ pub async fn insert_local(
         INSERT INTO server_users (server_id, user_name, user_host, role)
         VALUES ($1, $2, $3, $4);
         "#,
-        new_membership.server_id,
+        new_membership.server_id.as_uuid(),
         new_membership.user_ref.name,
         new_membership.user_ref.host,
         new_membership.role as ServerRole,
@@ -127,7 +129,7 @@ pub async fn insert_remote(
         "#,
         membership.user_ref.name,
         membership.user_ref.host,
-        membership.server.id,
+        membership.server.id.as_uuid(),
         membership.role as ServerRole,
         membership.joined_at,
         membership.updated_at,
@@ -155,14 +157,14 @@ pub async fn insert_remote(
         "#,
         membership.user_ref.name,
         membership.user_ref.host,
-        membership.server.id,
+        membership.server.id.as_uuid(),
     )
     .fetch_one(pool)
     .await?;
 
     Ok(ServerMembership {
         server: Server {
-            id: row.id,
+            id: row.id.into(),
             host: row.host,
             title: row.title,
             description: row.description,
@@ -179,7 +181,7 @@ pub async fn insert_remote(
 
 pub async fn get_local_member_by_user_and_server(
     pool: &DbPool,
-    server_id: Uuid,
+    server_id: ServerId,
     user_ref: UserRef,
 ) -> ApiResult<ServerMember> {
     sqlx::query_as!(
@@ -195,7 +197,7 @@ pub async fn get_local_member_by_user_and_server(
         WHERE su.server_id = $1 AND su.user_name = $2 AND su.user_host = $3
         ORDER BY u.name, u.host
         "#,
-        server_id,
+        server_id.as_uuid(),
         user_ref.name,
         user_ref.host,
     )
@@ -206,7 +208,7 @@ pub async fn get_local_member_by_user_and_server(
 
 pub async fn get_remote_member_by_user_and_server(
     pool: &DbPool,
-    server_id: Uuid,
+    server_id: ServerId,
     user_ref: UserRef,
 ) -> ApiResult<ServerMember> {
     sqlx::query_as!(
@@ -222,7 +224,7 @@ pub async fn get_remote_member_by_user_and_server(
           ON u.name = m.user_name AND u.host = m.user_host
         WHERE m.remote_server_id = $1 AND m.user_name = $2 AND m.user_host = $3
         "#,
-        server_id,
+        server_id.as_uuid(),
         user_ref.name,
         user_ref.host,
     )
@@ -233,7 +235,7 @@ pub async fn get_remote_member_by_user_and_server(
 
 pub async fn get_member_by_user_and_server(
     pool: &DbPool,
-    server_id: Uuid,
+    server_id: ServerId,
     user_ref: UserRef,
 ) -> ApiResult<ServerMember> {
     match get_local_member_by_user_and_server(pool, server_id, user_ref.clone())
@@ -250,7 +252,7 @@ pub async fn get_member_by_user_and_server(
 
 pub async fn get_members_by_server(
     pool: &DbPool,
-    server_id: Uuid,
+    server_id: ServerId,
 ) -> ApiResult<Vec<ServerMember>> {
     sqlx::query_as!(
         ServerMemberRow,
@@ -265,7 +267,7 @@ pub async fn get_members_by_server(
         WHERE su.server_id = $1
         ORDER BY u.name, u.host
         "#,
-        server_id,
+        server_id.as_uuid(),
     )
     .fetch_all(pool)
     .await?
@@ -276,7 +278,7 @@ pub async fn get_members_by_server(
 
 pub async fn get_user_refs_by_local_server(
     pool: &DbPool,
-    server_id: Uuid,
+    server_id: ServerId,
 ) -> ApiResult<Vec<UserRef>> {
     let members = get_members_by_server(pool, server_id).await?;
     Ok(members
@@ -287,7 +289,7 @@ pub async fn get_user_refs_by_local_server(
 
 pub async fn get_user_refs_by_remote_server(
     pool: &DbPool,
-    server_id: Uuid,
+    server_id: ServerId,
 ) -> ApiResult<Vec<UserRef>> {
     let rows = sqlx::query!(
         r#"
@@ -298,7 +300,7 @@ pub async fn get_user_refs_by_remote_server(
         WHERE ursm.remote_server_id = $1
         ORDER BY user_name, user_host
         "#,
-        server_id,
+        server_id.as_uuid(),
     )
     .fetch_all(pool)
     .await?;
@@ -311,7 +313,7 @@ pub async fn get_user_refs_by_remote_server(
 
 pub async fn get_local_by_user_and_server(
     state: &AppState,
-    server_id: Uuid,
+    server_id: ServerId,
     user: UserRef,
 ) -> ApiResult<ServerMembership> {
     let row = sqlx::query!(
@@ -331,7 +333,7 @@ pub async fn get_local_by_user_and_server(
         WHERE s.id = $1
             AND su.user_name = $2 AND su.user_host = $3
         "#,
-        server_id,
+        server_id.as_uuid(),
         user.name,
         user.host,
     )
@@ -340,7 +342,7 @@ pub async fn get_local_by_user_and_server(
 
     Ok(ServerMembership {
         server: Server {
-            id: row.id,
+            id: row.id.into(),
             host: state.config.local_host(),
             title: row.title,
             description: row.description,
@@ -364,7 +366,7 @@ pub async fn get_by_user(
         r#"
         -- Local server memberships
         SELECT
-            s.id AS server_id,
+            s.id AS "server_id: ServerId",
             s.title AS server_title,
             s.description AS server_description,
             NULL::TEXT AS server_host_from_db,
@@ -384,7 +386,7 @@ pub async fn get_by_user(
 
         -- Cached remote server memberships
         SELECT
-            crs.id AS server_id,
+            crs.id AS "server_id: ServerId",
             crs.title AS server_title,
             crs.description AS server_description,
             crs.host AS server_host_from_db,
@@ -438,7 +440,7 @@ pub async fn get_remote_server_hosts_for_user(
 /// Delete a local server membership.
 pub async fn delete_local(
     pool: &DbPool,
-    server_id: Uuid,
+    server_id: ServerId,
     user: UserRef,
 ) -> ApiResult<()> {
     let result = sqlx::query!(
@@ -446,7 +448,7 @@ pub async fn delete_local(
         DELETE FROM server_users
         WHERE server_id = $1 AND user_name = $2 AND user_host = $3
         "#,
-        server_id,
+        server_id.as_uuid(),
         user.name,
         user.host,
     )
@@ -460,7 +462,7 @@ pub async fn delete_local(
 
 pub async fn delete_remote(
     pool: &DbPool,
-    server_id: Uuid,
+    server_id: ServerId,
     user: UserRef,
 ) -> ApiResult<()> {
     let result = sqlx::query!(
@@ -468,7 +470,7 @@ pub async fn delete_remote(
         DELETE FROM user_remote_server_memberships
         WHERE remote_server_id = $1 AND user_name = $2 AND user_host = $3
         "#,
-        server_id,
+        server_id.as_uuid(),
         user.name,
         user.host,
     )

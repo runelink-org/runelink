@@ -1,6 +1,5 @@
 use runelink_client::requests;
-use runelink_types::UserRef;
-use uuid::Uuid;
+use runelink_types::{server::ServerId, user::UserRef};
 
 use crate::error::CliError;
 
@@ -37,7 +36,7 @@ pub struct UserListArgs {
     pub host: Option<String>,
     /// The ID of the server
     #[clap(long)]
-    pub server_id: Option<Uuid>,
+    pub server_id: Option<ServerId>,
 }
 
 pub async fn handle_user_commands(

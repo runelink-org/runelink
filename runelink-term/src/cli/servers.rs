@@ -3,8 +3,9 @@
 #![allow(unreachable_code)]
 
 use runelink_client::requests;
-use runelink_types::{NewServer, NewServerMembership, ServerRole};
-use uuid::Uuid;
+use runelink_types::server::{
+    NewServer, NewServerMembership, ServerId, ServerRole,
+};
 
 use crate::{error::CliError, util::group_memberships_by_host};
 
@@ -47,7 +48,7 @@ pub struct ServerListArgs {
 pub struct ServerGetArg {
     /// The ID of the server
     #[clap(long)]
-    pub server_id: Uuid,
+    pub server_id: ServerId,
     /// The host of the server
     #[clap(long)]
     pub host: Option<String>,
@@ -73,7 +74,7 @@ pub struct ServerCreateArgs {
 pub struct ServerJoinArgs {
     /// The ID of the server
     #[clap(long)]
-    pub server_id: Option<Uuid>,
+    pub server_id: Option<ServerId>,
     /// The host of the server
     #[clap(long)]
     pub host: Option<String>,
@@ -83,7 +84,7 @@ pub struct ServerJoinArgs {
 pub struct ServerLeaveArgs {
     /// The ID of the server to leave
     #[clap(long)]
-    pub server_id: Option<Uuid>,
+    pub server_id: Option<ServerId>,
     /// The host of the server
     #[clap(long)]
     pub host: Option<String>,
@@ -93,7 +94,7 @@ pub struct ServerLeaveArgs {
 pub struct ServerDeleteArgs {
     /// The ID of the server to delete
     #[clap(long)]
-    pub server_id: Option<Uuid>,
+    pub server_id: Option<ServerId>,
     /// The host of the server
     #[clap(long)]
     pub host: Option<String>,

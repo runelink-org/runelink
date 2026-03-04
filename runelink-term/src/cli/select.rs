@@ -6,10 +6,12 @@ use crossterm::{
     terminal::{Clear, ClearType, disable_raw_mode, enable_raw_mode},
 };
 use runelink_client::requests;
-use runelink_types::{Channel, Server};
+use runelink_types::{
+    channel::{Channel, ChannelId},
+    server::{Server, ServerId},
+};
 use std::collections::HashSet;
 use std::io::Write;
-use uuid::Uuid;
 
 use crate::error::CliError;
 
@@ -180,10 +182,8 @@ pub async fn get_server_selection(
             let all_servers = all_servers_result?;
             let member_servers = member_servers_result?;
             // Create a set of member server IDs for efficient lookup
-            let member_server_ids = member_servers
-                .iter()
-                .map(|s| s.id)
-                .collect::<HashSet<Uuid>>();
+            let member_server_ids =
+                member_servers.iter().map(|s| s.id).collect::<HashSet<_>>();
             // Filter out servers the user is already a member of
             all_servers
                 .into_iter()
@@ -208,13 +208,13 @@ pub async fn get_server_selection(
 #[derive(Debug, Clone)]
 pub struct ChannelSelection {
     pub host: String,
-    pub server_id: Uuid,
-    pub channel_id: Uuid,
+    pub server_id: ServerId,
+    pub channel_id: ChannelId,
 }
 
 pub async fn get_channel_selection(
     ctx: &mut CliContext<'_>,
-    server_id: Uuid,
+    server_id: ServerId,
     server_host: &str,
 ) -> Result<ChannelSelection, CliError> {
     let api_url = ctx.home_api_url()?;
@@ -247,8 +247,8 @@ pub async fn get_channel_selection(
 
 pub async fn get_channel_selection_with_inputs(
     ctx: &mut CliContext<'_>,
-    channel_id: Option<Uuid>,
-    server_id: Option<Uuid>,
+    channel_id: Option<ChannelId>,
+    server_id: Option<ServerId>,
     host: Option<&str>,
 ) -> Result<ChannelSelection, CliError> {
     let host = match host {

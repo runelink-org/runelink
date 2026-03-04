@@ -3,11 +3,11 @@
 use std::borrow::Borrow;
 
 use runelink_types::{
+    ids::{EventId, RequestId},
     user::UserRef,
     ws::{ClientWsEnvelope, ClientWsReply, ClientWsUpdate, WsError},
 };
 use tokio::sync::mpsc;
-use uuid::Uuid;
 
 use super::pools::ClientWsPool;
 use crate::ids::ConnId;
@@ -63,7 +63,7 @@ impl ClientWsManager {
             .send_to_connection(
                 conn_id,
                 ClientWsEnvelope::Update {
-                    event_id: Uuid::new_v4(),
+                    event_id: EventId::new(),
                     update,
                 },
             )
@@ -79,7 +79,7 @@ impl ClientWsManager {
             .send_to_user(
                 user_ref,
                 ClientWsEnvelope::Update {
-                    event_id: Uuid::new_v4(),
+                    event_id: EventId::new(),
                     update,
                 },
             )
@@ -99,7 +99,7 @@ impl ClientWsManager {
             .send_to_users(
                 users,
                 ClientWsEnvelope::Update {
-                    event_id: Uuid::new_v4(),
+                    event_id: EventId::new(),
                     update,
                 },
             )
@@ -109,7 +109,7 @@ impl ClientWsManager {
     pub async fn send_reply_to_connection(
         &self,
         conn_id: ConnId,
-        request_id: Uuid,
+        request_id: RequestId,
         reply: ClientWsReply,
     ) -> bool {
         self.pool
@@ -117,7 +117,7 @@ impl ClientWsManager {
                 conn_id,
                 ClientWsEnvelope::Reply {
                     request_id,
-                    event_id: Uuid::new_v4(),
+                    event_id: EventId::new(),
                     reply,
                 },
             )
@@ -127,7 +127,7 @@ impl ClientWsManager {
     pub async fn send_error_to_connection(
         &self,
         conn_id: ConnId,
-        request_id: Option<Uuid>,
+        request_id: Option<RequestId>,
         error: WsError,
     ) -> bool {
         self.pool
@@ -135,7 +135,7 @@ impl ClientWsManager {
                 conn_id,
                 ClientWsEnvelope::Error {
                     request_id,
-                    event_id: Uuid::new_v4(),
+                    event_id: EventId::new(),
                     error,
                 },
             )
@@ -145,7 +145,7 @@ impl ClientWsManager {
     pub async fn broadcast_update(&self, update: ClientWsUpdate) -> usize {
         self.pool
             .broadcast(ClientWsEnvelope::Update {
-                event_id: Uuid::new_v4(),
+                event_id: EventId::new(),
                 update,
             })
             .await

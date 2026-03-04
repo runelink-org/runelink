@@ -1,6 +1,9 @@
 use runelink_client::requests;
-use runelink_types::NewMessage;
-use uuid::Uuid;
+use runelink_types::{
+    channel::ChannelId,
+    message::{MessageId, NewMessage},
+    server::ServerId,
+};
 
 use crate::error::CliError;
 
@@ -31,10 +34,10 @@ pub enum MessageCommands {
 pub struct MessageListArgs {
     /// Optional: Filter messages by Server ID
     #[clap(long)]
-    pub server_id: Option<Uuid>,
+    pub server_id: Option<ServerId>,
     /// Optional: Filter messages by Channel ID
     #[clap(long)]
-    pub channel_id: Option<Uuid>,
+    pub channel_id: Option<ChannelId>,
     /// The host of the server
     #[clap(long)]
     pub host: Option<String>,
@@ -44,13 +47,13 @@ pub struct MessageListArgs {
 pub struct MessageGetArgs {
     /// The ID of the message to fetch
     #[clap(long)]
-    pub message_id: Uuid,
+    pub message_id: MessageId,
     /// The ID of the channel the message is in
     #[clap(long)]
-    pub channel_id: Uuid,
+    pub channel_id: ChannelId,
     /// The ID of the server the message is in
     #[clap(long)]
-    pub server_id: Uuid,
+    pub server_id: ServerId,
     /// The host of the server the message is in
     #[clap(long)]
     pub host: Option<String>,
@@ -63,10 +66,10 @@ pub struct MessageSendArgs {
     pub body: Option<String>,
     /// The server ID
     #[clap(long)]
-    pub server_id: Option<Uuid>,
+    pub server_id: Option<ServerId>,
     /// The channel ID
     #[clap(long)]
-    pub channel_id: Option<Uuid>,
+    pub channel_id: Option<ChannelId>,
     /// The host of the server
     #[clap(long)]
     pub host: Option<String>,
@@ -76,13 +79,13 @@ pub struct MessageSendArgs {
 pub struct MessageDeleteArgs {
     /// The ID of the server
     #[clap(long)]
-    pub server_id: Uuid,
+    pub server_id: ServerId,
     /// The ID of the channel
     #[clap(long)]
-    pub channel_id: Uuid,
+    pub channel_id: ChannelId,
     /// The ID of the message to delete
     #[clap(long)]
-    pub message_id: Uuid,
+    pub message_id: MessageId,
     /// The host of the server
     #[clap(long)]
     pub host: Option<String>,

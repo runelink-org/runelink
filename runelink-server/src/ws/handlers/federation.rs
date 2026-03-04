@@ -1,12 +1,12 @@
 use log::info;
 use runelink_types::{
+    server::ServerId,
     user::UserRef,
     ws::{
         ClientWsUpdate, FederationWsConnectionState, FederationWsReply,
         FederationWsRequest, FederationWsUpdate,
     },
 };
-use uuid::Uuid;
 
 use super::shared::authorize_federation;
 use crate::{
@@ -19,7 +19,7 @@ use crate::{
 /// Fanout a remote server update to the local users (best effort).
 async fn fanout_remote_server_update(
     state: &AppState,
-    server_id: Uuid,
+    server_id: ServerId,
     client_update: ClientWsUpdate,
 ) -> ApiResult<()> {
     let local_users = state

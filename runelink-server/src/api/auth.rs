@@ -1,8 +1,3 @@
-use crate::{
-    error::{ApiError, ApiResult},
-    queries,
-    state::AppState,
-};
 use argon2::{
     Argon2, PasswordHasher, PasswordVerifier,
     password_hash::{PasswordHash, SaltString, rand_core::OsRng},
@@ -23,6 +18,12 @@ use runelink_types::{
 };
 use serde_json::json;
 use time::{Duration, OffsetDateTime};
+
+use crate::{
+    error::{ApiError, ApiResult},
+    queries,
+    state::AppState,
+};
 
 /// Creates a router for all auth-related endpoints
 pub fn router() -> Router<AppState> {

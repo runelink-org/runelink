@@ -1,11 +1,12 @@
 use runelink_types::{
-    message::{Message, NewMessage},
+    channel::ChannelId,
+    message::{Message, MessageId, NewMessage},
+    server::ServerId,
     ws::{
         ClientWsUpdate, FederationWsReply, FederationWsRequest,
         FederationWsUpdate,
     },
 };
-use uuid::Uuid;
 
 use super::federation;
 use crate::{
@@ -20,8 +21,8 @@ use crate::{
 pub async fn create(
     state: &AppState,
     session: &Session,
-    server_id: Uuid,
-    channel_id: Uuid,
+    server_id: ServerId,
+    channel_id: ChannelId,
     new_message: &NewMessage,
     target_host: Option<&str>,
 ) -> ApiResult<Message> {
@@ -116,7 +117,7 @@ pub async fn get_all(
 pub async fn get_by_server(
     state: &AppState,
     session: &Session,
-    server_id: Uuid,
+    server_id: ServerId,
     target_host: Option<&str>,
 ) -> ApiResult<Vec<Message>> {
     // Handle local case
@@ -153,8 +154,8 @@ pub async fn get_by_server(
 pub async fn get_by_channel(
     state: &AppState,
     session: &Session,
-    server_id: Uuid,
-    channel_id: Uuid,
+    server_id: ServerId,
+    channel_id: ChannelId,
     target_host: Option<&str>,
 ) -> ApiResult<Vec<Message>> {
     // Handle local case
@@ -195,9 +196,9 @@ pub async fn get_by_channel(
 pub async fn get_by_id(
     state: &AppState,
     session: &Session,
-    server_id: Uuid,
-    channel_id: Uuid,
-    message_id: Uuid,
+    server_id: ServerId,
+    channel_id: ChannelId,
+    message_id: MessageId,
     target_host: Option<&str>,
 ) -> ApiResult<Message> {
     // Handle local case
@@ -250,9 +251,9 @@ pub async fn get_by_id(
 pub async fn delete(
     state: &AppState,
     session: &Session,
-    server_id: Uuid,
-    channel_id: Uuid,
-    message_id: Uuid,
+    server_id: ServerId,
+    channel_id: ChannelId,
+    message_id: MessageId,
     target_host: Option<&str>,
 ) -> ApiResult<()> {
     // Handle local case
@@ -325,7 +326,7 @@ pub mod auth {
     use crate::auth::Requirement as Req;
     use crate::or;
 
-    pub fn create(server_id: Uuid) -> Req {
+    pub fn create(server_id: ServerId) -> Req {
         Req::ServerMember(server_id).or_admin().client_only()
     }
 
@@ -333,22 +334,22 @@ pub mod auth {
         Req::HostAdmin.client_only()
     }
 
-    pub fn get_by_server(server_id: Uuid) -> Req {
+    pub fn get_by_server(server_id: ServerId) -> Req {
         Req::ServerMember(server_id).or_admin().client_only()
     }
 
-    pub fn get_by_channel(server_id: Uuid) -> Req {
+    pub fn get_by_channel(server_id: ServerId) -> Req {
         Req::ServerMember(server_id).or_admin().client_only()
     }
 
-    pub fn get_by_id(server_id: Uuid) -> Req {
+    pub fn get_by_id(server_id: ServerId) -> Req {
         Req::ServerMember(server_id).or_admin().client_only()
     }
 
     async fn delete_base(
         state: &AppState,
-        server_id: Uuid,
-        message_id: Uuid,
+        server_id: ServerId,
+        message_id: MessageId,
     ) -> ApiResult<Req> {
         let message =
             queries::messages::get_by_id(&state.db_pool, message_id).await?;
@@ -361,8 +362,8 @@ pub mod auth {
 
     pub async fn delete(
         state: &AppState,
-        server_id: Uuid,
-        message_id: Uuid,
+        server_id: ServerId,
+        message_id: MessageId,
     ) -> ApiResult<Req> {
         let base = delete_base(state, server_id, message_id).await?;
         Ok(base.or_admin().client_only())
@@ -371,7 +372,7 @@ pub mod auth {
     pub mod federated {
         use super::*;
 
-        pub fn create(server_id: Uuid) -> Req {
+        pub fn create(server_id: ServerId) -> Req {
             Req::ServerMember(server_id).federated_only()
         }
 
@@ -379,22 +380,22 @@ pub mod auth {
             Req::Never.federated_only()
         }
 
-        pub fn get_by_server(server_id: Uuid) -> Req {
+        pub fn get_by_server(server_id: ServerId) -> Req {
             Req::ServerMember(server_id).federated_only()
         }
 
-        pub fn get_by_channel(server_id: Uuid) -> Req {
+        pub fn get_by_channel(server_id: ServerId) -> Req {
             Req::ServerMember(server_id).federated_only()
         }
 
-        pub fn get_by_id(server_id: Uuid) -> Req {
+        pub fn get_by_id(server_id: ServerId) -> Req {
             Req::ServerMember(server_id).federated_only()
         }
 
         pub async fn delete(
             state: &AppState,
-            server_id: Uuid,
-            message_id: Uuid,
+            server_id: ServerId,
+            message_id: MessageId,
         ) -> ApiResult<Req> {
             // TODO: Check if the author is from the same host as the server
             let base = delete_base(state, server_id, message_id).await?;

@@ -1,6 +1,5 @@
-use runelink_types::{NewServer, Server};
+use runelink_types::server::{NewServer, Server, ServerId};
 use time::OffsetDateTime;
-use uuid::Uuid;
 
 use crate::{
     config::ServerConfig, db::DbPool, error::ApiResult, state::AppState,
@@ -8,7 +7,7 @@ use crate::{
 
 #[derive(sqlx::FromRow, Debug)]
 struct LocalServerRow {
-    pub id: Uuid,
+    pub id: ServerId,
     pub title: String,
     pub description: Option<String>,
     pub created_at: OffsetDateTime,
@@ -64,7 +63,7 @@ pub async fn upsert_remote(pool: &DbPool, server: &Server) -> ApiResult<()> {
                 remote_updated_at = EXCLUDED.remote_updated_at,
                 synced_at = NOW()
         "#,
-        server.id,
+        server.id.as_uuid(),
         server.host,
         server.title,
         server.description,
@@ -75,11 +74,14 @@ pub async fn upsert_remote(pool: &DbPool, server: &Server) -> ApiResult<()> {
     .await?;
     Ok(())
 }
-pub async fn get_by_id(state: &AppState, server_id: Uuid) -> ApiResult<Server> {
+pub async fn get_by_id(
+    state: &AppState,
+    server_id: ServerId,
+) -> ApiResult<Server> {
     let row = sqlx::query_as!(
         LocalServerRow,
         "SELECT * FROM servers WHERE id = $1;",
-        server_id,
+        server_id.as_uuid(),
     )
     .fetch_one(state.db_pool.as_ref())
     .await?;
@@ -97,8 +99,8 @@ pub async fn get_all(state: &AppState) -> ApiResult<Vec<Server>> {
     Ok(servers)
 }
 
-pub async fn delete(state: &AppState, server_id: Uuid) -> ApiResult<()> {
-    sqlx::query!("DELETE FROM servers WHERE id = $1;", server_id)
+pub async fn delete(state: &AppState, server_id: ServerId) -> ApiResult<()> {
+    sqlx::query!("DELETE FROM servers WHERE id = $1;", server_id.as_uuid())
         .execute(state.db_pool.as_ref())
         .await?;
     Ok(())

@@ -1,18 +1,18 @@
-use crate::{
-    auth::{Principal, authorize},
-    error::ApiResult,
-    ops,
-    state::AppState,
-};
 use axum::{
     extract::{Json, Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
 use log::info;
-use runelink_types::NewServer;
+use runelink_types::server::{NewServer, ServerId};
 use serde::Deserialize;
-use uuid::Uuid;
+
+use crate::{
+    auth::{Principal, authorize},
+    error::ApiResult,
+    ops,
+    state::AppState,
+};
 
 #[derive(Deserialize, Debug)]
 pub struct ServerQueryParams {
@@ -60,7 +60,7 @@ pub async fn get_all(
 /// GET /servers/{server_id}
 pub async fn get_by_id(
     State(state): State<AppState>,
-    Path(server_id): Path<Uuid>,
+    Path(server_id): Path<ServerId>,
     Query(params): Query<ServerQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
@@ -80,7 +80,7 @@ pub async fn get_by_id(
 pub async fn get_with_channels(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(server_id): Path<Uuid>,
+    Path(server_id): Path<ServerId>,
     Query(params): Query<ServerQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
@@ -107,7 +107,7 @@ pub async fn get_with_channels(
 pub async fn delete(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(server_id): Path<Uuid>,
+    Path(server_id): Path<ServerId>,
     Query(params): Query<ServerQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(

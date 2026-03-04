@@ -1,8 +1,8 @@
 use runelink_types::{
+    server::ServerId,
     user::UserRef,
     ws::{ClientWsUpdate, FederationWsUpdate},
 };
-use uuid::Uuid;
 
 use crate::{error::ApiResult, state::AppState};
 
@@ -15,7 +15,7 @@ pub struct ServerFanoutTargets {
 /// Resolve the targets for a server update.
 pub async fn resolve_server_targets(
     state: &AppState,
-    server_id: Uuid,
+    server_id: ServerId,
 ) -> ApiResult<ServerFanoutTargets> {
     let local_users = state
         .routing_index
