@@ -1,3 +1,6 @@
+# If you have additional files that you want to ignore that are specific to
+# your machine, consider putting them in .git/info/exclude.
+
 # Rust build
 target/
 */target/
@@ -5,9 +8,3 @@ target/
 # Environmental variables
 *.env
 runelink-server/config.toml
-
-# Personal notes
-NOTES/
-
-# Python cache
-__pycache__/
