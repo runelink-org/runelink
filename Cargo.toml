@@ -6,3 +6,11 @@ members = [
     "runelink-types",
 ]
 resolver = "2"
+
+[workspace.package]
+repository = "https://github.com/runelink-org/runelink"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

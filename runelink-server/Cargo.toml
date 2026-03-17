@@ -2,6 +2,7 @@
 name = "runelink-server"
 version = "0.2.0"
 edition = "2024"
+repository.workspace = true
 
 [dependencies]
 runelink-client = { path = "../runelink-client" }

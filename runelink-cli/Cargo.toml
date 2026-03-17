@@ -2,6 +2,7 @@
 name = "runelink-cli"
 version = "0.2.0"
 edition = "2024"
+repository.workspace = true
 
 [[bin]]
 name = "rune"
