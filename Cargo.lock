@@ -1894,6 +1894,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "runelink-cli"
+version = "0.2.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "crossterm",
+ "directories",
+ "env_logger",
+ "log",
+ "reqwest",
+ "runelink-client",
+ "runelink-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.12",
+ "time",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "runelink-client"
 version = "0.2.0"
 dependencies = [
@@ -1933,27 +1954,6 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.28.0",
  "toml",
- "uuid",
-]
-
-[[package]]
-name = "runelink-term"
-version = "0.2.0"
-dependencies = [
- "clap",
- "clap_complete",
- "crossterm",
- "directories",
- "env_logger",
- "log",
- "reqwest",
- "runelink-client",
- "runelink-types",
- "serde",
- "serde_json",
- "thiserror 2.0.12",
- "time",
- "tokio",
  "uuid",
 ]
 

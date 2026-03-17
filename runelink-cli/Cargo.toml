@@ -1,5 +1,5 @@
 [package]
-name = "runelink-term"
+name = "runelink-cli"
 version = "0.2.0"
 edition = "2024"
 
