@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT DISTINCT\n            ursm.user_name,\n            ursm.user_host\n        FROM user_remote_server_memberships ursm\n        WHERE ursm.remote_server_id = $1\n        ORDER BY user_name, user_host\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_host",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "eba57f08abea9bf1e90f931db6cf196d24935ade437305edefc4c6ebf5828272"
+}

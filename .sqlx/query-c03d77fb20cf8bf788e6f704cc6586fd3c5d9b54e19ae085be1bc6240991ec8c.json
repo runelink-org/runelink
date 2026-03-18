@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM server_users\n        WHERE server_id = $1 AND user_name = $2 AND user_host = $3\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c03d77fb20cf8bf788e6f704cc6586fd3c5d9b54e19ae085be1bc6240991ec8c"
+}

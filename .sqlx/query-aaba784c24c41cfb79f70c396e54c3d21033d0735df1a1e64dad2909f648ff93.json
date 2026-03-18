@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            to_jsonb(u) \"user: Json<User>\",\n            m.role AS \"role: ServerRole\",\n            m.remote_created_at AS created_at,\n            m.remote_updated_at AS updated_at\n        FROM users u\n        JOIN user_remote_server_memberships m\n          ON u.name = m.user_name AND u.host = m.user_host\n        WHERE m.remote_server_id = $1 AND m.user_name = $2 AND m.user_host = $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user: Json<User>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 1,
+        "name": "role: ServerRole",
+        "type_info": {
+          "Custom": {
+            "name": "server_role",
+            "kind": {
+              "Enum": [
+                "member",
+                "admin"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "aaba784c24c41cfb79f70c396e54c3d21033d0735df1a1e64dad2909f648ff93"
+}

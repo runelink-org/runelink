@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n          s.id,\n          s.host,\n          s.title,\n          s.description,\n          s.remote_created_at AS server_created_at,\n          s.remote_updated_at AS server_updated_at,\n          m.role AS \"role: ServerRole\",\n          m.remote_created_at AS membership_created_at,\n          m.remote_updated_at AS membership_updated_at,\n          m.synced_at\n        FROM cached_remote_servers s\n        JOIN user_remote_server_memberships m\n          ON s.id = m.remote_server_id\n        WHERE m.user_name = $1 AND m.user_host = $2 AND m.remote_server_id = $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "host",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "server_created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "server_updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "role: ServerRole",
+        "type_info": {
+          "Custom": {
+            "name": "server_role",
+            "kind": {
+              "Enum": [
+                "member",
+                "admin"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "membership_created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "membership_updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "synced_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e9ec549ea9ac594b6b8ae031a38465650fca89d2b5cc0c2bef191dd4ba71e8a7"
+}

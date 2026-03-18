@@ -118,6 +118,8 @@ Then update `database_url` and any other values for your environment, install `s
 
 `runelink-server` runtime config comes from TOML, but `sqlx` tooling (CLI/query checking) reads `DATABASE_URL` from env/`.env`. Copy `runelink-server/.env.example` to `runelink-server/.env` for local tooling, or pass `--database-url` to `sqlx` commands.
 
+If you edit SQL queries checked by `sqlx`, refresh the offline metadata afterward with `cargo sqlx prepare --workspace`.
+
 ```bash
 cargo install sqlx-cli --no-default-features --features postgres,rustls
 sqlx migrate run
