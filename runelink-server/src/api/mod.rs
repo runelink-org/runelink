@@ -2,6 +2,7 @@ use crate::{state::AppState, ws};
 use axum::{Router, extract::Query, response::IntoResponse, routing::get};
 use log::info;
 use serde::Deserialize;
+use tower_http::cors;
 
 mod auth;
 mod channels;
@@ -12,6 +13,11 @@ mod users;
 
 /// Creates a router for all API endpoints.
 pub fn router() -> Router<AppState> {
+    let cors = cors::CorsLayer::new()
+        .allow_origin(cors::Any)
+        .allow_methods(cors::Any)
+        .allow_headers(cors::Any);
+
     Router::new()
         // Mount auth router (includes OIDC discovery and auth endpoints)
         .merge(auth::router())
@@ -73,6 +79,7 @@ pub fn router() -> Router<AppState> {
             get(memberships::get_by_user_and_server)
                 .delete(memberships::delete),
         )
+        .layer(cors)
 }
 
 #[derive(Deserialize, Debug)]
