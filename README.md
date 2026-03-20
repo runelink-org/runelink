@@ -4,7 +4,7 @@ RuneLink is an **experimental** federated messaging network with a Slack/Discord
 
 This repo contains:
 - A Rust server implementation (`runelink-server`)
-- A Rust CLI client (`runelink-term`, binary name: `rune`)
+- A Rust CLI client (`runelink-cli`, binary name: `rune`)
 - A Rust client library (`runelink-client`) and shared API types (`runelink-types`) for building additional clients
 
 > Status: **WIP**. APIs and data model may change. Not security-audited.
@@ -27,7 +27,7 @@ This repo contains:
 This is a Rust workspace (see `Cargo.toml`) with these crates:
 
 - `runelink-server`: Axum HTTP server + Postgres persistence + federation endpoints.
-- `runelink-term`: the `rune` CLI client (a TUI + websockets are planned, but not the primary interface yet).
+- `runelink-cli`: the `rune` CLI client (a TUI + websockets are planned, but not the primary interface yet).
 - `runelink-client`: reusable Rust client library for talking to RuneLink servers.
 - `runelink-types`: shared request/response and host types.
 
@@ -62,7 +62,7 @@ This is intentionally *not* federated: your end-user credentials are never share
 Install `rune` from source (recommended for now):
 
 ```bash
-cargo install --path runelink-term
+cargo install --path runelink-cli
 ```
 
 Verify it's in your PATH:
