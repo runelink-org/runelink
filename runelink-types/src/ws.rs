@@ -24,7 +24,7 @@ pub struct WsError {
     pub details: Option<Value>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuthTokenAccessRequest {
     pub access_token: String,
 }
@@ -430,4 +430,29 @@ pub enum FederationWsEnvelope {
         event_id: EventId,
         update: FederationWsUpdate,
     },
+}
+
+impl std::fmt::Debug for AuthTokenAccessRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthTokenAccessRequest")
+            .field("access_token", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AuthTokenAccessRequest;
+
+    #[test]
+    fn auth_token_access_request_debug_redacts_access_token() {
+        let request = AuthTokenAccessRequest {
+            access_token: "secret-token".into(),
+        };
+
+        let debug = format!("{request:?}");
+
+        assert!(debug.contains("[REDACTED]"));
+        assert!(!debug.contains("secret-token"));
+    }
 }

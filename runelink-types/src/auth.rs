@@ -1,5 +1,5 @@
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use rand::{RngCore, rngs::OsRng};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
 
@@ -76,7 +76,7 @@ pub struct JwksResponse {
 }
 
 /// Structured password grant request (e.g. for WebSocket auth flow)
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuthTokenPasswordRequest {
     pub username: String,
     pub password: String,
@@ -85,7 +85,7 @@ pub struct AuthTokenPasswordRequest {
 }
 
 /// Structured refresh_token grant request (e.g. for WebSocket auth flow)
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuthTokenRefreshRequest {
     pub refresh_token: String,
     pub scope: Option<String>,
@@ -266,6 +266,27 @@ impl std::fmt::Debug for SignupRequest {
     }
 }
 
+impl std::fmt::Debug for AuthTokenPasswordRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthTokenPasswordRequest")
+            .field("username", &self.username)
+            .field("password", &"[REDACTED]")
+            .field("scope", &self.scope)
+            .field("client_id", &self.client_id)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for AuthTokenRefreshRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthTokenRefreshRequest")
+            .field("refresh_token", &"[REDACTED]")
+            .field("scope", &self.scope)
+            .field("client_id", &self.client_id)
+            .finish()
+    }
+}
+
 impl std::fmt::Debug for RefreshToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RefreshToken")
@@ -303,5 +324,39 @@ impl std::fmt::Debug for TokenResponse {
             .field("refresh_token", &"[REDACTED]")
             .field("scope", &self.scope)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AuthTokenPasswordRequest, AuthTokenRefreshRequest};
+
+    #[test]
+    fn auth_token_password_request_debug_redacts_password() {
+        let request = AuthTokenPasswordRequest {
+            username: "connor".into(),
+            password: "secret-password".into(),
+            scope: Some("openid".into()),
+            client_id: Some("client-1".into()),
+        };
+
+        let debug = format!("{request:?}");
+
+        assert!(debug.contains("[REDACTED]"));
+        assert!(!debug.contains("secret-password"));
+    }
+
+    #[test]
+    fn auth_token_refresh_request_debug_redacts_refresh_token() {
+        let request = AuthTokenRefreshRequest {
+            refresh_token: "secret-refresh-token".into(),
+            scope: Some("openid".into()),
+            client_id: Some("client-1".into()),
+        };
+
+        let debug = format!("{request:?}");
+
+        assert!(debug.contains("[REDACTED]"));
+        assert!(!debug.contains("secret-refresh-token"));
     }
 }
