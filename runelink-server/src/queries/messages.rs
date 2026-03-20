@@ -7,6 +7,7 @@ use runelink_types::{
 use serde::{Deserialize, Serialize};
 use sqlx::types::Json;
 use time::OffsetDateTime;
+use uuid::Uuid;
 
 use crate::{db::DbPool, error::ApiResult};
 
@@ -40,11 +41,11 @@ pub async fn insert(
     channel_id: ChannelId,
     new_message: &NewMessage,
 ) -> ApiResult<Message> {
-    let new_id: MessageId = sqlx::query_scalar!(
+    let new_id: Uuid = sqlx::query_scalar!(
         r#"
         INSERT INTO messages (channel_id, author_name, author_host, body)
         VALUES ($1, $2, $3, $4)
-        RETURNING id AS "id: MessageId";
+        RETURNING id;
         "#,
         channel_id.as_uuid(),
         new_message.author.name,
