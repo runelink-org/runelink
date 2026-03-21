@@ -7,13 +7,13 @@ use runelink_types::{
     },
 };
 
+use super::federation;
 use crate::{
     auth::Session,
     error::{ApiError, ApiResult},
     queries,
     state::AppState,
 };
-use super::federation;
 
 /// Create a new user.
 pub async fn create(

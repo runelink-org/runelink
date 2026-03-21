@@ -146,9 +146,8 @@ pub async fn decode_federation_jwt(
     token: &str,
     expected_audience: &str,
 ) -> ApiResult<FederationClaims> {
-    let header = jsonwebtoken::decode_header(token).map_err(|e| {
-        ApiError::AuthError(format!("invalid JWT header: {e}"))
-    })?;
+    let header = jsonwebtoken::decode_header(token)
+        .map_err(|e| ApiError::AuthError(format!("invalid JWT header: {e}")))?;
     let iss = parse_iss_unverified(token)?;
 
     let cached = get_cached_jwks(state, &iss).await?;

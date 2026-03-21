@@ -57,12 +57,9 @@ pub async fn get_by_ref(
         params.target_host
     );
     let user_ref = UserRef::new(name, host);
-    let user = ops::users::get_by_ref(
-        &state,
-        user_ref,
-        params.target_host.as_deref(),
-    )
-    .await?;
+    let user =
+        ops::users::get_by_ref(&state, user_ref, params.target_host.as_deref())
+            .await?;
     Ok((StatusCode::OK, Json(user)))
 }
 

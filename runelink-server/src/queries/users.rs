@@ -137,7 +137,6 @@ pub async fn delete(pool: &DbPool, user_ref: UserRef) -> ApiResult<()> {
     Ok(())
 }
 
-
 pub async fn get_associated_hosts(
     pool: &DbPool,
     user_ref: &UserRef,

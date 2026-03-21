@@ -1,7 +1,6 @@
-use jsonwebtoken::{Algorithm, Validation};
 use log::info;
 use runelink_types::{
-    auth::{ClientAccessClaims, JwksResponse, OidcDiscoveryDocument},
+    auth::{JwksResponse, OidcDiscoveryDocument},
     user::UserRef,
     ws::{
         AuthTokenAccessRequest, ClientWsConnectionState, ClientWsReply,
@@ -11,34 +10,12 @@ use runelink_types::{
 
 use super::shared::authorize_client;
 use crate::{
-    bearer_auth::ClientAuth,
+    auth_service,
     error::{ApiError, ApiResult},
     ids::ConnId,
     ops,
     state::AppState,
 };
-
-/// Extract the client authentication from an access token.
-fn client_auth_from_access_token(
-    state: &AppState,
-    access_token: &str,
-) -> ApiResult<ClientAuth> {
-    let server_id = state.config.api_url();
-    let mut validation = Validation::new(Algorithm::EdDSA);
-    validation.set_audience(std::slice::from_ref(&server_id));
-    validation.set_issuer(std::slice::from_ref(&server_id));
-
-    let data = jsonwebtoken::decode::<ClientAccessClaims>(
-        access_token,
-        &state.key_manager.decoding_key,
-        &validation,
-    )
-    .map_err(|_| ApiError::AuthError("Invalid or expired token".into()))?;
-
-    Ok(ClientAuth {
-        claims: data.claims,
-    })
-}
 
 /// Handle a client websocket request.
 pub(super) async fn handle_client_request(
@@ -90,7 +67,8 @@ pub(super) async fn handle_client_request(
         ClientWsRequest::AuthTokenAccess(AuthTokenAccessRequest {
             access_token,
         }) => {
-            let auth = client_auth_from_access_token(state, &access_token)?;
+            let auth =
+                auth_service::authenticate_access_token(state, &access_token)?;
             let user_ref = UserRef::parse_subject(&auth.claims.sub)
                 .ok_or_else(|| {
                     ApiError::AuthError(
@@ -111,13 +89,48 @@ pub(super) async fn handle_client_request(
             ))
         }
 
-        ClientWsRequest::AuthSignup(_)
-        | ClientWsRequest::AuthTokenPassword(_)
-        | ClientWsRequest::AuthTokenRefresh(_)
-        | ClientWsRequest::AuthUserinfo
-        | ClientWsRequest::AuthRegisterClient => Err(ApiError::BadRequest(
-            "This auth operation is not implemented over websocket".into(),
-        )),
+        ClientWsRequest::AuthSignup(signup_request) => {
+            let user = auth_service::signup(state, signup_request).await?;
+            Ok(ClientWsReply::AuthSignup(user))
+        }
+
+        ClientWsRequest::AuthTokenPassword(password_request) => {
+            let issued =
+                auth_service::issue_password_token(state, password_request)
+                    .await?;
+            let authenticated = state
+                .client_ws_manager
+                .authenticate_connection(conn_id, issued.user_ref)
+                .await;
+            if !authenticated {
+                return Err(ApiError::Internal(
+                    "Client websocket connection not registered".into(),
+                ));
+            }
+            Ok(ClientWsReply::AuthToken(issued.response))
+        }
+
+        ClientWsRequest::AuthTokenRefresh(refresh_request) => {
+            let issued =
+                auth_service::issue_refresh_token(state, refresh_request)
+                    .await?;
+            let authenticated = state
+                .client_ws_manager
+                .authenticate_connection(conn_id, issued.user_ref)
+                .await;
+            if !authenticated {
+                return Err(ApiError::Internal(
+                    "Client websocket connection not registered".into(),
+                ));
+            }
+            Ok(ClientWsReply::AuthToken(issued.response))
+        }
+
+        ClientWsRequest::AuthUserinfo | ClientWsRequest::AuthRegisterClient => {
+            Err(ApiError::BadRequest(
+                "This auth operation is not implemented over websocket".into(),
+            ))
+        }
 
         ClientWsRequest::UsersCreate(new_user) => {
             let session =

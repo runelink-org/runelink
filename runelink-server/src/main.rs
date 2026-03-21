@@ -7,6 +7,7 @@ use crate::{config::ServerConfig, key_manager::KeyManager, state::AppState};
 
 mod api;
 mod auth;
+mod auth_service;
 mod bearer_auth;
 mod config;
 mod db;
