@@ -1,7 +1,9 @@
+use std::fmt;
+
 use uuid::Uuid;
 
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct ConnId(Uuid);
 
 impl ConnId {
@@ -23,5 +25,11 @@ impl From<Uuid> for ConnId {
 impl From<ConnId> for Uuid {
     fn from(value: ConnId) -> Self {
         value.0
+    }
+}
+
+impl fmt::Debug for ConnId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
