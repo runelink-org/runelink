@@ -219,10 +219,11 @@ pub async fn delete(
 ) -> ApiResult<()> {
     // Handle local case
     if !state.config.is_remote_host(target_host) {
+        let targets = fanout::resolve_server_targets(state, server_id).await?;
         queries::servers::delete(state, server_id).await?;
         fanout::fanout_update(
             state,
-            fanout::resolve_server_targets(state, server_id).await?,
+            targets,
             ClientWsUpdate::ServerDeleted { server_id },
             FederationWsUpdate::ServerDeleted { server_id },
         )
