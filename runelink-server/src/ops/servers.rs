@@ -1,7 +1,7 @@
 use runelink_types::{
     server::{
-        NewServer, NewServerMembership, Server, ServerId, ServerMembership,
-        ServerRole, ServerWithChannels,
+        FullServerMembership, NewServer, NewServerMembership, Server,
+        ServerId, ServerMembership, ServerRole, ServerWithChannels,
     },
     ws::{
         ClientWsUpdate, FederationWsReply, FederationWsRequest,
@@ -43,13 +43,30 @@ pub async fn create(
             server_host: server.host.clone(),
             role: ServerRole::Admin,
         };
-        queries::memberships::insert_local(&state.db_pool, &new_membership)
-            .await?;
+        let member =
+            queries::memberships::insert_local(&state.db_pool, &new_membership)
+                .await?;
+        let targets = fanout::resolve_server_targets(state, server.id).await?;
         fanout::fanout_update(
             state,
-            fanout::resolve_server_targets(state, server.id).await?,
+            targets.clone(),
             ClientWsUpdate::ServerUpserted(server.clone()),
             FederationWsUpdate::ServerUpserted(server.clone()),
+        )
+        .await;
+        let full_membership = FullServerMembership {
+            server: server.clone(),
+            user: member.user,
+            role: ServerRole::Admin,
+            joined_at: member.joined_at,
+            updated_at: member.updated_at,
+            synced_at: None,
+        };
+        fanout::fanout_update(
+            state,
+            targets,
+            ClientWsUpdate::MembershipUpserted(full_membership.clone()),
+            FederationWsUpdate::MembershipUpserted(full_membership),
         )
         .await;
         Ok(server)

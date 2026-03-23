@@ -13,6 +13,7 @@ use crate::{
     error::{ApiError, ApiResult},
     ids::ConnId,
     ops,
+    queries,
     state::AppState,
 };
 
@@ -41,6 +42,13 @@ pub(super) async fn handle_federation_update(
     info!("WS federation: update={:#?}", update);
     match update {
         FederationWsUpdate::MembershipUpserted(membership) => {
+            queries::servers::upsert_remote(&state.db_pool, &membership.server)
+                .await?;
+            queries::memberships::insert_remote(
+                &state.db_pool,
+                &membership.clone().into(),
+            )
+            .await?;
             fanout_remote_server_update(
                 state,
                 membership.server.id,
@@ -53,6 +61,9 @@ pub(super) async fn handle_federation_update(
             server_id,
             user_ref,
         } => {
+            let _ =
+                queries::memberships::delete_remote(&state.db_pool, server_id, user_ref.clone())
+                    .await;
             let mut targets = state
                 .routing_index
                 .users_for_remote_server(server_id)

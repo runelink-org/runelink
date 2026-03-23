@@ -126,6 +126,11 @@ pub async fn insert_remote(
             remote_updated_at, synced_at
         )
         VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        ON CONFLICT (user_name, user_host, remote_server_id) DO UPDATE
+            SET role = EXCLUDED.role,
+                remote_created_at = EXCLUDED.remote_created_at,
+                remote_updated_at = EXCLUDED.remote_updated_at,
+                synced_at = NOW()
         "#,
         membership.user_ref.name,
         membership.user_ref.host,

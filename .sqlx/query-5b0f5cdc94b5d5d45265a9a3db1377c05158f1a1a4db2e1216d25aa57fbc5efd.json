@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO user_remote_server_memberships (\n            user_name, user_host, remote_server_id, role, remote_created_at,\n            remote_updated_at, synced_at\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, NOW())\n        ON CONFLICT (user_name, user_host, remote_server_id) DO UPDATE\n            SET role = EXCLUDED.role,\n                remote_created_at = EXCLUDED.remote_created_at,\n                remote_updated_at = EXCLUDED.remote_updated_at,\n                synced_at = NOW()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid",
+        {
+          "Custom": {
+            "name": "server_role",
+            "kind": {
+              "Enum": [
+                "member",
+                "admin"
+              ]
+            }
+          }
+        },
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5b0f5cdc94b5d5d45265a9a3db1377c05158f1a1a4db2e1216d25aa57fbc5efd"
+}
