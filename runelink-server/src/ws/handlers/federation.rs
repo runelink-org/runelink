@@ -215,20 +215,9 @@ pub(super) async fn handle_federation_request(
             Ok(FederationWsReply::UsersDelete)
         }
 
-        FederationWsRequest::MembershipsCreate {
-            server_id,
-            new_membership,
-        } => {
-            if server_id != new_membership.server_id {
-                return Err(ApiError::BadRequest(
-                    "Server ID in path does not match server ID in membership"
-                        .into(),
-                ));
-            }
-            if !state
-                .config
-                .is_remote_host(Some(&new_membership.user_ref.host))
-            {
+        FederationWsRequest::MembershipsCreate { new_membership } => {
+            let user = new_membership.user.clone();
+            if !state.config.is_remote_host(Some(&user.host)) {
                 return Err(ApiError::BadRequest(
                     "User host in membership should not match local host"
                         .into(),
@@ -237,16 +226,21 @@ pub(super) async fn handle_federation_request(
             let mut session = authorize_federation(
                 state,
                 conn_id,
-                Some(new_membership.user_ref.clone()),
+                Some(user.as_ref()),
                 ops::memberships::auth::federated::create(
-                    server_id,
-                    new_membership.user_ref.clone(),
+                    new_membership.server_id,
+                    user.as_ref(),
                 ),
             )
             .await?;
             let membership =
-                ops::memberships::create(state, &mut session, &new_membership)
-                    .await?;
+                ops::memberships::create(
+                    state,
+                    &mut session,
+                    &new_membership.into(),
+                    Some(&user),
+                )
+                .await?;
             Ok(FederationWsReply::MembershipsCreate(membership))
         }
 

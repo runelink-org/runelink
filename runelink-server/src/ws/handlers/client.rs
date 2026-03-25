@@ -231,8 +231,13 @@ pub(super) async fn handle_client_request(
             )
             .await?;
             let membership =
-                ops::memberships::create(state, &mut session, &new_membership)
-                    .await?;
+                ops::memberships::create(
+                    state,
+                    &mut session,
+                    &new_membership,
+                    None,
+                )
+                .await?;
             Ok(ClientWsReply::MembershipsCreate(membership))
         }
 

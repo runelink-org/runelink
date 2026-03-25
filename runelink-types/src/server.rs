@@ -90,6 +90,14 @@ pub struct NewServerMembership {
     pub role: ServerRole,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NewServerMembershipFull {
+    pub user: User,
+    pub server_id: ServerId,
+    pub server_host: String,
+    pub role: ServerRole,
+}
+
 impl Server {
     pub fn verbose(&self) -> String {
         format!("{} ({})", self.title, self.id)
@@ -119,6 +127,17 @@ impl From<FullServerMembership> for ServerMembership {
     }
 }
 
+impl From<NewServerMembershipFull> for NewServerMembership {
+    fn from(full_membership: NewServerMembershipFull) -> Self {
+        NewServerMembership {
+            user_ref: full_membership.user.as_ref(),
+            server_id: full_membership.server_id,
+            server_host: full_membership.server_host,
+            role: full_membership.role,
+        }
+    }
+}
+
 impl From<FullServerMembership> for ServerMember {
     fn from(full_membership: FullServerMembership) -> Self {
         ServerMember {
@@ -139,6 +158,17 @@ impl ServerMembership {
             joined_at: self.joined_at,
             updated_at: self.updated_at,
             synced_at: self.synced_at,
+        }
+    }
+}
+
+impl NewServerMembership {
+    pub fn as_full(self, user: User) -> NewServerMembershipFull {
+        NewServerMembershipFull {
+            user,
+            server_id: self.server_id,
+            server_host: self.server_host,
+            role: self.role,
         }
     }
 }

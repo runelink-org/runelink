@@ -3,14 +3,14 @@ use runelink_types::{
         FullServerMembership, NewServerMembership, ServerId, ServerMember,
         ServerMembership,
     },
-    user::UserRef,
+    user::{User, UserRef},
     ws::{
         ClientWsUpdate, FederationWsReply, FederationWsRequest,
         FederationWsUpdate,
     },
 };
 
-use super::federation;
+use super::{federation, users};
 use crate::{
     auth::Session,
     error::{ApiError, ApiResult},
@@ -22,8 +22,9 @@ use crate::{
 /// Create a new membership for a user in a server.
 pub async fn create(
     state: &AppState,
-    session: &mut Session,
+    _session: &mut Session,
     new_membership: &NewServerMembership,
+    remote_user: Option<&User>,
 ) -> ApiResult<FullServerMembership> {
     // If this membership is for a remote server, proxy via federation and cache locally.
     if state
@@ -38,13 +39,14 @@ pub async fn create(
             ));
         }
         let host = new_membership.server_host.as_str();
+        let user = users::get_by_ref(state, new_membership.user_ref.clone(), None)
+            .await?;
         let reply = federation::request(
             state,
             host,
             Some(new_membership.user_ref.clone()),
             FederationWsRequest::MembershipsCreate {
-                server_id: new_membership.server_id,
-                new_membership: new_membership.clone(),
+                new_membership: new_membership.clone().as_full(user),
             },
         )
         .await?;
@@ -66,27 +68,20 @@ pub async fn create(
         return Ok(cached_membership.as_full(user));
     }
 
-    // Ensure remote user exists locally before creating membership
     if new_membership.user_ref.host != state.config.local_host() {
-        let user = session.lookup_user(state).await?;
-        if user.is_none() {
-            let host = new_membership.user_ref.host.as_str();
-            let reply = federation::request(
-                state,
-                host,
-                None,
-                FederationWsRequest::UsersGetByRef {
-                    user_ref: new_membership.user_ref.clone(),
-                },
-            )
-            .await?;
-            let FederationWsReply::UsersGetByRef(user) = reply else {
-                return Err(ApiError::Internal(format!(
-                    "Unexpected federation reply from {host} for users.get_by_ref"
-                )));
-            };
-            queries::users::upsert_remote(&state.db_pool, &user).await?;
+        let remote_user = match remote_user {
+            Some(user) => user.clone(),
+            None => {
+                users::get_by_ref(state, new_membership.user_ref.clone(), None)
+                    .await?
+            }
+        };
+        if remote_user.as_ref() != new_membership.user_ref {
+            return Err(ApiError::BadRequest(
+                "User payload does not match membership user_ref".into(),
+            ));
         }
+        queries::users::upsert_remote(&state.db_pool, &remote_user).await?;
     }
 
     // Create the membership

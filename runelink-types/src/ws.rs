@@ -9,8 +9,9 @@ use crate::{
     channel::{Channel, ChannelId, NewChannel},
     message::{Message, MessageId, NewMessage},
     server::{
-        FullServerMembership, NewServer, NewServerMembership, Server, ServerId,
-        ServerMember, ServerMembership, ServerWithChannels,
+        FullServerMembership, NewServer, NewServerMembership,
+        NewServerMembershipFull, Server, ServerId, ServerMember,
+        ServerMembership, ServerWithChannels,
     },
     user::{NewUser, User, UserRef},
 };
@@ -221,8 +222,7 @@ pub enum FederationWsRequest {
         user_ref: UserRef,
     },
     MembershipsCreate {
-        server_id: ServerId,
-        new_membership: NewServerMembership,
+        new_membership: NewServerMembershipFull,
     },
     MembershipsGetByUser {
         user_ref: UserRef,
