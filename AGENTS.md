@@ -8,15 +8,13 @@ This repository is a Rust workspace.
 
 Always use the Makefile targets instead. Cargo may fail in agent environments.
 
-### Allowed Commands
+### Checks After Changes
 
-Use these commands from the repository root:
-
-- `make check` – Check all crates
-- `make check-server` – Check only runelink-server
-- `make build` – Build all crates
-- `make build-server` – Build only runelink-server
-- `make test` – Run tests
+- Always run checks in this order after making changes:
+  1. `make fmt` - Format code
+  2. `make check` - Check the crates
+  3. `make build` - Build the crates
+  3. `make test` - Run tests
 
 ### Toolchain
 
