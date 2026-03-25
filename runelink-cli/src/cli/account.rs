@@ -107,8 +107,7 @@ pub async fn handle_account_commands(
         }
 
         AccountCommands::Create(create_args) => {
-            let host =
-                unwrap_or_prompt(create_args.host.clone(), "Host")?;
+            let host = unwrap_or_prompt(create_args.host.clone(), "Host")?;
             let name = unwrap_or_prompt(create_args.name.clone(), "Name")?;
             let password = read_input("Password: ")?.ok_or_else(|| {
                 CliError::InvalidArgument("Password is required.".into())

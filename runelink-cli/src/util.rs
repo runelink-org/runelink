@@ -13,11 +13,7 @@ pub fn get_prefix<T: PartialEq>(
     let Some(default) = default else {
         return "";
     };
-    if val == default {
-        "* "
-    } else {
-        "  "
-    }
+    if val == default { "* " } else { "  " }
 }
 
 pub fn group_memberships_by_host<'a>(

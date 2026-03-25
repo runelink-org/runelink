@@ -1,7 +1,7 @@
 use runelink_types::{
     server::{
-        FullServerMembership, NewServer, NewServerMembership, Server,
-        ServerId, ServerMembership, ServerRole, ServerWithChannels,
+        FullServerMembership, NewServer, NewServerMembership, Server, ServerId,
+        ServerMembership, ServerRole, ServerWithChannels,
     },
     ws::{
         ClientWsUpdate, FederationWsReply, FederationWsRequest,

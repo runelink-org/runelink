@@ -12,8 +12,7 @@ use super::shared::authorize_federation;
 use crate::{
     error::{ApiError, ApiResult},
     ids::ConnId,
-    ops,
-    queries,
+    ops, queries,
     state::AppState,
 };
 
@@ -61,9 +60,12 @@ pub(super) async fn handle_federation_update(
             server_id,
             user_ref,
         } => {
-            let _ =
-                queries::memberships::delete_remote(&state.db_pool, server_id, user_ref.clone())
-                    .await;
+            let _ = queries::memberships::delete_remote(
+                &state.db_pool,
+                server_id,
+                user_ref.clone(),
+            )
+            .await;
             let mut targets = state
                 .routing_index
                 .users_for_remote_server(server_id)
@@ -233,14 +235,13 @@ pub(super) async fn handle_federation_request(
                 ),
             )
             .await?;
-            let membership =
-                ops::memberships::create(
-                    state,
-                    &mut session,
-                    &new_membership.into(),
-                    Some(&user),
-                )
-                .await?;
+            let membership = ops::memberships::create(
+                state,
+                &mut session,
+                &new_membership.into(),
+                Some(&user),
+            )
+            .await?;
             Ok(FederationWsReply::MembershipsCreate(membership))
         }
 

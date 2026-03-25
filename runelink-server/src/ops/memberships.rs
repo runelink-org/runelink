@@ -39,8 +39,9 @@ pub async fn create(
             ));
         }
         let host = new_membership.server_host.as_str();
-        let user = users::get_by_ref(state, new_membership.user_ref.clone(), None)
-            .await?;
+        let user =
+            users::get_by_ref(state, new_membership.user_ref.clone(), None)
+                .await?;
         let reply = federation::request(
             state,
             host,
