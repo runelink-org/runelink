@@ -1,4 +1,4 @@
-.PHONY: help fmt sqlx-prepare check build test
+.PHONY: help fmt sqlx-prepare check build test verify
 
 # Ensure commands work even when rustup has no default toolchain set.
 # Users can override, e.g. `make check-server TOOLCHAIN=nightly`.
@@ -12,6 +12,7 @@ help:
 	@echo "  check        - Run cargo check on all crates"
 	@echo "  build        - Build all crates"
 	@echo "  test         - Run tests"
+	@echo "  verify       - Run formatting and all checks"
 
 fmt:
 	$(CARGO) +$(TOOLCHAIN) fmt
@@ -27,3 +28,5 @@ build:
 
 test:
 	$(CARGO) +$(TOOLCHAIN) test
+
+verify: fmt sqlx-prepare build test
