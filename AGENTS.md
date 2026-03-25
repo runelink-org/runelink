@@ -12,9 +12,10 @@ Always use the Makefile targets instead. Cargo may fail in agent environments.
 
 - Always run checks in this order after making changes:
   1. `make fmt` - Format code
-  2. `make check` - Check the crates
-  3. `make build` - Build the crates
-  3. `make test` - Run tests
+  2. `make sqlx-prepare` - Update SQLx workspace metadata
+  3. `make check` - Check the crates
+  4. `make build` - Build the crates
+  5. `make test` - Run tests
 
 ### Toolchain
 
