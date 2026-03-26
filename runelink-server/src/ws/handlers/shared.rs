@@ -1,4 +1,3 @@
-use runelink_client::util::get_api_url;
 use runelink_types::{ClientAccessClaims, FederationClaims, UserRef};
 use time::Duration;
 
@@ -42,9 +41,9 @@ pub(super) async fn authorize_federation(
     delegated_user_ref: Option<UserRef>,
     requirement: Requirement,
 ) -> ApiResult<Session> {
-    let host = state
+    let issuer = state
         .federation_ws_manager
-        .authenticated_host(conn_id)
+        .authenticated_issuer(conn_id)
         .await
         .ok_or_else(|| {
             ApiError::AuthError(
@@ -52,7 +51,6 @@ pub(super) async fn authorize_federation(
             )
         })?;
 
-    let issuer = get_api_url(&host);
     let claims = match delegated_user_ref {
         Some(user_ref) => FederationClaims::new_delegated(
             issuer,

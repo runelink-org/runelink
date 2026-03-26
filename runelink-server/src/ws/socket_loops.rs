@@ -182,9 +182,10 @@ async fn federation_ws_upgrade_loop(
         Principal::from_federation_headers(&headers, &state).await
     {
         let host = host_from_issuer(&auth.claims.iss);
+        let issuer = auth.claims.iss.clone();
         let _ = state
             .federation_ws_manager
-            .authenticate_connection(conn_id, host)
+            .authenticate_connection(conn_id, host, issuer)
             .await;
     }
 

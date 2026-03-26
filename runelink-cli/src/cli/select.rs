@@ -136,10 +136,10 @@ pub enum ServerSelectionType<'a> {
 }
 
 pub async fn get_server_selection(
-    ctx: &CliContext<'_>,
+    ctx: &mut CliContext<'_>,
     selection_type: ServerSelectionType<'_>,
 ) -> Result<Server, CliError> {
-    let api_url = ctx.home_api_url()?;
+    let api_url = ctx.home_api_url().await?;
     let account = ctx.account.ok_or(CliError::MissingAccount)?;
     let servers = match selection_type {
         ServerSelectionType::All { host } => {
@@ -217,7 +217,7 @@ pub async fn get_channel_selection(
     server_id: ServerId,
     server_host: &str,
 ) -> Result<ChannelSelection, CliError> {
-    let api_url = ctx.home_api_url()?;
+    let api_url = ctx.home_api_url().await?;
     let access_token = ctx.get_access_token().await?;
     let channels = requests::channels::fetch_by_server(
         ctx.client,
@@ -269,7 +269,7 @@ pub async fn get_channel_selection_with_inputs(
         }
         (None, None) => {
             let server =
-                get_server_selection(&*ctx, ServerSelectionType::MemberOnly)
+                get_server_selection(ctx, ServerSelectionType::MemberOnly)
                     .await?;
             get_channel_selection(ctx, server.id, server.host.as_str()).await
         }

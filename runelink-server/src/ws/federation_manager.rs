@@ -75,8 +75,11 @@ impl FederationWsManager {
         &self,
         conn_id: ConnId,
         host: String,
+        issuer: String,
     ) -> bool {
-        self.pool.authenticate_connection(conn_id, host).await
+        self.pool
+            .authenticate_connection(conn_id, host, issuer)
+            .await
     }
 
     /// Deregisters a connection from the manager.
@@ -86,6 +89,13 @@ impl FederationWsManager {
 
     pub async fn authenticated_host(&self, conn_id: ConnId) -> Option<String> {
         self.pool.authenticated_host(conn_id).await
+    }
+
+    pub async fn authenticated_issuer(
+        &self,
+        conn_id: ConnId,
+    ) -> Option<String> {
+        self.pool.authenticated_issuer(conn_id).await
     }
 
     /// Sends a request to the given host and waits for a reply with a timeout.
@@ -283,7 +293,7 @@ impl FederationWsManager {
             info!("Opening federation websocket to {host}");
             let claims = FederationClaims::new_server_only(
                 state.config.api_url(),
-                get_api_url(host),
+                get_api_url(host, state.config.secure),
                 Duration::minutes(5),
             );
             let token = match jsonwebtoken::encode(
@@ -299,7 +309,7 @@ impl FederationWsManager {
                     return false;
                 }
             };
-            let ws_url = get_federation_ws_url(host);
+            let ws_url = get_federation_ws_url(host, state.config.secure);
             let mut request = match ws_url.as_str().into_client_request() {
                 Ok(request) => request,
                 Err(error) => {
@@ -333,8 +343,9 @@ impl FederationWsManager {
             let (sender, outbound_rx) =
                 mpsc::unbounded_channel::<FederationWsEnvelope>();
             let conn_id = self.register_connection(sender).await;
+            let issuer = get_api_url(host, state.config.secure);
             let _ = self
-                .authenticate_connection(conn_id, host.to_string())
+                .authenticate_connection(conn_id, host.to_string(), issuer)
                 .await;
             let state = state.clone();
             let host = host.to_string();

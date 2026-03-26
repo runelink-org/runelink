@@ -37,19 +37,22 @@ pub fn host_from_issuer(issuer: &str) -> String {
     strip_default_port(host)
 }
 
-pub fn get_api_url(host: &str) -> String {
+pub fn get_api_url(host: &str, secure: bool) -> String {
     let host_with_port = pad_host(host);
-    format!("http://{host_with_port}")
+    let scheme = if secure { "https" } else { "http" };
+    format!("{scheme}://{host_with_port}")
 }
 
-pub fn get_client_ws_url(host: &str) -> String {
+pub fn get_client_ws_url(host: &str, secure: bool) -> String {
     let host_with_port = pad_host(host);
-    format!("ws://{host_with_port}/ws/client")
+    let scheme = if secure { "wss" } else { "ws" };
+    format!("{scheme}://{host_with_port}/ws/client")
 }
 
-pub fn get_federation_ws_url(host: &str) -> String {
+pub fn get_federation_ws_url(host: &str, secure: bool) -> String {
     let host_with_port = pad_host(host);
-    format!("ws://{host_with_port}/ws/federation")
+    let scheme = if secure { "wss" } else { "ws" };
+    format!("{scheme}://{host_with_port}/ws/federation")
 }
 
 #[cfg(test)]
@@ -82,32 +85,48 @@ mod tests {
 
     #[test]
     fn test_no_port() {
-        let url = get_api_url("example.com");
+        let url = get_api_url("example.com", false);
         assert_eq!(url, "http://example.com:7000");
     }
 
     #[test]
     fn test_with_port() {
-        let url = get_api_url("example.com:8080");
+        let url = get_api_url("example.com:8080", false);
         assert_eq!(url, "http://example.com:8080");
     }
 
     #[test]
     fn test_ipv6_no_port() {
-        let url = get_api_url("[::1]");
+        let url = get_api_url("[::1]", false);
         assert_eq!(url, "http://[::1]:7000");
     }
 
     #[test]
     fn test_ipv6_with_port() {
-        let url = get_api_url("[::1]:4321");
+        let url = get_api_url("[::1]:4321", false);
         assert_eq!(url, "http://[::1]:4321");
     }
 
     #[test]
     fn test_malformed_ipv6() {
         // no closing ']', treated as no port
-        let url = get_api_url("[::1");
+        let url = get_api_url("[::1", false);
         assert_eq!(url, "http://[::1:7000");
+    }
+
+    #[test]
+    fn test_secure_urls() {
+        assert_eq!(
+            get_api_url("example.com", true),
+            "https://example.com:7000"
+        );
+        assert_eq!(
+            get_client_ws_url("example.com", true),
+            "wss://example.com:7000/ws/client"
+        );
+        assert_eq!(
+            get_federation_ws_url("example.com", true),
+            "wss://example.com:7000/ws/federation"
+        );
     }
 }

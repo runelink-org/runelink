@@ -10,5 +10,6 @@
 [[servers]]
 local_host = "localhost"
 port = 7000
+secure = false
 database_url = "postgres://postgres:postgres@localhost/runelink"
 key_dir = "/home/your-user/.local/share/runelink/keys"

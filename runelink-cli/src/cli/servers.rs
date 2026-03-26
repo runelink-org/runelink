@@ -106,7 +106,7 @@ pub async fn handle_server_commands(
 ) -> Result<(), CliError> {
     match &server_args.command {
         ServerCommands::List(list_args) => {
-            let api_url = ctx.home_api_url()?;
+            let api_url = ctx.home_api_url().await?;
 
             if let Some(host) = &list_args.host {
                 // List all servers in the specified host
@@ -162,7 +162,7 @@ pub async fn handle_server_commands(
         }
 
         ServerCommands::Get(get_args) => {
-            let api_url = ctx.home_api_url()?;
+            let api_url = ctx.home_api_url().await?;
             let server = requests::servers::fetch_by_id(
                 ctx.client,
                 &api_url,
@@ -180,7 +180,7 @@ pub async fn handle_server_commands(
 
         ServerCommands::Create(create_args) => {
             let account = ctx.account.ok_or(CliError::MissingAccount)?;
-            let api_url = ctx.home_api_url()?;
+            let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
             let title =
                 unwrap_or_prompt(create_args.title.clone(), "Server Title")?;
@@ -205,7 +205,7 @@ pub async fn handle_server_commands(
 
         ServerCommands::Join(join_args) => {
             let account = ctx.account.ok_or(CliError::MissingAccount)?;
-            let api_url = ctx.home_api_url()?;
+            let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
             let server = if let Some(server_id) = join_args.server_id {
                 requests::servers::fetch_by_id(
@@ -244,7 +244,7 @@ pub async fn handle_server_commands(
 
         ServerCommands::Leave(leave_args) => {
             let account = ctx.account.ok_or(CliError::MissingAccount)?;
-            let api_url = ctx.home_api_url()?;
+            let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
             let server = if let Some(server_id) = leave_args.server_id {
                 requests::servers::fetch_by_id(
@@ -276,7 +276,7 @@ pub async fn handle_server_commands(
 
         ServerCommands::Delete(delete_args) => {
             let account = ctx.account.ok_or(CliError::MissingAccount)?;
-            let api_url = ctx.home_api_url()?;
+            let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
             let server_id = if let Some(server_id) = delete_args.server_id {
                 server_id

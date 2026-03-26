@@ -43,6 +43,7 @@ pub struct ServerConfig {
     pub local_host_raw: String,
     pub database_url: String,
     pub port: u16,
+    pub secure: bool,
     pub key_dir: PathBuf,
 }
 
@@ -52,18 +53,15 @@ impl ServerConfig {
             .map_err(|e| ConfigError::ReadConfigFile(path.clone(), e))?;
         let parsed: RootConfig = toml::from_str(&file_contents)
             .map_err(|e| ConfigError::ParseConfigFile(path.clone(), e))?;
-
         if parsed.servers.is_empty() {
             return Err(ConfigError::NoServers(path.clone()));
         }
-
-        let configs: Vec<Self> = parsed
+        let configs = parsed
             .servers
             .into_iter()
             .enumerate()
             .map(|(index, raw)| raw.resolve(index))
-            .collect::<ConfigResult<Vec<_>>>()?;
-
+            .collect::<ConfigResult<Vec<Self>>>()?;
         validate_unique_resources(&configs)?;
         Ok(configs)
     }
@@ -73,7 +71,7 @@ impl ServerConfig {
         if self.port == 7000 {
             self.local_host_raw.clone()
         } else {
-            format!("{}:{}", &self.local_host_raw, self.port)
+            self.local_host_with_explicit_port()
         }
     }
 
@@ -83,7 +81,23 @@ impl ServerConfig {
     }
 
     pub fn api_url(&self) -> String {
-        get_api_url(self.local_host_with_explicit_port().as_str())
+        get_api_url(self.local_host_with_explicit_port().as_str(), self.secure)
+    }
+
+    #[allow(dead_code)]
+    pub fn client_ws_url(&self) -> String {
+        runelink_client::util::get_client_ws_url(
+            self.local_host_with_explicit_port().as_str(),
+            self.secure,
+        )
+    }
+
+    #[allow(dead_code)]
+    pub fn federation_ws_url(&self) -> String {
+        runelink_client::util::get_federation_ws_url(
+            self.local_host_with_explicit_port().as_str(),
+            self.secure,
+        )
     }
 
     pub fn is_remote_host(&self, host: Option<&str>) -> bool {
@@ -106,6 +120,8 @@ struct RawServerConfig {
     database_url: String,
     #[serde(default = "default_port")]
     port: u16,
+    #[serde(default = "default_secure")]
+    secure: bool,
     key_dir: Option<PathBuf>,
 }
 
@@ -131,6 +147,7 @@ impl RawServerConfig {
             local_host_raw: local_host,
             database_url,
             port: self.port,
+            secure: self.secure,
             key_dir,
         })
     }
@@ -140,6 +157,10 @@ fn default_port() -> u16 {
     7000
 }
 
+fn default_secure() -> bool {
+    true
+}
+
 fn default_key_dir(port: u16) -> PathBuf {
     let mut path = dirs_next::home_dir().expect("failed to get home directory");
     path.extend([".local", "share", "runelink", "keys", &port.to_string()]);
@@ -147,21 +168,18 @@ fn default_key_dir(port: u16) -> PathBuf {
 }
 
 fn validate_unique_resources(configs: &[ServerConfig]) -> ConfigResult<()> {
-    let mut first_index_by_port: HashMap<u16, usize> = HashMap::new();
-    let mut first_index_by_database_url: HashMap<String, usize> =
-        HashMap::new();
+    let mut index_by_port = HashMap::<u16, usize>::new();
+    let mut index_by_database_url = HashMap::<String, usize>::new();
     for (index, config) in configs.iter().enumerate() {
-        if let Some(first_index) =
-            first_index_by_port.insert(config.port, index)
-        {
+        if let Some(first_index) = index_by_port.insert(config.port, index) {
             return Err(ConfigError::DuplicatePort {
                 port: config.port,
                 first_index,
                 second_index: index,
             });
         }
-        if let Some(first_index) = first_index_by_database_url
-            .insert(config.database_url.clone(), index)
+        if let Some(first_index) =
+            index_by_database_url.insert(config.database_url.clone(), index)
         {
             return Err(ConfigError::DuplicateDatabaseUrl {
                 database_url: config.database_url.clone(),

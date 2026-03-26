@@ -1,7 +1,9 @@
 use directories::ProjectDirs;
-use runelink_client::util::get_api_url;
+use reqwest::Client;
+use runelink_client::{Error as ClientError, requests, util::get_api_url};
 use runelink_types::UserRef;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::{fmt, fs};
 use uuid::Uuid;
@@ -15,12 +17,20 @@ pub struct AppConfig {
     pub default_account: Option<UserRef>,
     pub default_server: Option<Uuid>,
     pub accounts: Vec<AccountConfig>,
+    #[serde(default)]
+    pub hosts: HashMap<String, HostConfig>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AccountConfig {
     #[serde(flatten)]
     pub user_ref: UserRef,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct HostConfig {
+    #[serde(default = "default_secure")]
+    pub secure: bool,
 }
 
 impl fmt::Display for AccountConfig {
@@ -82,11 +92,18 @@ impl AppConfig {
             self.accounts.last_mut().unwrap()
         }
     }
+
+    pub fn host_config(&self, host: &str) -> Option<HostConfig> {
+        self.hosts.get(host).copied()
+    }
+
+    pub fn set_host_secure(&mut self, host: &str, secure: bool) {
+        self.hosts.insert(host.to_string(), HostConfig { secure });
+    }
 }
 
 pub trait TryGetHost {
     fn try_get_host(&self) -> Result<&str, CliError>;
-    fn try_get_api_url(&self) -> Result<String, CliError>;
 }
 
 impl TryGetHost for Option<&AccountConfig> {
@@ -94,9 +111,62 @@ impl TryGetHost for Option<&AccountConfig> {
         self.map(|ac| ac.user_ref.host.as_str())
             .ok_or(CliError::MissingAccount)
     }
+}
 
-    fn try_get_api_url(&self) -> Result<String, CliError> {
-        self.try_get_host().map(get_api_url)
+pub async fn resolve_api_url(
+    client: &Client,
+    config: &mut AppConfig,
+    host: &str,
+) -> Result<String, CliError> {
+    let mut attempts = Vec::with_capacity(2);
+    if let Some(host_config) = config.host_config(host) {
+        attempts.push(host_config.secure);
+        attempts.push(!host_config.secure);
+    } else {
+        attempts.push(true);
+        attempts.push(false);
+    }
+
+    let mut last_transport_error = None;
+    for secure in attempts {
+        let api_url = get_api_url(host, secure);
+        match requests::ping(client, &api_url).await {
+            Ok(_) => {
+                let changed = config
+                    .host_config(host)
+                    .map(|host_config| host_config.secure != secure)
+                    .unwrap_or(true);
+                config.set_host_secure(host, secure);
+                if changed {
+                    config.save()?;
+                }
+                return Ok(api_url);
+            }
+            Err(error) if is_transport_error(&error) => {
+                last_transport_error = Some(error);
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    Err(match last_transport_error {
+        Some(error) => error.into(),
+        None => CliError::ConfigError(format!(
+            "Unable to resolve API URL for host `{host}`"
+        )),
+    })
+}
+
+fn default_secure() -> bool {
+    true
+}
+
+fn is_transport_error(error: &ClientError) -> bool {
+    match error {
+        ClientError::Reqwest(error) => {
+            error.is_connect() || error.is_timeout() || error.is_request()
+        }
+        ClientError::Status(_, _) | ClientError::Json(_) => false,
     }
 }
 

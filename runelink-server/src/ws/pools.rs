@@ -273,6 +273,7 @@ struct FederationPoolState {
 pub struct FederationConn {
     pub sender: mpsc::UnboundedSender<FederationWsEnvelope>,
     pub host: Option<String>,
+    pub issuer: Option<String>,
     pub connected_at: OffsetDateTime,
 }
 
@@ -304,6 +305,7 @@ impl FederationWsPool {
             FederationConn {
                 sender,
                 host: None,
+                issuer: None,
                 connected_at: OffsetDateTime::now_utc(),
             },
         );
@@ -314,6 +316,7 @@ impl FederationWsPool {
         &self,
         conn_id: ConnId,
         host: String,
+        issuer: String,
     ) -> bool {
         let mut state = self.inner.write().await;
         let previous_host_for_conn = match state.connections.get(&conn_id) {
@@ -341,6 +344,7 @@ impl FederationWsPool {
         state.by_host.insert(host.clone(), conn_id);
         if let Some(conn) = state.connections.get_mut(&conn_id) {
             conn.host = Some(host);
+            conn.issuer = Some(issuer);
         }
         true
     }
@@ -383,6 +387,17 @@ impl FederationWsPool {
             .connections
             .get(&conn_id)
             .and_then(|conn| conn.host.clone())
+    }
+
+    pub async fn authenticated_issuer(
+        &self,
+        conn_id: ConnId,
+    ) -> Option<String> {
+        let state = self.inner.read().await;
+        state
+            .connections
+            .get(&conn_id)
+            .and_then(|conn| conn.issuer.clone())
     }
 
     /// Returns whether the given host currently has an authenticated connection.

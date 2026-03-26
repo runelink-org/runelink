@@ -100,7 +100,7 @@ pub async fn handle_channel_commands(
     match &channel_args.command {
         ChannelCommands::List(list_args) => {
             ctx.account.ok_or(CliError::MissingAccount)?;
-            let api_url = ctx.home_api_url()?;
+            let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
             let channels = match (list_args.server_id, list_args.all) {
                 (Some(_server_id), true) => {
@@ -156,7 +156,7 @@ pub async fn handle_channel_commands(
 
         ChannelCommands::Get(get_args) => {
             ctx.account.ok_or(CliError::MissingAccount)?;
-            let api_url = ctx.home_api_url()?;
+            let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
             let channel = requests::channels::fetch_by_id(
                 ctx.client,
@@ -172,7 +172,7 @@ pub async fn handle_channel_commands(
 
         ChannelCommands::Create(create_args) => {
             let account = ctx.account.ok_or(CliError::MissingAccount)?;
-            let api_url = ctx.home_api_url()?;
+            let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
             let server = match create_args.server_id {
                 Some(server_id) => {
@@ -221,7 +221,7 @@ pub async fn handle_channel_commands(
 
         ChannelCommands::Delete(delete_args) => {
             let _account = ctx.account.ok_or(CliError::MissingAccount)?;
-            let api_url = ctx.home_api_url()?;
+            let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
             let selection =
                 match (delete_args.server_id, delete_args.channel_id) {

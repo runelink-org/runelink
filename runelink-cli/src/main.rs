@@ -18,7 +18,7 @@ mod util;
 async fn test_connectivities(client: &Client, hosts: Vec<&str>) {
     println!("Hosts:");
     for host in hosts {
-        let api_url = get_api_url(host);
+        let api_url = get_api_url(host, false);
         match requests::ping(client, &api_url).await {
             Ok(_) => println!("{} (ready)", host),
             Err(_) => println!("{} (down)", host),
@@ -34,6 +34,7 @@ async fn main() -> ExitCode {
         let cli = Cli::parse();
         let client = Client::new();
         handle_cli(&client, &cli, &mut config, &mut auth_cache).await?;
+        config.save()?;
         auth_cache.save()?;
         Ok(())
     }

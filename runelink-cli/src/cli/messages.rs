@@ -106,7 +106,7 @@ pub async fn handle_message_commands(
                 list_args.host.as_deref(),
             )
             .await?;
-            let api_url = ctx.home_api_url()?;
+            let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
             let target_host = if selection.host != account.user_ref.host {
                 Some(selection.host.as_str())
@@ -129,7 +129,7 @@ pub async fn handle_message_commands(
 
         MessageCommands::Get(get_args) => {
             ctx.account.ok_or(CliError::MissingAccount)?;
-            let api_url = ctx.home_api_url()?;
+            let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
             let message = requests::messages::fetch_by_id(
                 ctx.client,
@@ -154,7 +154,7 @@ pub async fn handle_message_commands(
             )
             .await?;
             let body = unwrap_or_prompt(send_args.body.clone(), "Message")?;
-            let api_url = ctx.home_api_url()?;
+            let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
             let new_message = NewMessage {
                 author: account.user_ref.clone(),
@@ -180,7 +180,7 @@ pub async fn handle_message_commands(
 
         MessageCommands::Delete(delete_args) => {
             // TODO: Interactive message selection
-            let api_url = ctx.home_api_url()?;
+            let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
             requests::messages::delete(
                 ctx.client,

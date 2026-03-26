@@ -4,7 +4,7 @@ use runelink_types::UserRef;
 use time::OffsetDateTime;
 
 use crate::error::CliError;
-use crate::storage::{AccountConfig, AppConfig, TryGetHost};
+use crate::storage::{AccountConfig, AppConfig, TryGetHost, resolve_api_url};
 use crate::storage_auth::AuthCache;
 
 pub struct CliContext<'a> {
@@ -15,8 +15,9 @@ pub struct CliContext<'a> {
 }
 
 impl<'a> CliContext<'a> {
-    pub fn home_api_url(&self) -> Result<String, CliError> {
-        self.account.try_get_api_url()
+    pub async fn home_api_url(&mut self) -> Result<String, CliError> {
+        let host = self.account.try_get_host()?.to_string();
+        resolve_api_url(self.client, self.config, &host).await
     }
 
     pub fn home_host(&self) -> Result<&str, CliError> {
@@ -25,7 +26,7 @@ impl<'a> CliContext<'a> {
 
     pub async fn get_access_token(&mut self) -> Result<String, CliError> {
         let account = self.account.ok_or(CliError::MissingAccount)?;
-        let api_url = self.home_api_url()?;
+        let api_url = self.home_api_url().await?;
         self.get_access_token_for(&account.user_ref, &api_url).await
     }
 

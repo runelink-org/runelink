@@ -1,10 +1,13 @@
-use runelink_client::{requests, util::get_api_url};
+use runelink_client::requests;
 use runelink_types::{SignupRequest, UserRef};
 use uuid::Uuid;
 
 use crate::{
-    cli::input::read_input, error::CliError, storage::AccountConfig,
-    storage_auth::AccountAuth, util,
+    cli::input::read_input,
+    error::CliError,
+    storage::{AccountConfig, resolve_api_url},
+    storage_auth::AccountAuth,
+    util,
 };
 
 use super::{
@@ -112,7 +115,8 @@ pub async fn handle_account_commands(
             let password = read_input("Password: ")?.ok_or_else(|| {
                 CliError::InvalidArgument("Password is required.".into())
             })?;
-            let api_url = get_api_url(&host);
+            let api_url =
+                resolve_api_url(ctx.client, ctx.config, &host).await?;
             let signup_req = SignupRequest { name, password };
             let user =
                 requests::auth::signup(ctx.client, &api_url, &signup_req)
@@ -135,7 +139,8 @@ pub async fn handle_account_commands(
                     acc
                 } else {
                     // Account doesn't exist, fetch it from server
-                    let api_url = get_api_url(host);
+                    let api_url =
+                        resolve_api_url(ctx.client, ctx.config, host).await?;
                     let user = requests::users::fetch_by_ref(
                         ctx.client,
                         &api_url,
@@ -152,6 +157,9 @@ pub async fn handle_account_commands(
                 ctx.account.ok_or(CliError::MissingAccount)?
             };
 
+            let account_user_ref = account.user_ref.clone();
+            let account_display = account.to_string();
+
             let password = read_input("Password: ")?.ok_or_else(|| {
                 CliError::InvalidArgument("Password is required.".into())
             })?;
@@ -159,11 +167,13 @@ pub async fn handle_account_commands(
             // TODO: Don't generate a random client_id for each session
             let client_id = Uuid::new_v4().to_string();
 
-            let api_url = get_api_url(&account.user_ref.host);
+            let api_url =
+                resolve_api_url(ctx.client, ctx.config, &account_user_ref.host)
+                    .await?;
             let token_response = requests::auth::token_password(
                 ctx.client,
                 &api_url,
-                &account.user_ref.name,
+                &account_user_ref.name,
                 &password,
                 None,
                 Some(&client_id),
@@ -181,10 +191,10 @@ pub async fn handle_account_commands(
                 client_id: Some(client_id),
                 scope: None,
             };
-            ctx.auth_cache.set(&account.user_ref, account_auth);
+            ctx.auth_cache.set(&account_user_ref, account_auth);
             ctx.auth_cache.save()?;
 
-            println!("Logged in successfully: {account}");
+            println!("Logged in successfully: {account_display}");
         }
 
         AccountCommands::Logout(logout_args) => {
@@ -290,7 +300,8 @@ pub async fn handle_account_commands(
                 account.user_ref.clone()
             };
 
-            let api_url = get_api_url(&user_ref.host);
+            let api_url =
+                resolve_api_url(ctx.client, ctx.config, &user_ref.host).await?;
             let access_token =
                 ctx.get_access_token_for(&user_ref, &api_url).await?;
 

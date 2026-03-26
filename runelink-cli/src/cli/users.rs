@@ -45,7 +45,7 @@ pub async fn handle_user_commands(
 ) -> Result<(), CliError> {
     match &user_args.command {
         UserCommands::List(list_args) => {
-            let api_url = ctx.home_api_url()?;
+            let api_url = ctx.home_api_url().await?;
             let users;
             if let Some(server_id) = list_args.server_id {
                 // Fetch members of the server, then extract users
@@ -73,7 +73,7 @@ pub async fn handle_user_commands(
         UserCommands::Get(get_args) => {
             let user_ref =
                 UserRef::new(get_args.name.clone(), get_args.host.clone());
-            let api_url = ctx.home_api_url()?;
+            let api_url = ctx.home_api_url().await?;
             let user =
                 requests::users::fetch_by_ref(ctx.client, &api_url, user_ref)
                     .await?;
