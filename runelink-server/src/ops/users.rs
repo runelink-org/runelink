@@ -90,7 +90,7 @@ pub async fn delete_home_user(
 ) -> ApiResult<()> {
     let user =
         queries::users::get_by_ref(&state.db_pool, user_ref.clone()).await?;
-    if user.host != state.config.local_host() {
+    if user.host != state.config.public_host() {
         return Err(ApiError::BadRequest(
             "Can only delete users from their home server".into(),
         ));
@@ -140,7 +140,7 @@ pub async fn delete_remote_user_record(
                 .into(),
         ));
     }
-    if session_user_ref.host == state.config.local_host() {
+    if session_user_ref.host == state.config.public_host() {
         return Err(ApiError::BadRequest(
             "Cannot delete local users via federation".into(),
         ));

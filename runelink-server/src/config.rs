@@ -20,10 +20,20 @@ pub enum ConfigError {
     InvalidServerEntry { index: usize, reason: String },
 
     #[error(
-        "Invalid cluster config: duplicate port `{port}` used by servers at indices {first_index} and {second_index}"
+        "Invalid cluster config: duplicate public address `{public_address}` used by servers at indices {first_index} and {second_index}"
     )]
-    DuplicatePort {
-        port: u16,
+    DuplicatePublicAddress {
+        public_address: String,
+        first_index: usize,
+        second_index: usize,
+    },
+
+    #[error(
+        "Invalid cluster config: duplicate bind address `{bind_host}:{bind_port}` used by servers at indices {first_index} and {second_index}"
+    )]
+    DuplicateBindAddress {
+        bind_host: String,
+        bind_port: u16,
         first_index: usize,
         second_index: usize,
     },
@@ -40,9 +50,11 @@ pub enum ConfigError {
 
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
-    pub local_host_raw: String,
+    pub public_host_raw: String,
     pub database_url: String,
-    pub port: u16,
+    pub public_port: u16,
+    pub bind_host: String,
+    pub bind_port: u16,
     pub secure: bool,
     pub key_dir: PathBuf,
 }
@@ -67,27 +79,31 @@ impl ServerConfig {
     }
 
     /// Includes port if it's not the default port (7000)
-    pub fn local_host(&self) -> String {
-        if self.port == 7000 {
-            self.local_host_raw.clone()
+    pub fn public_host(&self) -> String {
+        if self.public_port == 7000 {
+            self.public_host_raw.clone()
         } else {
-            self.local_host_with_explicit_port()
+            self.public_host_with_explicit_port()
         }
     }
 
     /// Always includes port for machine-to-machine communication
-    pub fn local_host_with_explicit_port(&self) -> String {
-        format!("{}:{}", &self.local_host_raw, self.port)
+    pub fn public_host_with_explicit_port(&self) -> String {
+        format!("{}:{}", &self.public_host_raw, self.public_port)
     }
 
     pub fn api_url(&self) -> String {
-        get_api_url(self.local_host_with_explicit_port().as_str(), self.secure)
+        get_api_url(self.public_host_with_explicit_port().as_str(), self.secure)
+    }
+
+    pub fn bind_addr(&self) -> String {
+        format!("{}:{}", self.bind_host, self.bind_port)
     }
 
     #[allow(dead_code)]
     pub fn client_ws_url(&self) -> String {
         runelink_client::util::get_client_ws_url(
-            self.local_host_with_explicit_port().as_str(),
+            self.public_host_with_explicit_port().as_str(),
             self.secure,
         )
     }
@@ -95,7 +111,7 @@ impl ServerConfig {
     #[allow(dead_code)]
     pub fn federation_ws_url(&self) -> String {
         runelink_client::util::get_federation_ws_url(
-            self.local_host_with_explicit_port().as_str(),
+            self.public_host_with_explicit_port().as_str(),
             self.secure,
         )
     }
@@ -104,7 +120,7 @@ impl ServerConfig {
         let Some(host) = host else {
             return false;
         };
-        pad_host(host) != pad_host(self.local_host().as_str())
+        pad_host(host) != pad_host(self.public_host().as_str())
     }
 }
 
@@ -116,10 +132,13 @@ struct RootConfig {
 
 #[derive(Deserialize, Debug)]
 struct RawServerConfig {
-    local_host: String,
+    public_host: String,
     database_url: String,
-    #[serde(default = "default_port")]
-    port: u16,
+    #[serde(default = "default_public_port")]
+    public_port: u16,
+    #[serde(default = "default_bind_host")]
+    bind_host: String,
+    bind_port: Option<u16>,
     #[serde(default = "default_secure")]
     secure: bool,
     key_dir: Option<PathBuf>,
@@ -127,11 +146,11 @@ struct RawServerConfig {
 
 impl RawServerConfig {
     fn resolve(self, index: usize) -> ConfigResult<ServerConfig> {
-        let local_host = self.local_host.trim().to_string();
-        if local_host.is_empty() {
+        let public_host = self.public_host.trim().to_string();
+        if public_host.is_empty() {
             return Err(ConfigError::InvalidServerEntry {
                 index,
-                reason: "local_host cannot be empty".to_string(),
+                reason: "public_host cannot be empty".to_string(),
             });
         }
         let database_url = self.database_url.trim().to_string();
@@ -141,24 +160,39 @@ impl RawServerConfig {
                 reason: "database_url cannot be empty".to_string(),
             });
         }
-        let key_dir =
-            self.key_dir.unwrap_or_else(|| default_key_dir(self.port));
+        let bind_host = self.bind_host.trim().to_string();
+        if bind_host.is_empty() {
+            return Err(ConfigError::InvalidServerEntry {
+                index,
+                reason: "bind_host cannot be empty".to_string(),
+            });
+        }
+        let bind_port = self.bind_port.unwrap_or(self.public_port);
+        let key_dir = self
+            .key_dir
+            .unwrap_or_else(|| default_key_dir(self.public_port));
         Ok(ServerConfig {
-            local_host_raw: local_host,
+            public_host_raw: public_host,
             database_url,
-            port: self.port,
+            public_port: self.public_port,
+            bind_host,
+            bind_port,
             secure: self.secure,
             key_dir,
         })
     }
 }
 
-fn default_port() -> u16 {
+fn default_public_port() -> u16 {
     7000
 }
 
 fn default_secure() -> bool {
     true
+}
+
+fn default_bind_host() -> String {
+    "0.0.0.0".to_string()
 }
 
 fn default_key_dir(port: u16) -> PathBuf {
@@ -168,12 +202,27 @@ fn default_key_dir(port: u16) -> PathBuf {
 }
 
 fn validate_unique_resources(configs: &[ServerConfig]) -> ConfigResult<()> {
-    let mut index_by_port = HashMap::<u16, usize>::new();
+    let mut index_by_public_addr = HashMap::<String, usize>::new();
+    let mut index_by_bind_addr = HashMap::<String, usize>::new();
     let mut index_by_database_url = HashMap::<String, usize>::new();
     for (index, config) in configs.iter().enumerate() {
-        if let Some(first_index) = index_by_port.insert(config.port, index) {
-            return Err(ConfigError::DuplicatePort {
-                port: config.port,
+        let public_address = config.public_host_with_explicit_port();
+        if let Some(first_index) =
+            index_by_public_addr.insert(public_address.clone(), index)
+        {
+            return Err(ConfigError::DuplicatePublicAddress {
+                public_address,
+                first_index,
+                second_index: index,
+            });
+        }
+        let bind_addr = config.bind_addr();
+        if let Some(first_index) =
+            index_by_bind_addr.insert(bind_addr.clone(), index)
+        {
+            return Err(ConfigError::DuplicateBindAddress {
+                bind_host: config.bind_host.clone(),
+                bind_port: config.bind_port,
                 first_index,
                 second_index: index,
             });

@@ -69,7 +69,7 @@ pub async fn create(
         return Ok(cached_membership.as_full(user));
     }
 
-    if new_membership.user_ref.host != state.config.local_host() {
+    if new_membership.user_ref.host != state.config.public_host() {
         let remote_user = match remote_user {
             Some(user) => user.clone(),
             None => {
@@ -220,7 +220,7 @@ pub async fn delete(
         if !targets.local_users.contains(&user_ref) {
             targets.local_users.push(user_ref.clone());
         }
-        if user_ref.host != state.config.local_host() {
+        if user_ref.host != state.config.public_host() {
             targets.remote_hosts.push(user_ref.host.clone());
         }
         // Verify the membership exists

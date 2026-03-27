@@ -49,7 +49,7 @@ pub async fn signup(
 ) -> ApiResult<User> {
     let new_user = NewUser {
         name: request.name,
-        host: state.config.local_host(),
+        host: state.config.public_host(),
         role: UserRole::User,
     };
     let user = queries::users::insert(&state.db_pool, &new_user).await?;
@@ -79,7 +79,7 @@ pub async fn issue_password_token(
 
     let user = queries::users::get_by_ref(
         &state.db_pool,
-        UserRef::new(request.username, state.config.local_host()),
+        UserRef::new(request.username, state.config.public_host()),
     )
     .await?;
 

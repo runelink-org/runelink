@@ -70,16 +70,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         MIGRATOR.run(db_pool.as_ref()).await?;
         log::info!(
             "Migrations are up to date for {}.",
-            config.local_host_with_explicit_port()
+            config.public_host_with_explicit_port()
         );
 
         let app = api::router().with_state(app_state);
 
-        let ip_addr = format!("0.0.0.0:{}", config.port);
-        let listener = TcpListener::bind(&ip_addr).await?;
-        let host = config.local_host_with_explicit_port();
+        let bind_addr = config.bind_addr();
+        let listener = TcpListener::bind(&bind_addr).await?;
+        let host = config.public_host_with_explicit_port();
 
-        log::info!("Starting server {host} on {ip_addr}");
+        log::info!("Starting server {host} on {bind_addr}");
         join_set.spawn(async move {
             axum::serve(listener, app)
                 .await

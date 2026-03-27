@@ -70,7 +70,7 @@ pub(super) async fn handle_federation_update(
                 .routing_index
                 .users_for_remote_server(server_id)
                 .await?;
-            if user_ref.host == state.config.local_host()
+            if user_ref.host == state.config.public_host()
                 && !targets.contains(&user_ref)
             {
                 targets.push(user_ref.clone());

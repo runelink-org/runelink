@@ -66,7 +66,7 @@ impl ServerMembershipRow {
     ) -> ApiResult<ServerMembership> {
         let server_host = self
             .server_host_from_db
-            .unwrap_or_else(|| config.local_host());
+            .unwrap_or_else(|| config.public_host());
 
         // Needed because of weird sqlx limitations (or misuse)
         let get_error = || ApiError::Unknown("Sqlx conversion error".into());
@@ -348,7 +348,7 @@ pub async fn get_local_by_user_and_server(
     Ok(ServerMembership {
         server: Server {
             id: row.id.into(),
-            host: state.config.local_host(),
+            host: state.config.public_host(),
             title: row.title,
             description: row.description,
             created_at: row.server_created_at,

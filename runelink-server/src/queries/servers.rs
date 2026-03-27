@@ -19,7 +19,7 @@ impl LocalServerRow {
     fn into_server(self, config: &ServerConfig) -> Server {
         Server {
             id: self.id,
-            host: config.local_host(),
+            host: config.public_host(),
             title: self.title,
             description: self.description,
             created_at: self.created_at,

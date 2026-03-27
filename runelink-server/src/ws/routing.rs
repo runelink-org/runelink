@@ -30,7 +30,7 @@ impl RoutingIndex {
             server_id,
         )
         .await?;
-        let local_host = self.server_config.local_host();
+        let local_host = self.server_config.public_host();
         let hosts = users
             .into_iter()
             .map(|user| user.host)
@@ -51,7 +51,7 @@ impl RoutingIndex {
             server_id,
         )
         .await?;
-        let local_host = self.server_config.local_host();
+        let local_host = self.server_config.public_host();
         let local_users = server_users
             .into_iter()
             .filter(|user| user.host == local_host)
