@@ -109,10 +109,27 @@ Single-server config syntax:
 ```toml
 [[servers]]
 local_host = "localhost"
-port = 7000
+public_port = 7000
+secure = false
 database_url = "postgres://postgres:postgres@localhost/runelink"
 key_dir = "/home/your-user/.local/share/runelink/keys/localhost/7000"
 ```
+
+If you are running behind a TLS reverse proxy, keep the public host/port in
+`local_host` + `public_port`, and bind the backend locally:
+
+```toml
+[[servers]]
+local_host = "example.com"
+public_port = 7000
+secure = true
+bind_host = "127.0.0.1"
+bind_port = 17000
+database_url = "postgres://postgres:postgres@localhost/runelink"
+key_dir = "/home/your-user/.local/share/runelink/keys/7000"
+```
+
+A sample Caddy config for this setup lives at `deploy/Caddyfile.example`.
 
 Then update `database_url` and any other values for your environment, install `sqlx-cli`, and run migrations:
 
