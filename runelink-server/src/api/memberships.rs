@@ -84,7 +84,7 @@ pub async fn create(
     )
     .await?;
     let membership =
-        ops::memberships::create(&state, &mut session, &new_membership, None)
+        ops::memberships::upsert(&state, &mut session, &new_membership, None)
             .await?;
     Ok((StatusCode::CREATED, Json(membership)))
 }

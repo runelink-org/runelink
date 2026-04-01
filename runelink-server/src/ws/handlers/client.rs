@@ -214,7 +214,7 @@ pub(super) async fn handle_client_request(
             Ok(ClientWsReply::MembershipsGetByUserAndServer(member))
         }
 
-        ClientWsRequest::MembershipsCreate {
+        ClientWsRequest::MembershipsUpsert {
             server_id,
             new_membership,
         } => {
@@ -230,14 +230,14 @@ pub(super) async fn handle_client_request(
                 ops::memberships::auth::create(server_id),
             )
             .await?;
-            let membership = ops::memberships::create(
+            let membership = ops::memberships::upsert(
                 state,
                 &mut session,
                 &new_membership,
                 None,
             )
             .await?;
-            Ok(ClientWsReply::MembershipsCreate(membership))
+            Ok(ClientWsReply::MembershipsUpsert(membership))
         }
 
         ClientWsRequest::MembershipsDelete {

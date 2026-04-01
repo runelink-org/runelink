@@ -20,7 +20,7 @@ use crate::{
 };
 
 /// Create a new membership for a user in a server.
-pub async fn create(
+pub async fn upsert(
     state: &AppState,
     _session: &mut Session,
     new_membership: &NewServerMembership,
@@ -46,14 +46,14 @@ pub async fn create(
             state,
             host,
             Some(new_membership.user_ref.clone()),
-            FederationWsRequest::MembershipsCreate {
+            FederationWsRequest::MembershipsUpsert {
                 new_membership: new_membership.clone().as_full(user),
             },
         )
         .await?;
-        let FederationWsReply::MembershipsCreate(membership) = reply else {
+        let FederationWsReply::MembershipsUpsert(membership) = reply else {
             return Err(ApiError::Internal(format!(
-                "Unexpected federation reply from {host} for memberships.create"
+                "Unexpected federation reply from {host} for memberships.upsert"
             )));
         };
         let user = membership.user.clone();
@@ -87,7 +87,7 @@ pub async fn create(
 
     // Create the membership
     let member =
-        queries::memberships::insert_local(&state.db_pool, new_membership)
+        queries::memberships::upsert_local(&state.db_pool, new_membership)
             .await?;
     let membership = queries::memberships::get_local_by_user_and_server(
         state,
@@ -204,14 +204,9 @@ pub async fn delete(
     user_ref: UserRef,
     target_host: Option<&str>,
 ) -> ApiResult<()> {
-    let session_user_ref = session.user_ref.clone().ok_or_else(|| {
+    let _session_user_ref = session.user_ref.clone().ok_or_else(|| {
         ApiError::AuthError("User reference required for leaving server".into())
     })?;
-    if session_user_ref != user_ref {
-        return Err(ApiError::BadRequest(
-            "User identity in path does not match authenticated user".into(),
-        ));
-    }
 
     // Handle local case
     if !state.config.is_remote_host(target_host) {
@@ -230,18 +225,22 @@ pub async fn delete(
             user_ref.clone(),
         )
         .await?;
-        queries::memberships::delete_local(&state.db_pool, server_id, user_ref)
-            .await?;
+        queries::memberships::delete_local(
+            &state.db_pool,
+            server_id,
+            user_ref.clone(),
+        )
+        .await?;
         fanout::fanout_update(
             state,
             targets,
             ClientWsUpdate::MembershipDeleted {
                 server_id,
-                user_ref: session_user_ref.clone(),
+                user_ref: user_ref.clone(),
             },
             FederationWsUpdate::MembershipDeleted {
                 server_id,
-                user_ref: session_user_ref,
+                user_ref,
             },
         )
         .await;

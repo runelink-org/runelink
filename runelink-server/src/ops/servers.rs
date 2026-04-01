@@ -44,7 +44,7 @@ pub async fn create(
             role: ServerRole::Admin,
         };
         let member =
-            queries::memberships::insert_local(&state.db_pool, &new_membership)
+            queries::memberships::upsert_local(&state.db_pool, &new_membership)
                 .await?;
         let targets = fanout::resolve_server_targets(state, server.id).await?;
         fanout::fanout_update(

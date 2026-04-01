@@ -217,7 +217,7 @@ pub(super) async fn handle_federation_request(
             Ok(FederationWsReply::UsersDelete)
         }
 
-        FederationWsRequest::MembershipsCreate { new_membership } => {
+        FederationWsRequest::MembershipsUpsert { new_membership } => {
             let user = new_membership.user.clone();
             if !state.config.is_remote_host(Some(&user.host)) {
                 return Err(ApiError::BadRequest(
@@ -235,14 +235,14 @@ pub(super) async fn handle_federation_request(
                 ),
             )
             .await?;
-            let membership = ops::memberships::create(
+            let membership = ops::memberships::upsert(
                 state,
                 &mut session,
                 &new_membership.into(),
                 Some(&user),
             )
             .await?;
-            Ok(FederationWsReply::MembershipsCreate(membership))
+            Ok(FederationWsReply::MembershipsUpsert(membership))
         }
 
         FederationWsRequest::MembershipsGetByUser { user_ref } => {

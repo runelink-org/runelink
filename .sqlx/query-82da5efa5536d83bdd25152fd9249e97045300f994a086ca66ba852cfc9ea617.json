@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO server_users (server_id, user_name, user_host, role)\n        VALUES ($1, $2, $3, $4);\n        ",
+  "query": "\n        INSERT INTO server_users (server_id, user_name, user_host, role)\n        VALUES ($1, $2, $3, $4)\n        ON CONFLICT (server_id, user_name, user_host) DO UPDATE\n            SET role = EXCLUDED.role,\n                updated_at = NOW();\n        ",
   "describe": {
     "columns": [],
     "parameters": {
@@ -23,5 +23,5 @@
     },
     "nullable": []
   },
-  "hash": "d5e47c6f3be9f125adc212e61c42dd07cc8448a6ec4ab0cdab76f52c8fec4a47"
+  "hash": "82da5efa5536d83bdd25152fd9249e97045300f994a086ca66ba852cfc9ea617"
 }

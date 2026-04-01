@@ -85,7 +85,7 @@ pub enum ClientWsRequest {
         user_ref: UserRef,
         target_host: Option<String>,
     },
-    MembershipsCreate {
+    MembershipsUpsert {
         server_id: ServerId,
         new_membership: NewServerMembership,
     },
@@ -186,7 +186,7 @@ pub enum ClientWsReply {
     MembershipsGetByUser(Vec<ServerMembership>),
     MembershipsGetMembersByServer(Vec<ServerMember>),
     MembershipsGetByUserAndServer(ServerMember),
-    MembershipsCreate(FullServerMembership),
+    MembershipsUpsert(FullServerMembership),
     MembershipsDelete,
     ServersCreate(Server),
     ServersGetAll(Vec<Server>),
@@ -221,7 +221,7 @@ pub enum FederationWsRequest {
     UsersDelete {
         user_ref: UserRef,
     },
-    MembershipsCreate {
+    MembershipsUpsert {
         new_membership: NewServerMembershipFull,
     },
     MembershipsGetByUser {
@@ -299,7 +299,7 @@ pub enum FederationWsReply {
     UsersGetByRef(User),
     UsersGetAssociatedHosts(Vec<String>),
     UsersDelete,
-    MembershipsCreate(FullServerMembership),
+    MembershipsUpsert(FullServerMembership),
     MembershipsGetByUser(Vec<ServerMembership>),
     MembershipsDelete,
     MembershipsGetMembersByServer(Vec<ServerMember>),

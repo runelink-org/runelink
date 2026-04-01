@@ -91,14 +91,17 @@ impl ServerMembershipRow {
     }
 }
 
-pub async fn insert_local(
+pub async fn upsert_local(
     pool: &DbPool,
     new_membership: &NewServerMembership,
 ) -> ApiResult<ServerMember> {
     sqlx::query!(
         r#"
         INSERT INTO server_users (server_id, user_name, user_host, role)
-        VALUES ($1, $2, $3, $4);
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (server_id, user_name, user_host) DO UPDATE
+            SET role = EXCLUDED.role,
+                updated_at = NOW();
         "#,
         new_membership.server_id.as_uuid(),
         new_membership.user_ref.name,
