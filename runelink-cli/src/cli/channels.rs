@@ -10,6 +10,7 @@ use crate::{
         get_channel_selection_with_inputs, get_server_selection,
     },
     error::CliError,
+    util::parse_optional_host_input,
 };
 
 use super::{
@@ -102,6 +103,10 @@ pub async fn handle_channel_commands(
             ctx.account.ok_or(CliError::MissingAccount)?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
+            let target_host = parse_optional_host_input(
+                list_args.host.as_deref(),
+                ctx.strict_input,
+            )?;
             let channels = match (list_args.server_id, list_args.all) {
                 (Some(_server_id), true) => {
                     return Err(CliError::InvalidArgument(
@@ -114,7 +119,7 @@ pub async fn handle_channel_commands(
                         &api_url,
                         &access_token,
                         server_id,
-                        list_args.host.as_deref(),
+                        target_host.as_deref(),
                     )
                     .await?
                 }
@@ -123,7 +128,7 @@ pub async fn handle_channel_commands(
                         ctx.client,
                         &api_url,
                         &access_token,
-                        list_args.host.as_deref(),
+                        target_host.as_deref(),
                     )
                     .await?
                 }
@@ -158,13 +163,17 @@ pub async fn handle_channel_commands(
             ctx.account.ok_or(CliError::MissingAccount)?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
+            let target_host = parse_optional_host_input(
+                get_args.host.as_deref(),
+                ctx.strict_input,
+            )?;
             let channel = requests::channels::fetch_by_id(
                 ctx.client,
                 &api_url,
                 &access_token,
                 get_args.server_id,
                 get_args.channel_id,
-                get_args.host.as_deref(),
+                target_host.as_deref(),
             )
             .await?;
             println!("{}", channel.verbose());
@@ -174,13 +183,17 @@ pub async fn handle_channel_commands(
             let account = ctx.account.ok_or(CliError::MissingAccount)?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
+            let target_host = parse_optional_host_input(
+                create_args.host.as_deref(),
+                ctx.strict_input,
+            )?;
             let server = match create_args.server_id {
                 Some(server_id) => {
                     requests::servers::fetch_by_id(
                         ctx.client,
                         &api_url,
                         server_id,
-                        create_args.host.as_deref(),
+                        target_host.as_deref(),
                     )
                     .await?
                 }
@@ -223,11 +236,15 @@ pub async fn handle_channel_commands(
             let _account = ctx.account.ok_or(CliError::MissingAccount)?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
+            let target_host = parse_optional_host_input(
+                delete_args.host.as_deref(),
+                ctx.strict_input,
+            )?;
             let selection =
                 match (delete_args.server_id, delete_args.channel_id) {
                     (Some(server_id), Some(channel_id)) => {
                         // Both IDs provided, use them directly
-                        let host = match &delete_args.host {
+                        let host = match &target_host {
                             Some(host) => host.to_string(),
                             None => ctx.home_host()?.to_string(),
                         };
@@ -243,7 +260,7 @@ pub async fn handle_channel_commands(
                             ctx,
                             delete_args.channel_id,
                             delete_args.server_id,
-                            delete_args.host.as_deref(),
+                            target_host.as_deref(),
                         )
                         .await?
                     }

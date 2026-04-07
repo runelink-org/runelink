@@ -7,6 +7,16 @@ use std::{
 use crate::error::CliError;
 
 pub fn read_input(prompt: &str) -> io::Result<Option<String>> {
+    read_input_internal(prompt, true)
+}
+
+pub fn read_input_preserving_whitespace(
+    prompt: &str,
+) -> io::Result<Option<String>> {
+    read_input_internal(prompt, false)
+}
+
+fn read_input_internal(prompt: &str, trim: bool) -> io::Result<Option<String>> {
     let mut stdout = io::stdout();
     let stdin = io::stdin();
 
@@ -17,12 +27,14 @@ pub fn read_input(prompt: &str) -> io::Result<Option<String>> {
     stdin.read_line(&mut buf)?;
     println!();
 
-    let trimmed = buf.trim();
+    let raw = buf.trim_end_matches(['\n', '\r']);
 
-    if trimmed.is_empty() {
+    if raw.is_empty() {
         Ok(None)
+    } else if trim {
+        Ok(Some(raw.trim().into()))
     } else {
-        Ok(Some(trimmed.into()))
+        Ok(Some(raw.into()))
     }
 }
 

@@ -1,7 +1,10 @@
 use runelink_client::requests;
-use runelink_types::{server::ServerId, user::UserRef};
+use runelink_types::server::ServerId;
 
-use crate::error::CliError;
+use crate::{
+    error::CliError,
+    util::{parse_optional_host_input, parse_user_ref_input},
+};
 
 use super::context::CliContext;
 
@@ -46,6 +49,10 @@ pub async fn handle_user_commands(
     match &user_args.command {
         UserCommands::List(list_args) => {
             let api_url = ctx.home_api_url().await?;
+            let target_host = parse_optional_host_input(
+                list_args.host.as_deref(),
+                ctx.strict_input,
+            )?;
             let users;
             if let Some(server_id) = list_args.server_id {
                 // Fetch members of the server, then extract users
@@ -53,7 +60,7 @@ pub async fn handle_user_commands(
                     ctx.client,
                     &api_url,
                     server_id,
-                    list_args.host.as_deref(),
+                    target_host.as_deref(),
                 )
                 .await?;
                 users = members.into_iter().map(|m| m.user).collect();
@@ -61,7 +68,7 @@ pub async fn handle_user_commands(
                 users = requests::users::fetch_all(
                     ctx.client,
                     &api_url,
-                    list_args.host.as_deref(),
+                    target_host.as_deref(),
                 )
                 .await?;
             }
@@ -71,8 +78,11 @@ pub async fn handle_user_commands(
         }
 
         UserCommands::Get(get_args) => {
-            let user_ref =
-                UserRef::new(get_args.name.clone(), get_args.host.clone());
+            let user_ref = parse_user_ref_input(
+                &get_args.name,
+                &get_args.host,
+                ctx.strict_input,
+            )?;
             let api_url = ctx.home_api_url().await?;
             let user =
                 requests::users::fetch_by_ref(ctx.client, &api_url, user_ref)

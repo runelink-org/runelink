@@ -1,19 +1,20 @@
 use runelink_client::requests;
-use runelink_types::{SignupRequest, UserRef};
+use runelink_types::SignupRequest;
 use uuid::Uuid;
 
 use crate::{
-    cli::input::read_input,
+    cli::input::{read_input, read_input_preserving_whitespace},
     error::CliError,
     storage::{AccountConfig, resolve_api_url},
     storage_auth::AccountAuth,
-    util,
+    util::{
+        self, parse_host_input, parse_user_ref_input, parse_username_input,
+    },
 };
 
 use super::{
     config::{DefaultAccountArgs, handle_default_account_commands},
     context::CliContext,
-    input::unwrap_or_prompt,
     select::select_inline,
 };
 
@@ -110,8 +111,22 @@ pub async fn handle_account_commands(
         }
 
         AccountCommands::Create(create_args) => {
-            let host = unwrap_or_prompt(create_args.host.clone(), "Host")?;
-            let name = unwrap_or_prompt(create_args.name.clone(), "Name")?;
+            let raw_host = match &create_args.host {
+                Some(host) => host.clone(),
+                None => read_input_preserving_whitespace("Host: ")?
+                    .ok_or_else(|| {
+                        CliError::InvalidArgument("Host is required.".into())
+                    })?,
+            };
+            let raw_name = match &create_args.name {
+                Some(name) => name.clone(),
+                None => read_input_preserving_whitespace("Name: ")?
+                    .ok_or_else(|| {
+                        CliError::InvalidArgument("Name is required.".into())
+                    })?,
+            };
+            let host = parse_host_input(&raw_host, ctx.strict_input)?;
+            let name = parse_username_input(&raw_name, ctx.strict_input)?;
             let password = read_input("Password: ")?.ok_or_else(|| {
                 CliError::InvalidArgument("Password is required.".into())
             })?;
@@ -131,7 +146,8 @@ pub async fn handle_account_commands(
             let account = if let (Some(name), Some(host)) =
                 (&login_args.name, &login_args.host)
             {
-                let user_ref = UserRef::new(name.clone(), host.clone());
+                let user_ref =
+                    parse_user_ref_input(name, host, ctx.strict_input)?;
                 // Try to find existing account in config
                 if let Some(acc) =
                     ctx.config.get_account_config(user_ref.clone())
@@ -202,10 +218,11 @@ pub async fn handle_account_commands(
                 (&logout_args.name, &logout_args.host)
             {
                 ctx.config
-                    .get_account_config(UserRef::new(
-                        name.clone(),
-                        host.clone(),
-                    ))
+                    .get_account_config(parse_user_ref_input(
+                        name,
+                        host,
+                        ctx.strict_input,
+                    )?)
                     .ok_or_else(|| {
                         CliError::InvalidArgument("Account not found.".into())
                     })?
@@ -225,7 +242,8 @@ pub async fn handle_account_commands(
             let account = if let (Some(name), Some(host)) =
                 (&status_args.name, &status_args.host)
             {
-                let user_ref = UserRef::new(name.clone(), host.clone());
+                let user_ref =
+                    parse_user_ref_input(name, host, ctx.strict_input)?;
                 ctx.config.get_account_config(user_ref).ok_or_else(|| {
                     CliError::InvalidArgument("Account not found.".into())
                 })?
@@ -279,10 +297,11 @@ pub async fn handle_account_commands(
             {
                 let account = ctx
                     .config
-                    .get_account_config(UserRef::new(
-                        name.clone(),
-                        host.clone(),
-                    ))
+                    .get_account_config(parse_user_ref_input(
+                        name,
+                        host,
+                        ctx.strict_input,
+                    )?)
                     .ok_or_else(|| {
                         CliError::InvalidArgument(
                             "Account not found in local config.".into(),

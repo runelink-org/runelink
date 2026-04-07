@@ -1,6 +1,7 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use runelink_client::util::{get_api_url, pad_host};
+use runelink_client::validation::validate_config_host;
 use serde::Deserialize;
 
 pub type ConfigResult<T> = std::result::Result<T, ConfigError>;
@@ -146,13 +147,13 @@ struct RawServerConfig {
 
 impl RawServerConfig {
     fn resolve(self, index: usize) -> ConfigResult<ServerConfig> {
-        let public_host = self.public_host.trim().to_string();
-        if public_host.is_empty() {
-            return Err(ConfigError::InvalidServerEntry {
-                index,
-                reason: "public_host cannot be empty".to_string(),
-            });
-        }
+        let public_host =
+            validate_config_host(&self.public_host).map_err(|error| {
+                ConfigError::InvalidServerEntry {
+                    index,
+                    reason: error.to_string(),
+                }
+            })?;
         let database_url = self.database_url.trim().to_string();
         if database_url.is_empty() {
             return Err(ConfigError::InvalidServerEntry {

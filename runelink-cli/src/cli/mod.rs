@@ -3,9 +3,11 @@ use clap_complete::Shell;
 use context::CliContext;
 use log::LevelFilter;
 use reqwest::Client;
-use runelink_types::UserRef;
 
-use crate::{error::CliError, storage::AppConfig, storage_auth::AuthCache};
+use crate::{
+    error::CliError, storage::AppConfig, storage_auth::AuthCache,
+    util::parse_user_ref_input,
+};
 
 pub mod account;
 pub mod channels;
@@ -30,6 +32,9 @@ pub struct Cli {
     /// Optional: The host name of the account's host
     #[clap(long)]
     pub host: Option<String>,
+    /// Disable automatic identity input normalization and fail on non-canonical values
+    #[clap(long)]
+    pub strict_input: bool,
     /// Increase logging verbosity (-v, -vv, -vvv)
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
@@ -79,7 +84,7 @@ pub async fn handle_cli(
     init_logging(cli.verbose);
     let account_owned = match (&cli.name, &cli.host) {
         (Some(name), Some(host)) => {
-            let user_ref = UserRef::new(name.clone(), host.clone());
+            let user_ref = parse_user_ref_input(name, host, cli.strict_input)?;
             config.get_account_config(user_ref).cloned()
         }
         _ => config.get_default_account().cloned(),
@@ -89,6 +94,7 @@ pub async fn handle_cli(
         config,
         auth_cache,
         account: account_owned.as_ref(),
+        strict_input: cli.strict_input,
     };
     let ctx = &mut ctx_owned;
 

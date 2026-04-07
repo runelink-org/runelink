@@ -1,7 +1,7 @@
 use super::{context::CliContext, select::select_inline};
 use crate::error::CliError;
 use crate::storage::AccountConfig;
-use runelink_types::UserRef;
+use crate::util::parse_user_ref_input;
 
 #[derive(clap::Args, Debug)]
 pub struct ConfigArgs {
@@ -71,7 +71,8 @@ pub async fn handle_default_account_commands(
             let account = if let (Some(name), Some(host)) =
                 (&set_args.name, &set_args.host)
             {
-                let user_ref = UserRef::new(name.clone(), host.clone());
+                let user_ref =
+                    parse_user_ref_input(name, host, ctx.strict_input)?;
                 ctx.config.get_account_config(user_ref).ok_or_else(|| {
                     CliError::InvalidArgument("Account not found.".into())
                 })?

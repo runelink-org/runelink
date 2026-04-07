@@ -3,6 +3,7 @@ use argon2::{
     password_hash::{PasswordHash, SaltString, rand_core::OsRng},
 };
 use jsonwebtoken::{Algorithm, Header, Validation};
+use runelink_client::validation::validate_username;
 use runelink_types::{
     ClientAccessClaims, NewUser, RefreshToken, SignupRequest, TokenResponse,
     User, UserRef, UserRole,
@@ -47,8 +48,10 @@ pub async fn signup(
     state: &AppState,
     request: SignupRequest,
 ) -> ApiResult<User> {
+    let name = validate_username(&request.name)
+        .map_err(|error| ApiError::BadRequest(error.to_string()))?;
     let new_user = NewUser {
-        name: request.name,
+        name,
         host: state.config.public_host(),
         role: UserRole::User,
     };
@@ -74,12 +77,14 @@ pub async fn issue_password_token(
     state: &AppState,
     request: AuthTokenPasswordRequest,
 ) -> ApiResult<IssuedClientToken> {
+    let username = validate_username(&request.username)
+        .map_err(|error| ApiError::BadRequest(error.to_string()))?;
     let client_id = request.client_id.unwrap_or_else(|| "default".into());
     let scope = request.scope.unwrap_or_else(|| "openid".into());
 
     let user = queries::users::get_by_ref(
         &state.db_pool,
-        UserRef::new(request.username, state.config.public_host()),
+        UserRef::new(username, state.config.public_host()),
     )
     .await?;
 

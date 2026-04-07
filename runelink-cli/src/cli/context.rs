@@ -12,6 +12,7 @@ pub struct CliContext<'a> {
     pub config: &'a mut AppConfig,
     pub auth_cache: &'a mut AuthCache,
     pub account: Option<&'a AccountConfig>,
+    pub strict_input: bool,
 }
 
 impl<'a> CliContext<'a> {

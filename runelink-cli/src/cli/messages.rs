@@ -5,7 +5,7 @@ use runelink_types::{
     server::ServerId,
 };
 
-use crate::error::CliError;
+use crate::{error::CliError, util::parse_optional_host_input};
 
 use super::{
     context::CliContext, input::unwrap_or_prompt,
@@ -99,11 +99,15 @@ pub async fn handle_message_commands(
         MessageCommands::List(list_args) => {
             ctx.account.ok_or(CliError::MissingAccount)?;
             let account = ctx.account.ok_or(CliError::MissingAccount)?;
+            let target_host = parse_optional_host_input(
+                list_args.host.as_deref(),
+                ctx.strict_input,
+            )?;
             let selection = get_channel_selection_with_inputs(
                 ctx,
                 list_args.channel_id,
                 list_args.server_id,
-                list_args.host.as_deref(),
+                target_host.as_deref(),
             )
             .await?;
             let api_url = ctx.home_api_url().await?;
@@ -131,6 +135,10 @@ pub async fn handle_message_commands(
             ctx.account.ok_or(CliError::MissingAccount)?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
+            let target_host = parse_optional_host_input(
+                get_args.host.as_deref(),
+                ctx.strict_input,
+            )?;
             let message = requests::messages::fetch_by_id(
                 ctx.client,
                 &api_url,
@@ -138,7 +146,7 @@ pub async fn handle_message_commands(
                 get_args.server_id,
                 get_args.channel_id,
                 get_args.message_id,
-                get_args.host.as_deref(),
+                target_host.as_deref(),
             )
             .await?;
             println!("{message}");
@@ -146,11 +154,15 @@ pub async fn handle_message_commands(
 
         MessageCommands::Send(send_args) => {
             let account = ctx.account.ok_or(CliError::MissingAccount)?;
+            let target_host = parse_optional_host_input(
+                send_args.host.as_deref(),
+                ctx.strict_input,
+            )?;
             let selection = get_channel_selection_with_inputs(
                 ctx,
                 send_args.channel_id,
                 send_args.server_id,
-                send_args.host.as_deref(),
+                target_host.as_deref(),
             )
             .await?;
             let body = unwrap_or_prompt(send_args.body.clone(), "Message")?;
@@ -182,6 +194,10 @@ pub async fn handle_message_commands(
             // TODO: Interactive message selection
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
+            let target_host = parse_optional_host_input(
+                delete_args.host.as_deref(),
+                ctx.strict_input,
+            )?;
             requests::messages::delete(
                 ctx.client,
                 &api_url,
@@ -189,7 +205,7 @@ pub async fn handle_message_commands(
                 delete_args.server_id,
                 delete_args.channel_id,
                 delete_args.message_id,
-                delete_args.host.as_deref(),
+                target_host.as_deref(),
             )
             .await?;
             println!("Deleted message: {}", delete_args.message_id);
