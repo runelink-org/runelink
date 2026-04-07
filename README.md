@@ -9,25 +9,27 @@ This repo contains:
 
 > Status: **WIP**. APIs and data model may change. Not security-audited.
 
+Public instance and web client: [**runelink.chat**](https://runelink.chat).
+
 ## What is RuneLink?
 
 - **Federated**: many independent hosts can interoperate.
 - **Server structure**: like Discord/Slack; join servers, talk in channels.
-- **Open client ecosystem**: today's client is a CLI, but the intent is that the community can build their own clients against the HTTP API and/or `runelink-client`.
+- **Open client ecosystem**: today, we have a CLI and web client, but the intent is that the community can build their own clients against the HTTP/Websocket API or the various SDKs provided.
 
 ## Concepts
 
-- **Host**: a RuneLink deployment reachable at a host (in dev, typically on port `7000`).
+- **Host**: a RuneLink deployment reachable at a host (on port `7000` by default).
 - **User**: an account on exactly one host (your **home host**).
-- **Server**: a workspace/community that “lives on” some host.
+- **Server**: a workspace/community that "lives on" some host.
 - **Channel**: a room inside a server.
 
 ## Repository layout
 
 This is a Rust workspace (see `Cargo.toml`) with these crates:
 
-- `runelink-server`: Axum HTTP server + Postgres persistence + federation endpoints.
-- `runelink-cli`: the `rune` CLI client (a TUI + websockets are planned, but not the primary interface yet).
+- `runelink-server`: Axum HTTP/Websocket server + Postgres persistence + federation management.
+- `runelink-cli`: the `rune` CLI client (a TUI is planned, but not the primary interface yet).
 - `runelink-client`: reusable Rust client library for talking to RuneLink servers.
 - `runelink-types`: shared request/response and host types.
 
@@ -158,24 +160,15 @@ curl "http://localhost:7000/ping"
 
 ## Roadmap (high level)
 
-- A public/demo instance: **planned**.
-- A richer interactive client experience: **CLI today**, TUI + GUI with websockets planned.
+- Direct messages: user-to-user direct messages and group chats.
+- Presence updates: typing indicators, user statuses, and message notifications.
 - Calls: group audio + video calls with WebRTC.
-- Direct messages: user-to-user direct messages with E2EE as well as group chats.
-- Federation hardening: key rotation, better caching/validation, richer policies.
-- Authentication improvements: additional methods remain local to the home host.
+- For more detailed and up-to-date plans, see the [project board](https://github.com/orgs/runelink-org/projects/1).
 
 ## Contributing
 
-Useful workspace commands:
-
-```bash
-cargo check
-cargo test
-cargo fmt --all
-cargo clippy --all-targets -- -D warnings
-```
+For useful workspace commands, refer to the [makefile](./Makefile).
 
 ## License
 
-GPL-3.0. See `LICENSE`.
+GPL-3.0. See [LICENSE](./LICENSE).
