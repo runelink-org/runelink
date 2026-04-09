@@ -369,6 +369,10 @@ pub mod auth {
         Ok(base.or_admin().client_only())
     }
 
+    pub fn delete_remote(server_id: ServerId) -> Req {
+        Req::ServerMember(server_id).client_only()
+    }
+
     pub mod federated {
         use super::*;
 

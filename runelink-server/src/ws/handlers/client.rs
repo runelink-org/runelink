@@ -547,8 +547,12 @@ pub(super) async fn handle_client_request(
             target_host,
         } => {
             let requirement =
-                ops::messages::auth::delete(state, server_id, message_id)
-                    .await?;
+                if state.config.is_remote_host(target_host.as_deref()) {
+                    ops::messages::auth::delete_remote(server_id)
+                } else {
+                    ops::messages::auth::delete(state, server_id, message_id)
+                        .await?
+                };
             let session = authorize_client(state, conn_id, requirement).await?;
             ops::messages::delete(
                 state,
