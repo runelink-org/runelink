@@ -166,7 +166,9 @@ fn is_transport_error(error: &ClientError) -> bool {
         ClientError::Reqwest(error) => {
             error.is_connect() || error.is_timeout() || error.is_request()
         }
-        ClientError::Status(_, _) | ClientError::Json(_) => false,
+        ClientError::Status(_, _)
+        | ClientError::Json(_)
+        | ClientError::UnsupportedCapability(_) => false,
     }
 }
 

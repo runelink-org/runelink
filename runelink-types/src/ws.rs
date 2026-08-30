@@ -16,6 +16,8 @@ use crate::{
     user::{NewUser, User, UserRef},
 };
 
+use crate::capability::{Capability, CapabilityHello, CapabilityWelcome};
+
 pub use crate::ids::{EventId, RequestId};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -167,6 +169,52 @@ pub enum ClientWsRequest {
     },
 }
 
+impl ClientWsRequest {
+    pub fn capability(&self) -> Capability {
+        match self {
+            Self::Ping => Capability::Ping,
+            Self::OidcDiscovery | Self::OidcJwks => Capability::AuthDiscovery,
+            Self::ConnectionState => Capability::ConnectionState,
+            Self::AuthSignup(_) => Capability::AuthSignup,
+            Self::AuthTokenPassword(_) | Self::AuthTokenRefresh(_) => {
+                Capability::AuthToken
+            }
+            Self::AuthTokenAccess(_) => Capability::AuthAuthenticate,
+            Self::AuthUserinfo => Capability::AuthUserinfo,
+            Self::AuthRegisterClient => Capability::AuthRegisterClient,
+            Self::UsersCreate(_) => Capability::UsersCreate,
+            Self::UsersGetAll { .. }
+            | Self::UsersGetByRef { .. }
+            | Self::UsersGetAssociatedHosts { .. } => Capability::UsersRead,
+            Self::UsersDelete { .. } => Capability::UsersDelete,
+            Self::MembershipsGetByUser { .. }
+            | Self::MembershipsGetMembersByServer { .. }
+            | Self::MembershipsGetByUserAndServer { .. } => {
+                Capability::MembershipsRead
+            }
+            Self::MembershipsUpsert { .. } | Self::MembershipsDelete { .. } => {
+                Capability::MembershipsWrite
+            }
+            Self::ServersCreate { .. } => Capability::ServersCreate,
+            Self::ServersGetAll { .. }
+            | Self::ServersGetById { .. }
+            | Self::ServersGetWithChannels { .. } => Capability::ServersRead,
+            Self::ServersDelete { .. } => Capability::ServersDelete,
+            Self::ChannelsCreate { .. } => Capability::ChannelsCreate,
+            Self::ChannelsGetAll { .. }
+            | Self::ChannelsGetByServer { .. }
+            | Self::ChannelsGetById { .. } => Capability::ChannelsRead,
+            Self::ChannelsDelete { .. } => Capability::ChannelsDelete,
+            Self::MessagesCreate { .. } => Capability::MessagesCreate,
+            Self::MessagesGetAll { .. }
+            | Self::MessagesGetByServer { .. }
+            | Self::MessagesGetByChannel { .. }
+            | Self::MessagesGetById { .. } => Capability::MessagesRead,
+            Self::MessagesDelete { .. } => Capability::MessagesDelete,
+        }
+    }
+}
+
 /// Reply enum for websocket client traffic. Variants map 1:1 with request outcomes.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
@@ -290,6 +338,42 @@ pub enum FederationWsRequest {
     },
 }
 
+impl FederationWsRequest {
+    pub fn capability(&self) -> Capability {
+        match self {
+            Self::ConnectionState => Capability::ConnectionState,
+            Self::UsersGetAll
+            | Self::UsersGetByRef { .. }
+            | Self::UsersGetAssociatedHosts { .. } => Capability::UsersRead,
+            Self::UsersDelete { .. } => Capability::UsersDelete,
+            Self::MembershipsGetByUser { .. }
+            | Self::MembershipsGetMembersByServer { .. }
+            | Self::MembershipsGetByUserAndServer { .. } => {
+                Capability::MembershipsRead
+            }
+            Self::MembershipsUpsert { .. } | Self::MembershipsDelete { .. } => {
+                Capability::MembershipsWrite
+            }
+            Self::ServersCreate(_) => Capability::ServersCreate,
+            Self::ServersGetAll
+            | Self::ServersGetById { .. }
+            | Self::ServersGetWithChannels { .. } => Capability::ServersRead,
+            Self::ServersDelete { .. } => Capability::ServersDelete,
+            Self::ChannelsCreate { .. } => Capability::ChannelsCreate,
+            Self::ChannelsGetAll
+            | Self::ChannelsGetByServer { .. }
+            | Self::ChannelsGetById { .. } => Capability::ChannelsRead,
+            Self::ChannelsDelete { .. } => Capability::ChannelsDelete,
+            Self::MessagesCreate { .. } => Capability::MessagesCreate,
+            Self::MessagesGetAll
+            | Self::MessagesGetByServer { .. }
+            | Self::MessagesGetByChannel { .. }
+            | Self::MessagesGetById { .. } => Capability::MessagesRead,
+            Self::MessagesDelete { .. } => Capability::MessagesDelete,
+        }
+    }
+}
+
 /// Reply enum for federation websocket traffic. Variants map 1:1 with request outcomes.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
@@ -352,6 +436,28 @@ pub enum ClientWsUpdate {
     },
 }
 
+impl ClientWsUpdate {
+    pub fn capability(&self) -> Capability {
+        match self {
+            Self::UserUpserted(_) | Self::UserDeleted { .. } => {
+                Capability::UsersEvents
+            }
+            Self::MembershipUpserted(_) | Self::MembershipDeleted { .. } => {
+                Capability::MembershipsEvents
+            }
+            Self::ServerUpserted(_) | Self::ServerDeleted { .. } => {
+                Capability::ServersEvents
+            }
+            Self::ChannelUpserted(_) | Self::ChannelDeleted { .. } => {
+                Capability::ChannelsEvents
+            }
+            Self::MessageUpserted(_) | Self::MessageDeleted { .. } => {
+                Capability::MessagesEvents
+            }
+        }
+    }
+}
+
 /// Federation websocket updates are push-only events
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
@@ -384,9 +490,31 @@ pub enum FederationWsUpdate {
     },
 }
 
+impl FederationWsUpdate {
+    pub fn capability(&self) -> Capability {
+        match self {
+            Self::RemoteUserDeleted { .. } => Capability::UsersEvents,
+            Self::MembershipUpserted(_) | Self::MembershipDeleted { .. } => {
+                Capability::MembershipsEvents
+            }
+            Self::ServerUpserted(_) | Self::ServerDeleted { .. } => {
+                Capability::ServersEvents
+            }
+            Self::ChannelUpserted(_) | Self::ChannelDeleted { .. } => {
+                Capability::ChannelsEvents
+            }
+            Self::MessageUpserted { .. } | Self::MessageDeleted { .. } => {
+                Capability::MessagesEvents
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ClientWsEnvelope {
+    Hello(CapabilityHello),
+    Welcome(CapabilityWelcome),
     Request {
         request_id: RequestId,
         request: ClientWsRequest,
@@ -410,6 +538,8 @@ pub enum ClientWsEnvelope {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum FederationWsEnvelope {
+    Hello(CapabilityHello),
+    Welcome(CapabilityWelcome),
     Request {
         request_id: RequestId,
         event_id: EventId,
@@ -442,7 +572,10 @@ impl std::fmt::Debug for AuthTokenAccessRequest {
 
 #[cfg(test)]
 mod tests {
-    use super::AuthTokenAccessRequest;
+    use std::collections::BTreeMap;
+
+    use super::{AuthTokenAccessRequest, ClientWsEnvelope};
+    use crate::capability::{CapabilityHello, versions::NEGOTIATION_VERSION};
 
     #[test]
     fn auth_token_access_request_debug_redacts_access_token() {
@@ -454,5 +587,24 @@ mod tests {
 
         assert!(debug.contains("[REDACTED]"));
         assert!(!debug.contains("secret-token"));
+    }
+
+    #[test]
+    fn capability_hello_has_stable_bootstrap_shape() {
+        let envelope = ClientWsEnvelope::Hello(CapabilityHello {
+            negotiation_version: NEGOTIATION_VERSION,
+            capabilities: BTreeMap::from([("messages.read".into(), vec![1])]),
+        });
+
+        assert_eq!(
+            serde_json::to_value(envelope).unwrap(),
+            serde_json::json!({
+                "type": "hello",
+                "data": {
+                    "negotiation_version": 1,
+                    "capabilities": { "messages.read": [1] }
+                }
+            })
+        );
     }
 }

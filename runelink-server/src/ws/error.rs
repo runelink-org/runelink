@@ -9,6 +9,8 @@ pub type FederationRequestResult<T> = Result<T, FederationRequestError>;
 pub enum FederationRequestError {
     #[error("No active federation connection for host '{host}'")]
     HostUnavailable { host: String },
+    #[error("{host} does not support the {capability} capability")]
+    UnsupportedCapability { host: String, capability: String },
     #[error("Timed out waiting for request '{request_id}' reply from '{host}'")]
     Timeout { host: String, request_id: RequestId },
     #[error("Request '{request_id}' waiter dropped before completion")]
@@ -29,6 +31,12 @@ impl FederationRequestError {
                     "No active federation websocket connection for host {host}"
                 ))
             }
+            FederationRequestError::UnsupportedCapability {
+                capability,
+                ..
+            } => ApiError::BadRequest(format!(
+                "{host} does not support the {capability} capability"
+            )),
             FederationRequestError::Timeout { .. } => {
                 ApiError::Internal(format!(
                     "Timed out waiting for federation websocket reply from {host}"

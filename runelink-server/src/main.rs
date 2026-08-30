@@ -9,6 +9,7 @@ mod api;
 mod auth;
 mod auth_service;
 mod bearer_auth;
+mod capabilities;
 mod config;
 mod db;
 mod error;

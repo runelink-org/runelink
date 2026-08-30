@@ -43,6 +43,14 @@ RuneLink separates **user authentication** from **server-to-server federation**:
 
 More detailed federation/authentication documentation is planned.
 
+## API capabilities
+
+RuneLink versions semantic operations independently. Client and federation WebSockets begin with a `hello` envelope listing exact supported versions and receive a `welcome` envelope containing the highest common version for each capability. Operations and updates whose capabilities were not negotiated remain unavailable without disabling the rest of the connection.
+
+HTTP capability support is advertised at `/.well-known/runelink`. Versioned HTTP requests send the selected operation and version in the `runelink-capability` header, for example `messages.read@1`. OIDC discovery, JWKS, capability discovery, and `/ping` remain unversioned so clients can bootstrap a connection.
+
+Capabilities describe protocol compatibility, not authorization. Permissions remain a separate many-to-many policy system: one permission may authorize several capabilities, and one capability may require different permissions depending on the actor and resource.
+
 ## Authentication (high level)
 
 Authentication is local to your home host. The current server exposes OIDC-style discovery endpoints and a token endpoint supporting:

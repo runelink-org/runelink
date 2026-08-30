@@ -50,6 +50,11 @@ impl From<ClientError> for CliError {
                 CliError::ApiStatusError { status, message }
             }
             ClientError::Json(e) => CliError::JsonError(e),
+            ClientError::UnsupportedCapability(capability) => {
+                CliError::NoActionPossible(format!(
+                    "This client does not support the {capability} capability"
+                ))
+            }
         }
     }
 }

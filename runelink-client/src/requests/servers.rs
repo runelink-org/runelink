@@ -1,6 +1,7 @@
 use log::info;
 use reqwest::Client;
 use runelink_types::{
+    capability::Capability,
     server::{NewServer, Server, ServerId, ServerWithChannels},
     user::UserRef,
 };
@@ -21,7 +22,14 @@ pub async fn create(
         url = format!("{url}?target_host={host}");
     }
     info!("creating server: {url}");
-    post_json_authed::<_, Server>(client, &url, access_token, new_server).await
+    post_json_authed::<_, Server>(
+        client,
+        &url,
+        access_token,
+        new_server,
+        Capability::ServersCreate,
+    )
+    .await
 }
 
 pub async fn fetch_all(
@@ -34,7 +42,7 @@ pub async fn fetch_all(
         url = format!("{url}?target_host={host}");
     }
     info!("fetching all servers: {url}");
-    fetch_json::<Vec<Server>>(client, &url).await
+    fetch_json::<Vec<Server>>(client, &url, Capability::ServersRead).await
 }
 
 pub async fn fetch_by_id(
@@ -48,7 +56,7 @@ pub async fn fetch_by_id(
         url = format!("{url}?target_host={host}");
     }
     info!("fetching server: {url}");
-    fetch_json::<Server>(client, &url).await
+    fetch_json::<Server>(client, &url, Capability::ServersRead).await
 }
 
 pub async fn fetch_by_user(
@@ -78,7 +86,13 @@ pub async fn fetch_with_channels(
         url = format!("{url}?target_host={host}");
     }
     info!("fetching server with channels (federation): {url}");
-    fetch_json_authed::<ServerWithChannels>(client, &url, access_token).await
+    fetch_json_authed::<ServerWithChannels>(
+        client,
+        &url,
+        access_token,
+        Capability::ServersRead,
+    )
+    .await
 }
 
 pub async fn delete(
@@ -93,5 +107,5 @@ pub async fn delete(
         url = format!("{url}?target_host={host}");
     }
     info!("deleting server: {url}");
-    delete_authed(client, &url, access_token).await
+    delete_authed(client, &url, access_token, Capability::ServersDelete).await
 }

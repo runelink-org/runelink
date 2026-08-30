@@ -1,6 +1,7 @@
 use log::info;
 use reqwest::Client;
 use runelink_types::{
+    capability::Capability,
     server::{
         FullServerMembership, NewServerMembership, ServerId, ServerMembership,
     },
@@ -22,7 +23,12 @@ pub async fn fetch_by_user(
         name = user.name
     );
     info!("fetching memberships by user: {url}");
-    fetch_json::<Vec<ServerMembership>>(client, &url).await
+    fetch_json::<Vec<ServerMembership>>(
+        client,
+        &url,
+        Capability::MembershipsRead,
+    )
+    .await
 }
 
 pub async fn fetch_members_by_server(
@@ -36,7 +42,12 @@ pub async fn fetch_members_by_server(
         url = format!("{url}?target_host={host}");
     }
     info!("fetching members by server: {url}");
-    fetch_json::<Vec<runelink_types::ServerMember>>(client, &url).await
+    fetch_json::<Vec<runelink_types::ServerMember>>(
+        client,
+        &url,
+        Capability::MembershipsRead,
+    )
+    .await
 }
 
 pub async fn fetch_member_by_user_and_server(
@@ -55,7 +66,12 @@ pub async fn fetch_member_by_user_and_server(
         url = format!("{url}?target_host={d}");
     }
     info!("fetching member by user and server: {url}");
-    fetch_json::<runelink_types::ServerMember>(client, &url).await
+    fetch_json::<runelink_types::ServerMember>(
+        client,
+        &url,
+        Capability::MembershipsRead,
+    )
+    .await
 }
 
 pub async fn create(
@@ -74,6 +90,7 @@ pub async fn create(
         &url,
         access_token,
         new_membership,
+        Capability::MembershipsWrite,
     )
     .await
 }
@@ -95,5 +112,6 @@ pub async fn delete(
         url = format!("{url}?target_host={d}");
     }
     info!("deleting server membership: {url}");
-    delete_authed(client, &url, access_token).await
+    delete_authed(client, &url, access_token, Capability::MembershipsWrite)
+        .await
 }

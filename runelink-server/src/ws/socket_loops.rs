@@ -9,6 +9,10 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use runelink_client::util::host_from_issuer;
 use runelink_types::{
+    capability::{
+        CapabilityWelcome, NegotiatedCapabilities, negotiate_capabilities,
+        supported_capabilities, versions::NEGOTIATION_VERSION,
+    },
     user::UserRef,
     ws::{ClientWsEnvelope, FederationWsEnvelope},
 };
@@ -19,14 +23,19 @@ use tokio_tungstenite::{
 };
 
 use super::handlers::{handle_client_message, handle_federation_message};
-use crate::{auth::Principal, ids::ConnId, state::AppState};
+use crate::{
+    auth::Principal,
+    capabilities::{client_websocket, federation_websocket},
+    ids::ConnId,
+    state::AppState,
+};
 
 pub enum FederationSocket {
     Inbound(WebSocket),
     Outbound(WebSocketStream<MaybeTlsStream<TcpStream>>),
 }
 
-enum FederationIncomingEvent {
+pub(super) enum FederationIncomingEvent {
     Text(String),
     Closed,
     Ignored,
@@ -34,7 +43,10 @@ enum FederationIncomingEvent {
 }
 
 impl FederationSocket {
-    async fn send_text(&mut self, payload: String) -> Result<(), String> {
+    pub(super) async fn send_text(
+        &mut self,
+        payload: String,
+    ) -> Result<(), String> {
         match self {
             FederationSocket::Inbound(socket) => socket
                 .send(AxumMessage::Text(payload.into()))
@@ -47,7 +59,7 @@ impl FederationSocket {
         }
     }
 
-    async fn recv_event(&mut self) -> FederationIncomingEvent {
+    pub(super) async fn recv_event(&mut self) -> FederationIncomingEvent {
         match self {
             FederationSocket::Inbound(socket) => match socket.recv().await {
                 Some(Ok(AxumMessage::Text(payload))) => {
@@ -109,9 +121,15 @@ async fn client_ws_loop(
     headers: HeaderMap,
     mut socket: WebSocket,
 ) {
+    let Some(capabilities) = negotiate_client_socket(&mut socket).await else {
+        return;
+    };
     let (sender, mut outbound_rx) =
         mpsc::unbounded_channel::<ClientWsEnvelope>();
-    let conn_id = state.client_ws_manager.register_connection(sender).await;
+    let conn_id = state
+        .client_ws_manager
+        .register_connection(sender, capabilities)
+        .await;
 
     if let Ok(Principal::Client(auth)) =
         Principal::from_client_headers(&headers, &state)
@@ -171,31 +189,123 @@ async fn federation_ws_upgrade_loop(
     headers: HeaderMap,
     socket: WebSocket,
 ) {
+    let auth = match Principal::from_federation_headers(&headers, &state).await
+    {
+        Ok(Principal::Federation(auth)) => auth,
+        Ok(Principal::Client(_)) => {
+            log::warn!("Rejected federation websocket with client credentials");
+            return;
+        }
+        Err(error) => {
+            log::warn!(
+                "Rejected unauthenticated federation websocket: {error}"
+            );
+            return;
+        }
+    };
+    let mut socket = FederationSocket::Inbound(socket);
+    let Some(capabilities) = negotiate_federation_socket(&mut socket).await
+    else {
+        return;
+    };
     let (sender, outbound_rx) =
         mpsc::unbounded_channel::<FederationWsEnvelope>();
     let conn_id = state
         .federation_ws_manager
-        .register_connection(sender)
+        .register_connection(sender, capabilities)
         .await;
 
-    if let Ok(Principal::Federation(auth)) =
-        Principal::from_federation_headers(&headers, &state).await
-    {
-        let host = host_from_issuer(&auth.claims.iss);
-        let issuer = auth.claims.iss.clone();
-        let _ = state
-            .federation_ws_manager
-            .authenticate_connection(conn_id, host, issuer)
-            .await;
-    }
+    let host = host_from_issuer(&auth.claims.iss);
+    let issuer = auth.claims.iss.clone();
+    let _ = state
+        .federation_ws_manager
+        .authenticate_connection(conn_id, host, issuer)
+        .await;
 
-    federation_socket_loop(
-        state,
-        conn_id,
-        FederationSocket::Inbound(socket),
-        outbound_rx,
+    federation_socket_loop(state, conn_id, socket, outbound_rx).await;
+}
+
+async fn negotiate_client_socket(
+    socket: &mut WebSocket,
+) -> Option<NegotiatedCapabilities> {
+    let message = match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        socket.recv(),
     )
-    .await;
+    .await
+    {
+        Ok(Some(Ok(AxumMessage::Text(payload)))) => payload,
+        _ => {
+            log::warn!("Client websocket did not send a capability hello");
+            return None;
+        }
+    };
+    let ClientWsEnvelope::Hello(hello) = serde_json::from_str(&message).ok()?
+    else {
+        log::warn!("Client websocket sent an invalid capability hello");
+        return None;
+    };
+    if hello.negotiation_version != NEGOTIATION_VERSION {
+        log::warn!(
+            "Unsupported client negotiation version: {}",
+            hello.negotiation_version
+        );
+        return None;
+    }
+    let capabilities = negotiate_capabilities(
+        &hello.capabilities,
+        &supported_capabilities(client_websocket),
+    );
+    let welcome = ClientWsEnvelope::Welcome(CapabilityWelcome {
+        negotiation_version: NEGOTIATION_VERSION,
+        capabilities: capabilities.clone(),
+        server_version: env!("CARGO_PKG_VERSION").to_string(),
+    });
+    let payload = serde_json::to_string(&welcome).ok()?;
+    socket.send(AxumMessage::Text(payload.into())).await.ok()?;
+    Some(capabilities)
+}
+
+async fn negotiate_federation_socket(
+    socket: &mut FederationSocket,
+) -> Option<NegotiatedCapabilities> {
+    let event = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        socket.recv_event(),
+    )
+    .await
+    .ok()?;
+    let FederationIncomingEvent::Text(payload) = event else {
+        log::warn!("Federation websocket did not send a capability hello");
+        return None;
+    };
+    let FederationWsEnvelope::Hello(hello) =
+        serde_json::from_str(&payload).ok()?
+    else {
+        log::warn!("Federation websocket sent an invalid capability hello");
+        return None;
+    };
+    if hello.negotiation_version != NEGOTIATION_VERSION {
+        log::warn!(
+            "Unsupported federation negotiation version: {}",
+            hello.negotiation_version
+        );
+        return None;
+    }
+    let capabilities = negotiate_capabilities(
+        &hello.capabilities,
+        &supported_capabilities(federation_websocket),
+    );
+    let welcome = FederationWsEnvelope::Welcome(CapabilityWelcome {
+        negotiation_version: NEGOTIATION_VERSION,
+        capabilities: capabilities.clone(),
+        server_version: env!("CARGO_PKG_VERSION").to_string(),
+    });
+    socket
+        .send_text(serde_json::to_string(&welcome).ok()?)
+        .await
+        .ok()?;
+    Some(capabilities)
 }
 
 pub async fn federation_socket_loop(
