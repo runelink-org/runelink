@@ -1,6 +1,9 @@
 use log::info;
 use reqwest::Client;
-use runelink_types::user::{NewUser, User, UserRef};
+use runelink_types::{
+    capability::Capability,
+    user::{NewUser, User, UserRef},
+};
 
 use crate::error::Result;
 
@@ -14,8 +17,14 @@ pub async fn create(
 ) -> Result<User> {
     let url = format!("{api_url}/users");
     info!("creating user: {url}");
-    post_json_authed::<NewUser, User>(client, &url, access_token, new_user)
-        .await
+    post_json_authed::<NewUser, User>(
+        client,
+        &url,
+        access_token,
+        new_user,
+        Capability::UsersCreate,
+    )
+    .await
 }
 
 pub async fn fetch_all(
@@ -28,7 +37,7 @@ pub async fn fetch_all(
         url = format!("{url}?target_host={host}");
     }
     info!("fetching all users: {url}");
-    fetch_json::<Vec<User>>(client, &url).await
+    fetch_json::<Vec<User>>(client, &url, Capability::UsersRead).await
 }
 
 pub async fn fetch_by_ref(
@@ -42,7 +51,7 @@ pub async fn fetch_by_ref(
         name = user.name
     );
     info!("fetching user: {url}");
-    fetch_json::<User>(client, &url).await
+    fetch_json::<User>(client, &url, Capability::UsersRead).await
 }
 
 pub async fn delete(
@@ -57,7 +66,7 @@ pub async fn delete(
         name = user.name
     );
     info!("deleting user: {url}");
-    delete_authed(client, &url, access_token).await
+    delete_authed(client, &url, access_token, Capability::UsersDelete).await
 }
 
 pub async fn fetch_associated_hosts(
@@ -75,5 +84,5 @@ pub async fn fetch_associated_hosts(
         url = format!("{url}?target_host={d}");
     }
     info!("fetching user associated hosts: {url}");
-    fetch_json::<Vec<String>>(client, &url).await
+    fetch_json::<Vec<String>>(client, &url, Capability::UsersRead).await
 }

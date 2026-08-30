@@ -1,6 +1,7 @@
 use log::info;
 use reqwest::Client;
 use runelink_types::{
+    capability::Capability,
     channel::ChannelId,
     message::{Message, MessageId, NewMessage},
     server::ServerId,
@@ -30,6 +31,7 @@ pub async fn create(
         &url,
         access_token,
         new_message,
+        Capability::MessagesCreate,
     )
     .await
 }
@@ -46,7 +48,13 @@ pub async fn fetch_all(
         url = format!("{url}?target_host={host}");
     }
     info!("fetching all messages: {url}");
-    fetch_json_authed::<Vec<Message>>(client, &url, access_token).await
+    fetch_json_authed::<Vec<Message>>(
+        client,
+        &url,
+        access_token,
+        Capability::MessagesRead,
+    )
+    .await
 }
 
 #[allow(dead_code)]
@@ -62,7 +70,13 @@ pub async fn fetch_by_server(
         url = format!("{url}?target_host={host}");
     }
     info!("fetching messages by server: {url}");
-    fetch_json_authed::<Vec<Message>>(client, &url, access_token).await
+    fetch_json_authed::<Vec<Message>>(
+        client,
+        &url,
+        access_token,
+        Capability::MessagesRead,
+    )
+    .await
 }
 
 pub async fn fetch_by_channel(
@@ -79,7 +93,13 @@ pub async fn fetch_by_channel(
         url = format!("{url}?target_host={host}");
     }
     info!("fetching messages by channel: {url}");
-    fetch_json_authed::<Vec<Message>>(client, &url, access_token).await
+    fetch_json_authed::<Vec<Message>>(
+        client,
+        &url,
+        access_token,
+        Capability::MessagesRead,
+    )
+    .await
 }
 
 pub async fn fetch_by_id(
@@ -98,7 +118,13 @@ pub async fn fetch_by_id(
         url = format!("{url}?target_host={host}");
     }
     info!("fetching message: {url}");
-    fetch_json_authed::<Message>(client, &url, access_token).await
+    fetch_json_authed::<Message>(
+        client,
+        &url,
+        access_token,
+        Capability::MessagesRead,
+    )
+    .await
 }
 
 pub async fn delete(
@@ -117,5 +143,5 @@ pub async fn delete(
         url = format!("{url}?target_host={host}");
     }
     info!("deleting message: {url}");
-    delete_authed(client, &url, access_token).await
+    delete_authed(client, &url, access_token, Capability::MessagesDelete).await
 }

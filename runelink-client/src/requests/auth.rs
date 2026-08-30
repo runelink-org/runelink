@@ -1,9 +1,14 @@
 use log::info;
 use reqwest::Client;
-use runelink_types::{SignupRequest, TokenResponse, User};
+use runelink_types::{
+    SignupRequest, TokenResponse, User, capability::Capability,
+};
 use std::collections::HashMap;
 
-use crate::error::{Error, Result};
+use crate::{
+    capabilities::http_header_value,
+    error::{Error, Result},
+};
 
 use super::post_json;
 
@@ -17,7 +22,13 @@ pub async fn signup(
 ) -> Result<User> {
     let url = format!("{api_url}/auth/signup");
     info!("signing up: {url}");
-    post_json::<SignupRequest, User>(client, &url, signup_req).await
+    post_json::<SignupRequest, User>(
+        client,
+        &url,
+        signup_req,
+        Capability::AuthSignup,
+    )
+    .await
 }
 
 /// Request an access token using password grant.
@@ -45,7 +56,16 @@ pub async fn token_password(
         form.insert("client_id", client_id);
     }
 
-    let response = client.post(&url).form(&form).send().await?;
+    let capability = Capability::AuthToken;
+    let response = client
+        .post(&url)
+        .header(
+            runelink_types::capability::HTTP_CAPABILITY_HEADER,
+            http_header_value(&capability)?,
+        )
+        .form(&form)
+        .send()
+        .await?;
     let status = response.status();
     if !status.is_success() {
         let message = response.text().await.unwrap_or_else(|e| {
@@ -80,7 +100,16 @@ pub async fn token_refresh(
         form.insert("client_id", client_id);
     }
 
-    let response = client.post(&url).form(&form).send().await?;
+    let capability = Capability::AuthToken;
+    let response = client
+        .post(&url)
+        .header(
+            runelink_types::capability::HTTP_CAPABILITY_HEADER,
+            http_header_value(&capability)?,
+        )
+        .form(&form)
+        .send()
+        .await?;
     let status = response.status();
     if !status.is_success() {
         let message = response.text().await.unwrap_or_else(|e| {

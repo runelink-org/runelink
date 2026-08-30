@@ -1,8 +1,12 @@
 use log::debug;
 use reqwest::Client;
+use runelink_types::capability::{Capability, HTTP_CAPABILITY_HEADER};
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::error::{Error, Result};
+use crate::{
+    capabilities::http_header_value,
+    error::{Error, Result},
+};
 
 pub async fn fetch_text(client: &Client, url: &str) -> Result<String> {
     debug!("fetching text: {url}");
@@ -18,12 +22,20 @@ pub async fn fetch_text(client: &Client, url: &str) -> Result<String> {
     Ok(text_data)
 }
 
-pub async fn fetch_json<T>(client: &Client, url: &str) -> Result<T>
+pub async fn fetch_json<T>(
+    client: &Client,
+    url: &str,
+    capability: Capability,
+) -> Result<T>
 where
     T: DeserializeOwned,
 {
     debug!("fetching json: {url}");
-    let response = client.get(url).send().await?;
+    let response = client
+        .get(url)
+        .header(HTTP_CAPABILITY_HEADER, http_header_value(&capability)?)
+        .send()
+        .await?;
     let status = response.status();
     if !status.is_success() {
         let message = response.text().await.unwrap_or_else(|e| {
@@ -39,6 +51,7 @@ pub async fn post_json<I, O>(
     client: &Client,
     url: &str,
     request_body: &I,
+    capability: Capability,
 ) -> Result<O>
 where
     I: Serialize,
@@ -48,7 +61,12 @@ where
         "posting json: {url}\n{}",
         serde_json::to_string_pretty(request_body).unwrap()
     );
-    let response = client.post(url).json(request_body).send().await?;
+    let response = client
+        .post(url)
+        .header(HTTP_CAPABILITY_HEADER, http_header_value(&capability)?)
+        .json(request_body)
+        .send()
+        .await?;
     let status = response.status();
     if !status.is_success() {
         let message = response.text().await.unwrap_or_else(|e| {
@@ -88,6 +106,7 @@ pub async fn fetch_json_authed<T>(
     client: &Client,
     url: &str,
     access_token: &str,
+    capability: Capability,
 ) -> Result<T>
 where
     T: DeserializeOwned,
@@ -96,6 +115,7 @@ where
     let response = client
         .get(url)
         .header("Authorization", format!("Bearer {access_token}"))
+        .header(HTTP_CAPABILITY_HEADER, http_header_value(&capability)?)
         .send()
         .await?;
     let status = response.status();
@@ -115,6 +135,7 @@ pub async fn post_json_authed<I, O>(
     url: &str,
     access_token: &str,
     request_body: &I,
+    capability: Capability,
 ) -> Result<O>
 where
     I: Serialize,
@@ -127,6 +148,7 @@ where
     let response = client
         .post(url)
         .header("Authorization", format!("Bearer {access_token}"))
+        .header(HTTP_CAPABILITY_HEADER, http_header_value(&capability)?)
         .json(request_body)
         .send()
         .await?;
@@ -146,11 +168,13 @@ pub async fn delete_authed(
     client: &Client,
     url: &str,
     access_token: &str,
+    capability: Capability,
 ) -> Result<()> {
     debug!("deleting (authenticated): {url}");
     let response = client
         .delete(url)
         .header("Authorization", format!("Bearer {access_token}"))
+        .header(HTTP_CAPABILITY_HEADER, http_header_value(&capability)?)
         .send()
         .await?;
     let status = response.status();

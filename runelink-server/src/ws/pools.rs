@@ -7,6 +7,10 @@ use std::{
 };
 
 use runelink_types::{
+    capability::{
+        NegotiatedCapabilities, VersionedCapability, preferred_version,
+        supports,
+    },
     user::UserRef,
     ws::{ClientWsEnvelope, FederationWsEnvelope},
 };
@@ -32,6 +36,7 @@ pub struct ClientConn {
     pub sender: mpsc::UnboundedSender<ClientWsEnvelope>,
     pub user_ref: Option<UserRef>,
     pub connected_at: OffsetDateTime,
+    pub capabilities: NegotiatedCapabilities,
 }
 
 impl ClientWsPool {
@@ -45,6 +50,7 @@ impl ClientWsPool {
         &self,
         conn_id: ConnId,
         sender: mpsc::UnboundedSender<ClientWsEnvelope>,
+        capabilities: NegotiatedCapabilities,
     ) {
         let mut state = self.inner.write().await;
         if let Some(previous) = state.connections.remove(&conn_id) {
@@ -62,6 +68,7 @@ impl ClientWsPool {
                 sender,
                 user_ref: None,
                 connected_at: OffsetDateTime::now_utc(),
+                capabilities,
             },
         );
     }
@@ -105,6 +112,7 @@ impl ClientWsPool {
             state
                 .connections
                 .get(&conn_id)
+                .filter(|conn| client_supports_envelope(conn, &envelope))
                 .map(|conn| conn.sender.clone())
         };
         let Some(sender) = sender else {
@@ -129,6 +137,18 @@ impl ClientWsPool {
             .and_then(|conn| conn.user_ref.clone())
     }
 
+    pub async fn supports_capability(
+        &self,
+        conn_id: ConnId,
+        capability: &VersionedCapability,
+    ) -> bool {
+        let state = self.inner.read().await;
+        state
+            .connections
+            .get(&conn_id)
+            .is_some_and(|conn| supports(&conn.capabilities, capability))
+    }
+
     pub async fn send_to_user(
         &self,
         user_ref: &UserRef,
@@ -145,6 +165,9 @@ impl ClientWsPool {
                     state
                         .connections
                         .get(conn_id)
+                        .filter(|conn| {
+                            client_supports_envelope(conn, &envelope)
+                        })
                         .map(|conn| (*conn_id, conn.sender.clone()))
                 })
                 .collect::<Vec<_>>()
@@ -180,6 +203,9 @@ impl ClientWsPool {
                     state
                         .connections
                         .get(&conn_id)
+                        .filter(|conn| {
+                            client_supports_envelope(conn, &envelope)
+                        })
                         .map(|conn| (conn_id, conn.sender.clone()))
                 })
                 .collect::<Vec<_>>()
@@ -194,6 +220,7 @@ impl ClientWsPool {
             state
                 .connections
                 .iter()
+                .filter(|(_, conn)| client_supports_envelope(conn, &envelope))
                 .map(|(conn_id, conn)| (*conn_id, conn.sender.clone()))
                 .collect::<Vec<_>>()
         };
@@ -275,6 +302,7 @@ pub struct FederationConn {
     pub host: Option<String>,
     pub issuer: Option<String>,
     pub connected_at: OffsetDateTime,
+    pub capabilities: NegotiatedCapabilities,
 }
 
 impl FederationWsPool {
@@ -288,6 +316,7 @@ impl FederationWsPool {
         &self,
         conn_id: ConnId,
         sender: mpsc::UnboundedSender<FederationWsEnvelope>,
+        capabilities: NegotiatedCapabilities,
     ) {
         let mut state = self.inner.write().await;
         if let Some(previous) = state.connections.remove(&conn_id) {
@@ -307,6 +336,7 @@ impl FederationWsPool {
                 host: None,
                 issuer: None,
                 connected_at: OffsetDateTime::now_utc(),
+                capabilities,
             },
         );
     }
@@ -400,6 +430,18 @@ impl FederationWsPool {
             .and_then(|conn| conn.issuer.clone())
     }
 
+    pub async fn supports_capability(
+        &self,
+        conn_id: ConnId,
+        capability: &VersionedCapability,
+    ) -> bool {
+        let state = self.inner.read().await;
+        state
+            .connections
+            .get(&conn_id)
+            .is_some_and(|conn| supports(&conn.capabilities, capability))
+    }
+
     /// Returns whether the given host currently has an authenticated connection.
     pub async fn has_host(&self, host: &str) -> bool {
         let state = self.inner.read().await;
@@ -407,6 +449,21 @@ impl FederationWsPool {
             return false;
         };
         state.connections.contains_key(&conn_id)
+    }
+
+    pub async fn host_supports_capability(
+        &self,
+        host: &str,
+        capability: &VersionedCapability,
+    ) -> bool {
+        let state = self.inner.read().await;
+        let Some(conn_id) = state.by_host.get(host) else {
+            return false;
+        };
+        state
+            .connections
+            .get(conn_id)
+            .is_some_and(|conn| supports(&conn.capabilities, capability))
     }
 
     /// Sends an envelope to the active connection for the given host.
@@ -423,6 +480,7 @@ impl FederationWsPool {
             state
                 .connections
                 .get(&conn_id)
+                .filter(|conn| federation_supports_envelope(conn, &envelope))
                 .map(|conn| (conn_id, conn.sender.clone()))
         };
         let Some((conn_id, sender)) = target else {
@@ -456,7 +514,11 @@ impl FederationWsPool {
                 let Some(conn_id) = state.by_host.get(&host).copied() else {
                     continue;
                 };
-                if let Some(conn) = state.connections.get(&conn_id) {
+                if let Some(conn) =
+                    state.connections.get(&conn_id).filter(|conn| {
+                        federation_supports_envelope(conn, &envelope)
+                    })
+                {
                     let sender = conn.sender.clone();
                     out.push((conn_id, sender));
                 }
@@ -473,6 +535,9 @@ impl FederationWsPool {
             state
                 .connections
                 .iter()
+                .filter(|(_, conn)| {
+                    federation_supports_envelope(conn, &envelope)
+                })
                 .map(|(conn_id, conn)| (*conn_id, conn.sender.clone()))
                 .collect::<Vec<_>>()
         };
@@ -528,5 +593,86 @@ impl FederationWsPool {
             }
         }
         sent
+    }
+}
+
+fn client_supports_envelope(
+    conn: &ClientConn,
+    envelope: &ClientWsEnvelope,
+) -> bool {
+    let ClientWsEnvelope::Update { update, .. } = envelope else {
+        return true;
+    };
+    let capability = update.capability();
+    preferred_version(crate::capabilities::client_websocket, &capability)
+        .is_some_and(|version| {
+            supports(&conn.capabilities, &capability.with_version(version))
+        })
+}
+
+fn federation_supports_envelope(
+    conn: &FederationConn,
+    envelope: &FederationWsEnvelope,
+) -> bool {
+    let capability = match envelope {
+        FederationWsEnvelope::Request { request, .. } => request.capability(),
+        FederationWsEnvelope::Update { update, .. } => update.capability(),
+        _ => return true,
+    };
+    preferred_version(crate::capabilities::federation_websocket, &capability)
+        .is_some_and(|version| {
+            supports(&conn.capabilities, &capability.with_version(version))
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use runelink_types::{
+        capability::Capability,
+        ids::{ChannelId, MessageId, ServerId},
+        ws::{ClientWsEnvelope, ClientWsUpdate},
+    };
+    use tokio::sync::mpsc;
+
+    use super::ClientWsPool;
+    use crate::ids::ConnId;
+
+    #[tokio::test]
+    async fn client_updates_only_reach_negotiated_capabilities() {
+        let pool = ClientWsPool::new();
+        let (subscribed_tx, mut subscribed_rx) = mpsc::unbounded_channel();
+        let (unsubscribed_tx, mut unsubscribed_rx) = mpsc::unbounded_channel();
+        pool.register_connection(
+            ConnId::new(),
+            subscribed_tx,
+            BTreeMap::from([(Capability::MessagesEvents, 1)]),
+        )
+        .await;
+        let unsubscribed_id = ConnId::new();
+        pool.register_connection(
+            unsubscribed_id,
+            unsubscribed_tx,
+            BTreeMap::new(),
+        )
+        .await;
+        let envelope = ClientWsEnvelope::Update {
+            event_id: runelink_types::EventId::new(),
+            update: ClientWsUpdate::MessageDeleted {
+                server_id: ServerId::new(),
+                channel_id: ChannelId::new(),
+                message_id: MessageId::new(),
+            },
+        };
+
+        assert!(
+            !pool
+                .send_to_connection(unsubscribed_id, envelope.clone())
+                .await
+        );
+        assert_eq!(pool.broadcast(envelope.clone()).await, 1);
+        assert_eq!(subscribed_rx.recv().await, Some(envelope));
+        assert!(unsubscribed_rx.try_recv().is_err());
     }
 }

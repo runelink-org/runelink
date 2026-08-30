@@ -1,4 +1,5 @@
 use reqwest::StatusCode;
+use runelink_types::capability::Capability;
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -13,4 +14,7 @@ pub enum Error {
 
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("This client does not support the {0} capability")]
+    UnsupportedCapability(Capability),
 }

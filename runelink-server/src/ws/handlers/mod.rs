@@ -2,9 +2,16 @@ mod client;
 mod federation;
 mod shared;
 
-use runelink_types::ws::{ClientWsEnvelope, FederationWsEnvelope};
+use runelink_types::{
+    capability::{Capability, preferred_version},
+    ws::{ClientWsEnvelope, FederationWsEnvelope, WsError},
+};
 
-use crate::{ids::ConnId, state::AppState};
+use crate::{
+    capabilities::{client_websocket, federation_websocket},
+    ids::ConnId,
+    state::AppState,
+};
 
 pub async fn handle_client_message(
     state: &AppState,
@@ -16,6 +23,44 @@ pub async fn handle_client_message(
             request_id,
             request,
         } => {
+            let capability = request.capability();
+            let version = preferred_version(client_websocket, &capability);
+            let Some(required) =
+                version.map(|version| capability.with_version(version))
+            else {
+                let _ = state
+                    .client_ws_manager
+                    .send_error_to_connection(
+                        conn_id,
+                        Some(request_id),
+                        unsupported_capability(
+                            &capability,
+                            None,
+                            &state.config.public_host_with_explicit_port(),
+                        ),
+                    )
+                    .await;
+                return;
+            };
+            if !state
+                .client_ws_manager
+                .supports_capability(conn_id, &required)
+                .await
+            {
+                let _ = state
+                    .client_ws_manager
+                    .send_error_to_connection(
+                        conn_id,
+                        Some(request_id),
+                        unsupported_capability(
+                            &capability,
+                            version,
+                            &state.config.public_host_with_explicit_port(),
+                        ),
+                    )
+                    .await;
+                return;
+            }
             let result =
                 client::handle_client_request(state, conn_id, request).await;
             match result {
@@ -56,6 +101,9 @@ pub async fn handle_client_message(
         ClientWsEnvelope::Update { .. } => {
             log::warn!("Ignoring client websocket update envelope");
         }
+        ClientWsEnvelope::Hello(_) | ClientWsEnvelope::Welcome(_) => {
+            log::warn!("Ignoring repeated client capability negotiation");
+        }
     }
 }
 
@@ -71,6 +119,44 @@ pub async fn handle_federation_message(
             request,
             ..
         } => {
+            let capability = request.capability();
+            let version = preferred_version(federation_websocket, &capability);
+            let Some(required) =
+                version.map(|version| capability.with_version(version))
+            else {
+                let _ = state
+                    .federation_ws_manager
+                    .send_error_to_connection(
+                        conn_id,
+                        Some(request_id),
+                        unsupported_capability(
+                            &capability,
+                            None,
+                            &state.config.public_host_with_explicit_port(),
+                        ),
+                    )
+                    .await;
+                return;
+            };
+            if !state
+                .federation_ws_manager
+                .supports_capability(conn_id, &required)
+                .await
+            {
+                let _ = state
+                    .federation_ws_manager
+                    .send_error_to_connection(
+                        conn_id,
+                        Some(request_id),
+                        unsupported_capability(
+                            &capability,
+                            version,
+                            &state.config.public_host_with_explicit_port(),
+                        ),
+                    )
+                    .await;
+                return;
+            }
             let result = federation::handle_federation_request(
                 state,
                 conn_id,
@@ -118,6 +204,27 @@ pub async fn handle_federation_message(
             }
         }
         FederationWsEnvelope::Update { update, .. } => {
+            let capability = update.capability();
+            let Some(required) =
+                preferred_version(federation_websocket, &capability)
+                    .map(|version| capability.with_version(version))
+            else {
+                log::warn!(
+                    "Ignoring update for unsupported capability {capability}"
+                );
+                return;
+            };
+            if !state
+                .federation_ws_manager
+                .supports_capability(conn_id, &required)
+                .await
+            {
+                log::warn!(
+                    "Ignoring update for unnegotiated capability {}",
+                    update.capability()
+                );
+                return;
+            }
             if let Err(error) =
                 federation::handle_federation_update(state, update).await
             {
@@ -126,5 +233,29 @@ pub async fn handle_federation_message(
                 );
             }
         }
+        FederationWsEnvelope::Hello(_) | FederationWsEnvelope::Welcome(_) => {
+            log::warn!("Ignoring repeated federation capability negotiation");
+        }
+    }
+}
+
+fn unsupported_capability(
+    capability: &Capability,
+    version: Option<u16>,
+    server: &str,
+) -> WsError {
+    let message = match version {
+        Some(version) => format!(
+            "Capability {} was not negotiated",
+            capability.with_version(version)
+        ),
+        None => {
+            format!("{server} does not support the {capability} capability")
+        }
+    };
+    WsError {
+        code: "unsupported_capability".into(),
+        message,
+        details: None,
     }
 }

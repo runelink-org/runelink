@@ -1,6 +1,7 @@
 use log::info;
 use reqwest::Client;
 use runelink_types::{
+    capability::Capability,
     channel::{Channel, ChannelId, NewChannel},
     server::ServerId,
 };
@@ -27,6 +28,7 @@ pub async fn create(
         &url,
         access_token,
         new_channel,
+        Capability::ChannelsCreate,
     )
     .await
 }
@@ -42,7 +44,13 @@ pub async fn fetch_all(
         url = format!("{url}?target_host={host}");
     }
     info!("fetching all channels: {url}");
-    fetch_json_authed::<Vec<Channel>>(client, &url, access_token).await
+    fetch_json_authed::<Vec<Channel>>(
+        client,
+        &url,
+        access_token,
+        Capability::ChannelsRead,
+    )
+    .await
 }
 
 pub async fn fetch_by_server(
@@ -57,7 +65,13 @@ pub async fn fetch_by_server(
         url = format!("{url}?target_host={host}");
     }
     info!("fetching channels by server: {url}");
-    fetch_json_authed::<Vec<Channel>>(client, &url, access_token).await
+    fetch_json_authed::<Vec<Channel>>(
+        client,
+        &url,
+        access_token,
+        Capability::ChannelsRead,
+    )
+    .await
 }
 
 pub async fn fetch_by_id(
@@ -74,7 +88,13 @@ pub async fn fetch_by_id(
         url = format!("{url}?target_host={host}");
     }
     info!("fetching channel: {url}");
-    fetch_json_authed::<Channel>(client, &url, access_token).await
+    fetch_json_authed::<Channel>(
+        client,
+        &url,
+        access_token,
+        Capability::ChannelsRead,
+    )
+    .await
 }
 
 pub async fn delete(
@@ -91,5 +111,5 @@ pub async fn delete(
         url = format!("{url}?target_host={host}");
     }
     info!("deleting channel: {url}");
-    delete_authed(client, &url, access_token).await
+    delete_authed(client, &url, access_token, Capability::ChannelsDelete).await
 }

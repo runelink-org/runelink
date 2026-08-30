@@ -10,6 +10,11 @@ use log::{info, warn};
 use runelink_client::util::{get_api_url, get_federation_ws_url, pad_host};
 use runelink_types::{
     FederationClaims,
+    capability::{
+        CapabilityHello, NegotiatedCapabilities, VersionedCapability,
+        preferred_version, supported_capabilities,
+        versions::NEGOTIATION_VERSION,
+    },
     ids::{EventId, RequestId},
     user::UserRef,
     ws::{
@@ -26,9 +31,11 @@ use tokio_tungstenite::{
 use super::{
     error::{FederationRequestError, FederationRequestResult},
     pools::FederationWsPool,
-    socket_loops::{FederationSocket, federation_socket_loop},
+    socket_loops::{
+        FederationIncomingEvent, FederationSocket, federation_socket_loop,
+    },
 };
-use crate::{ids::ConnId, state::AppState};
+use crate::{capabilities::federation_websocket, ids::ConnId, state::AppState};
 
 type PendingFederationReplySender =
     oneshot::Sender<Result<FederationWsReply, WsError>>;
@@ -64,9 +71,12 @@ impl FederationWsManager {
     pub async fn register_connection(
         &self,
         sender: mpsc::UnboundedSender<FederationWsEnvelope>,
+        capabilities: NegotiatedCapabilities,
     ) -> ConnId {
         let conn_id = ConnId::new();
-        self.pool.register_connection(conn_id, sender).await;
+        self.pool
+            .register_connection(conn_id, sender, capabilities)
+            .await;
         conn_id
     }
 
@@ -98,6 +108,14 @@ impl FederationWsManager {
         self.pool.authenticated_issuer(conn_id).await
     }
 
+    pub async fn supports_capability(
+        &self,
+        conn_id: ConnId,
+        capability: &VersionedCapability,
+    ) -> bool {
+        self.pool.supports_capability(conn_id, capability).await
+    }
+
     /// Sends a request to the given host and waits for a reply with a timeout.
     pub async fn send_request_to_host(
         &self,
@@ -110,6 +128,24 @@ impl FederationWsManager {
         let host = pad_host(host);
         if !self.ensure_connection(state, &host).await {
             return Err(FederationRequestError::HostUnavailable { host });
+        }
+
+        let capability = request.capability();
+        let Some(capability) = preferred_version(
+            crate::capabilities::federation_websocket,
+            &capability,
+        )
+        .map(|version| capability.with_version(version)) else {
+            return Err(FederationRequestError::UnsupportedCapability {
+                host,
+                capability: capability.to_string(),
+            });
+        };
+        if !self.pool.host_supports_capability(&host, &capability).await {
+            return Err(FederationRequestError::UnsupportedCapability {
+                host,
+                capability: capability.capability.to_string(),
+            });
         }
 
         let request_id = RequestId::new();
@@ -330,9 +366,18 @@ impl FederationWsManager {
             };
             request.headers_mut().insert("Authorization", auth_header);
 
-            let stream = match connect_async(request).await {
-                Ok((stream, _)) => stream,
-                Err(error) => {
+            let stream = match tokio::time::timeout(
+                StdDuration::from_secs(5),
+                connect_async(request),
+            )
+            .await
+            {
+                Ok(Ok((stream, _))) => stream,
+                Err(_) => {
+                    warn!("Timed out opening federation websocket to {host}");
+                    return false;
+                }
+                Ok(Err(error)) => {
                     warn!(
                         "Failed opening federation websocket to {host}: {error}"
                     );
@@ -340,9 +385,69 @@ impl FederationWsManager {
                 }
             };
 
+            let offered_capabilities =
+                supported_capabilities(federation_websocket);
+            let hello = FederationWsEnvelope::Hello(CapabilityHello {
+                negotiation_version: NEGOTIATION_VERSION,
+                capabilities: offered_capabilities.clone(),
+            });
+            let Ok(payload) = serde_json::to_string(&hello) else {
+                return false;
+            };
+            let mut socket = FederationSocket::Outbound(stream);
+            if !matches!(
+                tokio::time::timeout(
+                    StdDuration::from_secs(5),
+                    socket.send_text(payload),
+                )
+                .await,
+                Ok(Ok(()))
+            ) {
+                warn!("Failed sending federation capability hello to {host}");
+                return false;
+            }
+            let capabilities = match tokio::time::timeout(
+                StdDuration::from_secs(5),
+                socket.recv_event(),
+            )
+            .await
+            {
+                Ok(FederationIncomingEvent::Text(payload)) => {
+                    match serde_json::from_str(&payload) {
+                        Ok(FederationWsEnvelope::Welcome(welcome))
+                            if welcome.negotiation_version
+                                == NEGOTIATION_VERSION
+                                && welcome.capabilities.iter().all(
+                                    |(capability, version)| {
+                                        offered_capabilities
+                                            .get(capability)
+                                            .is_some_and(|versions| {
+                                                versions.contains(version)
+                                            })
+                                    },
+                                ) =>
+                        {
+                            welcome.capabilities
+                        }
+                        _ => {
+                            warn!(
+                                "Failed negotiating federation capabilities with {host}"
+                            );
+                            return false;
+                        }
+                    }
+                }
+                _ => {
+                    warn!(
+                        "Failed negotiating federation capabilities with {host}"
+                    );
+                    return false;
+                }
+            };
+
             let (sender, outbound_rx) =
                 mpsc::unbounded_channel::<FederationWsEnvelope>();
-            let conn_id = self.register_connection(sender).await;
+            let conn_id = self.register_connection(sender, capabilities).await;
             let issuer = get_api_url(host, state.config.secure);
             let _ = self
                 .authenticate_connection(conn_id, host.to_string(), issuer)
@@ -352,13 +457,8 @@ impl FederationWsManager {
 
             let loop_task: Pin<Box<dyn Future<Output = ()> + Send>> =
                 Box::pin(async move {
-                    federation_socket_loop(
-                        state,
-                        conn_id,
-                        FederationSocket::Outbound(stream),
-                        outbound_rx,
-                    )
-                    .await;
+                    federation_socket_loop(state, conn_id, socket, outbound_rx)
+                        .await;
                     info!("Federation websocket closed for {host}");
                 });
             tokio::spawn(loop_task);

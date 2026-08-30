@@ -3,6 +3,7 @@
 use std::borrow::Borrow;
 
 use runelink_types::{
+    capability::{NegotiatedCapabilities, VersionedCapability},
     ids::{EventId, RequestId},
     user::UserRef,
     ws::{ClientWsEnvelope, ClientWsReply, ClientWsUpdate, WsError},
@@ -29,9 +30,12 @@ impl ClientWsManager {
     pub async fn register_connection(
         &self,
         sender: mpsc::UnboundedSender<ClientWsEnvelope>,
+        capabilities: NegotiatedCapabilities,
     ) -> ConnId {
         let conn_id = ConnId::new();
-        self.pool.register_connection(conn_id, sender).await;
+        self.pool
+            .register_connection(conn_id, sender, capabilities)
+            .await;
         conn_id
     }
 
@@ -52,6 +56,14 @@ impl ClientWsManager {
         conn_id: ConnId,
     ) -> Option<UserRef> {
         self.pool.authenticated_user_ref(conn_id).await
+    }
+
+    pub async fn supports_capability(
+        &self,
+        conn_id: ConnId,
+        capability: &VersionedCapability,
+    ) -> bool {
+        self.pool.supports_capability(conn_id, capability).await
     }
 
     pub async fn send_update_to_connection(

@@ -1,10 +1,13 @@
 use crate::{state::AppState, ws};
-use axum::{Router, extract::Query, response::IntoResponse, routing::get};
+use axum::{
+    Router, extract::Query, middleware, response::IntoResponse, routing::get,
+};
 use log::info;
 use serde::Deserialize;
 use tower_http::cors;
 
 mod auth;
+mod capabilities;
 mod channels;
 mod memberships;
 mod messages;
@@ -21,6 +24,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         // Mount auth router (includes OIDC discovery and auth endpoints)
         .merge(auth::router())
+        .route("/.well-known/runelink", get(capabilities::discovery))
         // Mount websocket routers
         .route("/ws/client", get(ws::client_ws))
         .route("/ws/federation", get(ws::federation_ws))
@@ -79,6 +83,7 @@ pub fn router() -> Router<AppState> {
             get(memberships::get_by_user_and_server)
                 .delete(memberships::delete),
         )
+        .route_layer(middleware::from_fn(capabilities::require_capability))
         .layer(cors)
 }
 
