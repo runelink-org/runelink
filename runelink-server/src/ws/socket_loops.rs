@@ -1,7 +1,12 @@
+use std::time::Duration;
+
 use axum::{
     extract::{
         State,
-        ws::{Message as AxumMessage, WebSocket, WebSocketUpgrade},
+        ws::{
+            CloseFrame as AxumCloseFrame, Message as AxumMessage, WebSocket,
+            WebSocketUpgrade, close_code,
+        },
     },
     http::HeaderMap,
     response::IntoResponse,
@@ -19,7 +24,10 @@ use runelink_types::{
 use tokio::{net::TcpStream, sync::mpsc};
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
-    tungstenite::protocol::Message as WsMessage,
+    tungstenite::protocol::{
+        CloseFrame as WsCloseFrame, Message as WsMessage,
+        frame::coding::CloseCode,
+    },
 };
 
 use super::handlers::{handle_client_message, handle_federation_message};
@@ -31,6 +39,11 @@ use crate::{
     ids::ConnId,
     state::AppState,
 };
+
+pub(super) const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
+// How long to wait for the peer's close reply, so the close frame is not lost
+// to a connection reset.
+const CLOSE_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub enum FederationSocket {
     Inbound(WebSocket),
@@ -58,6 +71,30 @@ impl FederationSocket {
                 .send(WsMessage::Text(payload.into()))
                 .await
                 .map_err(|error| error.to_string()),
+        }
+    }
+
+    /// Closes the socket after a failed capability negotiation.
+    pub(super) async fn close_protocol_error(&mut self, reason: &str) {
+        match self {
+            FederationSocket::Inbound(socket) => {
+                close_axum_protocol_error(socket, reason).await;
+            }
+            FederationSocket::Outbound(socket) => {
+                let _ = socket
+                    .send(WsMessage::Close(Some(WsCloseFrame {
+                        code: CloseCode::Protocol,
+                        reason: reason.into(),
+                    })))
+                    .await;
+                let _ = tokio::time::timeout(CLOSE_HANDSHAKE_TIMEOUT, async {
+                    while matches!(
+                        socket.next().await,
+                        Some(Ok(message)) if !message.is_close()
+                    ) {}
+                })
+                .await;
+            }
         }
     }
 
@@ -231,30 +268,33 @@ async fn federation_ws_upgrade_loop(
 async fn negotiate_client_socket(
     socket: &mut WebSocket,
 ) -> Option<NegotiatedCapabilities> {
-    let message = match tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        socket.recv(),
-    )
-    .await
-    {
+    let message = tokio::time::timeout(HELLO_TIMEOUT, socket.recv()).await;
+    let payload = match message {
         Ok(Some(Ok(AxumMessage::Text(payload)))) => payload,
+        // The client went away during the handshake.
+        Ok(None | Some(Ok(AxumMessage::Close(_))) | Some(Err(_))) => {
+            return None;
+        }
+        // Timeouts and non-text frames are not evidence of incompatibility, so
+        // the client is not told it is incompatible.
         _ => {
             log::warn!("Client websocket did not send a capability hello");
             return None;
         }
     };
-    let ClientWsEnvelope::Hello(hello) = serde_json::from_str(&message).ok()?
-    else {
-        log::warn!("Client websocket sent an invalid capability hello");
-        return None;
+    let hello = match serde_json::from_str(&payload) {
+        Ok(ClientWsEnvelope::Hello(hello))
+            if hello.negotiation_version == NEGOTIATION_VERSION =>
+        {
+            hello
+        }
+        _ => {
+            let reason = hello_rejection(&payload);
+            log::warn!("Rejected client websocket: {reason}");
+            close_axum_protocol_error(socket, &reason).await;
+            return None;
+        }
     };
-    if hello.negotiation_version != NEGOTIATION_VERSION {
-        log::warn!(
-            "Unsupported client negotiation version: {}",
-            hello.negotiation_version
-        );
-        return None;
-    }
     let capabilities = negotiate_capabilities(
         &hello.capabilities,
         &supported_capabilities(client_websocket),
@@ -275,33 +315,74 @@ async fn negotiate_client_socket(
     Some(capabilities)
 }
 
+/// Explains why a first message is not an acceptable hello. The negotiation
+/// version is read on its own, so hellos from newer negotiation versions get an
+/// accurate reason even if the rest of their shape changed.
+fn hello_rejection(payload: &str) -> String {
+    let version = serde_json::from_str::<serde_json::Value>(payload)
+        .ok()
+        .and_then(|value| value.pointer("/data/negotiation_version")?.as_u64());
+    match version {
+        Some(version) if version != u64::from(NEGOTIATION_VERSION) => {
+            format!("Unsupported negotiation version {version}")
+        }
+        _ => "Invalid capability hello".into(),
+    }
+}
+
+/// Closes a socket whose capability negotiation failed, so the peer can tell an
+/// incompatible host apart from a dropped connection.
+async fn close_axum_protocol_error(socket: &mut WebSocket, reason: &str) {
+    let _ = socket
+        .send(AxumMessage::Close(Some(AxumCloseFrame {
+            code: close_code::PROTOCOL,
+            reason: reason.into(),
+        })))
+        .await;
+    let _ = tokio::time::timeout(CLOSE_HANDSHAKE_TIMEOUT, async {
+        while matches!(
+            socket.recv().await,
+            Some(Ok(message)) if !matches!(message, AxumMessage::Close(_))
+        ) {}
+    })
+    .await;
+}
+
 async fn negotiate_federation_socket(
     host: &str,
     socket: &mut FederationSocket,
 ) -> Option<NegotiatedCapabilities> {
-    let event = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        socket.recv_event(),
-    )
-    .await
-    .ok()?;
-    let FederationIncomingEvent::Text(payload) = event else {
-        log::warn!("Federation websocket did not send a capability hello");
-        return None;
+    let event = tokio::time::timeout(HELLO_TIMEOUT, socket.recv_event()).await;
+    let payload = match event {
+        Ok(FederationIncomingEvent::Text(payload)) => payload,
+        // The peer went away during the handshake.
+        Ok(
+            FederationIncomingEvent::Closed | FederationIncomingEvent::Error(_),
+        ) => {
+            return None;
+        }
+        // Timeouts and non-text frames are not evidence of incompatibility, so
+        // the peer is not told it is incompatible.
+        _ => {
+            log::warn!(
+                "Federation websocket from {host} did not send a capability hello"
+            );
+            return None;
+        }
     };
-    let FederationWsEnvelope::Hello(hello) =
-        serde_json::from_str(&payload).ok()?
-    else {
-        log::warn!("Federation websocket sent an invalid capability hello");
-        return None;
+    let hello = match serde_json::from_str(&payload) {
+        Ok(FederationWsEnvelope::Hello(hello))
+            if hello.negotiation_version == NEGOTIATION_VERSION =>
+        {
+            hello
+        }
+        _ => {
+            let reason = hello_rejection(&payload);
+            log::warn!("Rejected federation websocket from {host}: {reason}");
+            socket.close_protocol_error(&reason).await;
+            return None;
+        }
     };
-    if hello.negotiation_version != NEGOTIATION_VERSION {
-        log::warn!(
-            "Unsupported federation negotiation version: {}",
-            hello.negotiation_version
-        );
-        return None;
-    }
     let capabilities = negotiate_capabilities(
         &hello.capabilities,
         &supported_capabilities(federation_websocket),
@@ -375,4 +456,26 @@ pub async fn federation_socket_loop(
         .federation_ws_manager
         .deregister_connection(conn_id)
         .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hello_rejection;
+
+    #[test]
+    fn hello_rejection_reports_newer_negotiation_versions() {
+        assert_eq!(
+            hello_rejection(
+                r#"{"type":"hello","data":{"negotiation_version":2,"offers":[]}}"#
+            ),
+            "Unsupported negotiation version 2"
+        );
+        assert_eq!(
+            hello_rejection(
+                r#"{"type":"hello","data":{"negotiation_version":1}}"#
+            ),
+            "Invalid capability hello"
+        );
+        assert_eq!(hello_rejection("not json"), "Invalid capability hello");
+    }
 }

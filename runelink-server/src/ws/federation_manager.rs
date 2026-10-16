@@ -32,7 +32,8 @@ use super::{
     error::{FederationRequestError, FederationRequestResult},
     pools::FederationWsPool,
     socket_loops::{
-        FederationIncomingEvent, FederationSocket, federation_socket_loop,
+        FederationIncomingEvent, FederationSocket, HELLO_TIMEOUT,
+        federation_socket_loop,
     },
 };
 use crate::{capabilities::federation_websocket, ids::ConnId, state::AppState};
@@ -406,41 +407,37 @@ impl FederationWsManager {
                 warn!("Failed sending federation capability hello to {host}");
                 return false;
             }
-            let capabilities = match tokio::time::timeout(
-                StdDuration::from_secs(5),
-                socket.recv_event(),
-            )
-            .await
-            {
-                Ok(FederationIncomingEvent::Text(payload)) => {
-                    match serde_json::from_str(&payload) {
-                        Ok(FederationWsEnvelope::Welcome(welcome))
-                            if welcome.negotiation_version
-                                == NEGOTIATION_VERSION
-                                && welcome.capabilities.iter().all(
-                                    |(capability, version)| {
-                                        offered_capabilities
-                                            .get(capability)
-                                            .is_some_and(|versions| {
-                                                versions.contains(version)
-                                            })
-                                    },
-                                ) =>
-                        {
-                            welcome.capabilities
-                        }
-                        _ => {
-                            warn!(
-                                "Failed negotiating federation capabilities with {host}"
-                            );
-                            return false;
-                        }
-                    }
+            let event =
+                tokio::time::timeout(HELLO_TIMEOUT, socket.recv_event()).await;
+            let Ok(FederationIncomingEvent::Text(payload)) = event else {
+                // Timeouts and closes are not evidence of incompatibility.
+                warn!(
+                    "Federation peer {host} did not send a capability welcome"
+                );
+                return false;
+            };
+            let capabilities = match serde_json::from_str(&payload) {
+                Ok(FederationWsEnvelope::Welcome(welcome))
+                    if welcome.negotiation_version == NEGOTIATION_VERSION
+                        && welcome.capabilities.iter().all(
+                            |(capability, version)| {
+                                offered_capabilities
+                                    .get(capability)
+                                    .is_some_and(|versions| {
+                                        versions.contains(version)
+                                    })
+                            },
+                        ) =>
+                {
+                    welcome.capabilities
                 }
                 _ => {
                     warn!(
-                        "Failed negotiating federation capabilities with {host}"
+                        "Federation peer {host} sent an invalid capability welcome"
                     );
+                    socket
+                        .close_protocol_error("Invalid capability welcome")
+                        .await;
                     return false;
                 }
             };
