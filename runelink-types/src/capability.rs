@@ -1,7 +1,9 @@
 use std::{
     cmp::Ordering,
     collections::BTreeMap,
+    fmt,
     hash::{Hash, Hasher},
+    str::FromStr,
 };
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -28,7 +30,10 @@ macro_rules! define_capabilities {
                 }
             }
 
-            pub fn with_version(&self, version: u16) -> VersionedCapability {
+            pub fn with_version(
+                &self,
+                version: CapabilityVersion,
+            ) -> VersionedCapability {
                 VersionedCapability {
                     capability: self.clone(),
                     version,
@@ -126,27 +131,142 @@ impl<'de> Deserialize<'de> for Capability {
     }
 }
 
-impl std::fmt::Display for Capability {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Capability {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())
+    }
+}
+
+/// A CalVer capability version: `YYYY.MM.DD`, with an optional `.N` revision
+/// for additional versions on the same day. Versions are labels, so dates are
+/// not checked against the calendar.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CapabilityVersion {
+    year: u16,
+    month: u16,
+    day: u16,
+    revision: u16,
+}
+
+impl CapabilityVersion {
+    pub const fn new(year: u16, month: u16, day: u16) -> Self {
+        assert!(
+            has_valid_date_fields(year, month, day),
+            "invalid capability version"
+        );
+        Self {
+            year,
+            month,
+            day,
+            revision: 0,
+        }
+    }
+
+    pub const fn with_revision(self, revision: u16) -> Self {
+        Self { revision, ..self }
+    }
+}
+
+const fn has_valid_date_fields(year: u16, month: u16, day: u16) -> bool {
+    year <= 9999 && matches!(month, 1..=12) && matches!(day, 1..=31)
+}
+
+impl fmt::Display for CapabilityVersion {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{:04}.{:02}.{:02}",
+            self.year, self.month, self.day
+        )?;
+        if self.revision > 0 {
+            write!(formatter, ".{}", self.revision)?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Debug for CapabilityVersion {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, formatter)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InvalidCapabilityVersion;
+
+impl fmt::Display for InvalidCapabilityVersion {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("invalid capability version")
+    }
+}
+
+impl std::error::Error for InvalidCapabilityVersion {}
+
+impl FromStr for CapabilityVersion {
+    type Err = InvalidCapabilityVersion;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let fields: Vec<u16> = value
+            .split('.')
+            .map(str::parse)
+            .collect::<Result<_, _>>()
+            .map_err(|_| InvalidCapabilityVersion)?;
+        let (year, month, day, revision) = match fields[..] {
+            [year, month, day] => (year, month, day, 0),
+            [year, month, day, revision] => (year, month, day, revision),
+            _ => return Err(InvalidCapabilityVersion),
+        };
+        let version = Self {
+            year,
+            month,
+            day,
+            revision,
+        };
+        // Display defines the one canonical spelling, which rules out signs,
+        // missing padding, leading zeros, and `.0`.
+        if !has_valid_date_fields(year, month, day)
+            || version.to_string() != value
+        {
+            return Err(InvalidCapabilityVersion);
+        }
+        Ok(version)
+    }
+}
+
+impl Serialize for CapabilityVersion {
+    fn serialize<S: Serializer>(
+        &self,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for CapabilityVersion {
+    fn deserialize<D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Self, D::Error> {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(serde::de::Error::custom)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VersionedCapability {
     pub capability: Capability,
-    pub version: u16,
+    pub version: CapabilityVersion,
 }
 
-impl std::fmt::Display for VersionedCapability {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for VersionedCapability {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}@{}", self.capability, self.version)
     }
 }
 
-pub type CapabilityCatalog = fn(&Capability) -> &'static [u16];
-pub type SupportedCapabilities = BTreeMap<Capability, Vec<u16>>;
-pub type NegotiatedCapabilities = BTreeMap<Capability, u16>;
+pub type CapabilityCatalog = fn(&Capability) -> &'static [CapabilityVersion];
+pub type SupportedCapabilities = BTreeMap<Capability, Vec<CapabilityVersion>>;
+pub type NegotiatedCapabilities = BTreeMap<Capability, CapabilityVersion>;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CapabilityHello {
@@ -186,7 +306,7 @@ pub fn supported_capabilities(
 pub fn preferred_version(
     catalog: CapabilityCatalog,
     capability: &Capability,
-) -> Option<u16> {
+) -> Option<CapabilityVersion> {
     catalog(capability).iter().copied().max()
 }
 
@@ -226,50 +346,114 @@ pub fn supports(
 mod tests {
     use super::*;
 
-    fn messages_read_only(capability: &Capability) -> &'static [u16] {
+    const V1: CapabilityVersion = CapabilityVersion::new(2026, 10, 16);
+    const V2: CapabilityVersion = V1.with_revision(1);
+    const V3: CapabilityVersion = CapabilityVersion::new(2026, 10, 17);
+    const V4: CapabilityVersion = CapabilityVersion::new(2026, 11, 1);
+
+    fn messages_read_only(
+        capability: &Capability,
+    ) -> &'static [CapabilityVersion] {
         if capability == &Capability::MessagesRead {
-            &[1, 2]
+            &[V1, V2]
         } else {
             &[]
         }
     }
 
     #[test]
+    fn versions_order_by_date_then_revision() {
+        let v10 = V1.with_revision(10);
+        let v9 = V1.with_revision(9);
+        assert!(V1 < V2 && V2 < v9 && v9 < v10 && v10 < V3 && V3 < V4);
+    }
+
+    #[test]
+    fn versions_round_trip_through_their_canonical_spelling() {
+        for spelling in [
+            "2026.10.16",
+            "2026.10.16.1",
+            "2026.01.05.12",
+            "2026.10.16.65535",
+        ] {
+            let version: CapabilityVersion = spelling.parse().unwrap();
+            assert_eq!(version.to_string(), spelling);
+        }
+        assert_eq!(serde_json::to_string(&V2).unwrap(), r#""2026.10.16.1""#);
+        assert!(serde_json::from_str::<CapabilityVersion>("1").is_err());
+    }
+
+    #[test]
+    fn non_canonical_versions_are_rejected() {
+        for spelling in [
+            "",
+            "1",
+            "2026.10",
+            "2026.1.16",
+            "2026.10.6",
+            "26.10.16",
+            "2026.10.16.0",
+            "2026.10.16.01",
+            "2026.10.16.",
+            "2026.10.16.1.1",
+            "2026.13.16",
+            "2026.10.32",
+            "2026.00.16",
+            "2026.10.+1",
+            "2026.10.16.-1",
+            "2026.10.16.65536",
+            "2026.10.16.99999",
+            "2026..16",
+            " 2026.10.16",
+            "2026.10.16 ",
+            "２026.10.16",
+        ] {
+            assert!(
+                spelling.parse::<CapabilityVersion>().is_err(),
+                "{spelling} should be rejected"
+            );
+        }
+    }
+
+    #[test]
     fn negotiation_selects_highest_common_version_per_capability() {
         let offered = BTreeMap::from([
-            ("messages.read".into(), vec![1, 2, 4]),
-            ("messages.create".into(), vec![1]),
+            ("messages.read".into(), vec![V1, V2, V4]),
+            ("messages.create".into(), vec![V1]),
         ]);
         let supported = BTreeMap::from([
-            ("messages.read".into(), vec![1, 2, 3]),
-            ("messages.delete".into(), vec![1]),
+            ("messages.read".into(), vec![V1, V2, V3]),
+            ("messages.delete".into(), vec![V1]),
         ]);
 
         assert_eq!(
             negotiate_capabilities(&offered, &supported),
-            BTreeMap::from([("messages.read".into(), 2)])
+            BTreeMap::from([("messages.read".into(), V2)])
         );
     }
 
     #[test]
     fn versioned_capability_has_wire_format() {
         assert_eq!(
-            Capability::MessagesRead.with_version(2).to_string(),
-            "messages.read@2"
+            Capability::MessagesRead.with_version(V2).to_string(),
+            "messages.read@2026.10.16.1"
         );
         assert_eq!(Capability::MessagesRead.to_string(), "messages.read");
     }
 
     #[test]
     fn unknown_capability_round_trips_as_a_map_key() {
-        let json = r#"{"messages.read":[1],"vendor.search":[2]}"#;
+        let json = r#"{"messages.read":["2026.10.16"],"vendor.search":["2026.10.17"]}"#;
         let capabilities: SupportedCapabilities =
             serde_json::from_str(json).unwrap();
 
-        assert_eq!(capabilities.get(&Capability::MessagesRead), Some(&vec![1]));
+        assert_eq!(
+            capabilities.get(&Capability::MessagesRead),
+            Some(&vec![V1])
+        );
         assert_eq!(
             capabilities.get(&Capability::Unknown("vendor.search".into())),
-            Some(&vec![2])
+            Some(&vec![V3])
         );
         assert_eq!(serde_json::to_string(&capabilities).unwrap(), json);
     }
@@ -278,11 +462,11 @@ mod tests {
     fn catalog_omits_unsupported_capabilities() {
         assert_eq!(
             supported_capabilities(messages_read_only),
-            BTreeMap::from([(Capability::MessagesRead, vec![1, 2])])
+            BTreeMap::from([(Capability::MessagesRead, vec![V1, V2])])
         );
         assert_eq!(
             preferred_version(messages_read_only, &Capability::MessagesRead),
-            Some(2)
+            Some(V2)
         );
         assert_eq!(
             preferred_version(messages_read_only, &Capability::MessagesCreate),

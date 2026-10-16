@@ -630,7 +630,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use runelink_types::{
-        capability::Capability,
+        capability::{Capability, versions::messages},
         ids::{ChannelId, MessageId, ServerId},
         ws::{ClientWsEnvelope, ClientWsUpdate},
     };
@@ -647,7 +647,10 @@ mod tests {
         pool.register_connection(
             ConnId::new(),
             subscribed_tx,
-            BTreeMap::from([(Capability::MessagesEvents, 1)]),
+            BTreeMap::from([(
+                Capability::MessagesEvents,
+                messages::EVENTS_VERSION,
+            )]),
         )
         .await;
         let unsubscribed_id = ConnId::new();

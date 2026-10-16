@@ -3,7 +3,7 @@ mod federation;
 mod shared;
 
 use runelink_types::{
-    capability::{Capability, preferred_version},
+    capability::{Capability, CapabilityVersion, preferred_version},
     ws::{ClientWsEnvelope, FederationWsEnvelope, WsError},
 };
 
@@ -241,7 +241,7 @@ pub async fn handle_federation_message(
 
 fn unsupported_capability(
     capability: &Capability,
-    version: Option<u16>,
+    version: Option<CapabilityVersion>,
     server: &str,
 ) -> WsError {
     let message = match version {
