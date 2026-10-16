@@ -79,6 +79,14 @@ pub async fn require_capability(request: Request, next: Next) -> Response {
     }
     let requested = capability.with_version(version);
     if !required.supports(&requested) || !catalog_supports(http, &requested) {
+        let supported_versions = http(&required.capability);
+        if !supported_versions.is_empty() {
+            log::warn!(
+                "HTTP {} {} requested {requested}, but this host supports versions {supported_versions:?}",
+                request.method(),
+                path.as_str(),
+            );
+        }
         return capability_error(
             StatusCode::BAD_REQUEST,
             "unsupported_capability",

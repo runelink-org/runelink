@@ -25,7 +25,9 @@ use tokio_tungstenite::{
 use super::handlers::{handle_client_message, handle_federation_message};
 use crate::{
     auth::Principal,
-    capabilities::{client_websocket, federation_websocket},
+    capabilities::{
+        client_websocket, federation_websocket, log_version_mismatches,
+    },
     ids::ConnId,
     state::AppState,
 };
@@ -203,8 +205,10 @@ async fn federation_ws_upgrade_loop(
             return;
         }
     };
+    let host = host_from_issuer(&auth.claims.iss);
     let mut socket = FederationSocket::Inbound(socket);
-    let Some(capabilities) = negotiate_federation_socket(&mut socket).await
+    let Some(capabilities) =
+        negotiate_federation_socket(&host, &mut socket).await
     else {
         return;
     };
@@ -215,7 +219,6 @@ async fn federation_ws_upgrade_loop(
         .register_connection(sender, capabilities)
         .await;
 
-    let host = host_from_issuer(&auth.claims.iss);
     let issuer = auth.claims.iss.clone();
     let _ = state
         .federation_ws_manager
@@ -256,6 +259,12 @@ async fn negotiate_client_socket(
         &hello.capabilities,
         &supported_capabilities(client_websocket),
     );
+    log_version_mismatches(
+        "Client websocket",
+        &hello.capabilities,
+        &capabilities,
+        client_websocket,
+    );
     let welcome = ClientWsEnvelope::Welcome(CapabilityWelcome {
         negotiation_version: NEGOTIATION_VERSION,
         capabilities: capabilities.clone(),
@@ -267,6 +276,7 @@ async fn negotiate_client_socket(
 }
 
 async fn negotiate_federation_socket(
+    host: &str,
     socket: &mut FederationSocket,
 ) -> Option<NegotiatedCapabilities> {
     let event = tokio::time::timeout(
@@ -295,6 +305,12 @@ async fn negotiate_federation_socket(
     let capabilities = negotiate_capabilities(
         &hello.capabilities,
         &supported_capabilities(federation_websocket),
+    );
+    log_version_mismatches(
+        &format!("Federation peer {host}"),
+        &hello.capabilities,
+        &capabilities,
+        federation_websocket,
     );
     let welcome = FederationWsEnvelope::Welcome(CapabilityWelcome {
         negotiation_version: NEGOTIATION_VERSION,

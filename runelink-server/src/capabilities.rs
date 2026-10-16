@@ -1,5 +1,6 @@
 use runelink_types::capability::{
-    Capability,
+    Capability, CapabilityCatalog, NegotiatedCapabilities,
+    SupportedCapabilities,
     versions::{auth, channels, memberships, messages, servers, system, users},
 };
 
@@ -99,5 +100,51 @@ pub const fn http(capability: &Capability) -> &'static [u16] {
         Capability::UsersEvents => &[],
         Capability::UsersRead => users::READ_VERSIONS,
         Capability::Unknown(_) => &[],
+    }
+}
+
+const MAX_LOGGED_VERSIONS: usize = 8;
+
+/// Logs offered capabilities this host supports, but at no common version.
+pub fn log_version_mismatches(
+    peer: &str,
+    offered: &SupportedCapabilities,
+    negotiated: &NegotiatedCapabilities,
+    catalog: CapabilityCatalog,
+) {
+    for (capability, versions) in offered {
+        let supported = catalog(capability);
+        if !supported.is_empty()
+            && !versions.is_empty()
+            && !negotiated.contains_key(capability)
+        {
+            log::warn!(
+                "{peer} offered {capability} versions {}, but this host supports versions {supported:?}",
+                format_versions(versions)
+            );
+        }
+    }
+}
+
+/// Formats untrusted peer version lists without unbounded log lines.
+fn format_versions(versions: &[u16]) -> String {
+    let shown = &versions[..versions.len().min(MAX_LOGGED_VERSIONS)];
+    match versions.len() - shown.len() {
+        0 => format!("{shown:?}"),
+        hidden => format!("{shown:?} (+{hidden} more)"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncates_long_version_lists() {
+        assert_eq!(format_versions(&[1, 2]), "[1, 2]");
+        assert_eq!(
+            format_versions(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
+            "[1, 2, 3, 4, 5, 6, 7, 8] (+2 more)"
+        );
     }
 }
