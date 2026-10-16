@@ -45,9 +45,9 @@ More detailed federation/authentication documentation is planned.
 
 ## API capabilities
 
-RuneLink versions semantic operations independently. Client and federation WebSockets begin with a `hello` envelope listing exact supported versions and receive a `welcome` envelope containing the highest common version for each capability. Operations and updates whose capabilities were not negotiated remain unavailable without disabling the rest of the connection.
+RuneLink versions semantic operations independently. Capability versions use CalVer: `YYYY.MM.DD`, with an optional `.N` revision for additional versions on the same day (for example `2026.10.16.1`). Client and federation WebSockets begin with a `hello` envelope listing exact supported versions and receive a `welcome` envelope containing the highest common version for each capability. Operations and updates whose capabilities were not negotiated remain unavailable without disabling the rest of the connection.
 
-HTTP capability support is advertised at `/.well-known/runelink`. Versioned HTTP requests send the selected operation and version in the `runelink-capability` header, for example `messages.read@1`. OIDC discovery, JWKS, capability discovery, and `/ping` remain unversioned so clients can bootstrap a connection.
+HTTP capability support is advertised at `/.well-known/runelink`. Versioned HTTP requests send the selected operation and version in the `runelink-capability` header, for example `messages.read@2026.10.16`. OIDC discovery, JWKS, capability discovery, and `/ping` remain unversioned so clients can bootstrap a connection.
 
 Capabilities describe protocol compatibility, not authorization. Permissions remain a separate many-to-many policy system: one permission may authorize several capabilities, and one capability may require different permissions depending on the actor and resource.
 

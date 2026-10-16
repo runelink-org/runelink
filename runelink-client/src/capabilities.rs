@@ -1,11 +1,11 @@
 use runelink_types::capability::{
-    Capability, preferred_version,
+    Capability, CapabilityVersion, preferred_version,
     versions::{auth, channels, memberships, messages, servers, users},
 };
 
 use crate::error::{Error, Result};
 
-pub const fn http(capability: &Capability) -> &'static [u16] {
+pub const fn http(capability: &Capability) -> &'static [CapabilityVersion] {
     match capability {
         Capability::AuthAuthenticate => &[],
         Capability::AuthDiscovery => &[],
@@ -38,7 +38,9 @@ pub const fn http(capability: &Capability) -> &'static [u16] {
     }
 }
 
-pub fn preferred_http_version(capability: &Capability) -> Option<u16> {
+pub fn preferred_http_version(
+    capability: &Capability,
+) -> Option<CapabilityVersion> {
     preferred_version(http, capability)
 }
 

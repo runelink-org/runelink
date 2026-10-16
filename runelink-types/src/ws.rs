@@ -575,7 +575,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::{AuthTokenAccessRequest, ClientWsEnvelope};
-    use crate::capability::{CapabilityHello, versions::NEGOTIATION_VERSION};
+    use crate::capability::{
+        CapabilityHello,
+        versions::{NEGOTIATION_VERSION, messages},
+    };
 
     #[test]
     fn auth_token_access_request_debug_redacts_access_token() {
@@ -593,7 +596,10 @@ mod tests {
     fn capability_hello_has_stable_bootstrap_shape() {
         let envelope = ClientWsEnvelope::Hello(CapabilityHello {
             negotiation_version: NEGOTIATION_VERSION,
-            capabilities: BTreeMap::from([("messages.read".into(), vec![1])]),
+            capabilities: BTreeMap::from([(
+                "messages.read".into(),
+                vec![messages::READ_VERSION],
+            )]),
         });
 
         assert_eq!(
@@ -602,7 +608,7 @@ mod tests {
                 "type": "hello",
                 "data": {
                     "negotiation_version": 1,
-                    "capabilities": { "messages.read": [1] }
+                    "capabilities": { "messages.read": ["2026.10.16"] }
                 }
             })
         );

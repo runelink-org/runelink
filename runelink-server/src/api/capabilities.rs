@@ -6,7 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use runelink_types::capability::{
-    Capability, CapabilityDiscovery, HTTP_CAPABILITY_HEADER,
+    Capability, CapabilityDiscovery, CapabilityVersion, HTTP_CAPABILITY_HEADER,
     VersionedCapability, catalog_supports, supported_capabilities,
     versions::{
         NEGOTIATION_VERSION, auth, channels, memberships, messages, servers,
@@ -176,7 +176,7 @@ fn required_capability(
 
 fn required(
     capability: Capability,
-    versions: &'static [u16],
+    versions: &'static [CapabilityVersion],
 ) -> Option<RequiredCapability> {
     Some(RequiredCapability {
         capability,
@@ -187,7 +187,7 @@ fn required(
 #[derive(Debug, PartialEq, Eq)]
 struct RequiredCapability {
     capability: Capability,
-    versions: &'static [u16],
+    versions: &'static [CapabilityVersion],
 }
 
 impl RequiredCapability {
@@ -232,14 +232,17 @@ mod tests {
 
     #[test]
     fn accepts_any_required_version() {
+        const V1: CapabilityVersion = CapabilityVersion::new(2026, 10, 16);
+        const V2: CapabilityVersion = V1.with_revision(1);
+        const V3: CapabilityVersion = CapabilityVersion::new(2026, 10, 17);
         let required = RequiredCapability {
             capability: Capability::MessagesRead,
-            versions: &[1, 2],
+            versions: &[V1, V2],
         };
 
-        assert!(required.supports(&Capability::MessagesRead.with_version(1)));
-        assert!(required.supports(&Capability::MessagesRead.with_version(2)));
-        assert!(!required.supports(&Capability::MessagesRead.with_version(3)));
+        assert!(required.supports(&Capability::MessagesRead.with_version(V1)));
+        assert!(required.supports(&Capability::MessagesRead.with_version(V2)));
+        assert!(!required.supports(&Capability::MessagesRead.with_version(V3)));
     }
 
     #[test]

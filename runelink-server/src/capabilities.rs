@@ -1,10 +1,12 @@
 use runelink_types::capability::{
-    Capability, CapabilityCatalog, NegotiatedCapabilities,
+    Capability, CapabilityCatalog, CapabilityVersion, NegotiatedCapabilities,
     SupportedCapabilities,
     versions::{auth, channels, memberships, messages, servers, system, users},
 };
 
-pub const fn client_websocket(capability: &Capability) -> &'static [u16] {
+pub const fn client_websocket(
+    capability: &Capability,
+) -> &'static [CapabilityVersion] {
     match capability {
         Capability::AuthAuthenticate => auth::AUTHENTICATE_VERSIONS,
         Capability::AuthDiscovery => auth::DISCOVERY_VERSIONS,
@@ -37,7 +39,9 @@ pub const fn client_websocket(capability: &Capability) -> &'static [u16] {
     }
 }
 
-pub const fn federation_websocket(capability: &Capability) -> &'static [u16] {
+pub const fn federation_websocket(
+    capability: &Capability,
+) -> &'static [CapabilityVersion] {
     match capability {
         Capability::AuthAuthenticate => &[],
         Capability::AuthDiscovery => &[],
@@ -70,7 +74,7 @@ pub const fn federation_websocket(capability: &Capability) -> &'static [u16] {
     }
 }
 
-pub const fn http(capability: &Capability) -> &'static [u16] {
+pub const fn http(capability: &Capability) -> &'static [CapabilityVersion] {
     match capability {
         Capability::AuthAuthenticate => &[],
         Capability::AuthDiscovery => &[],
@@ -127,7 +131,7 @@ pub fn log_version_mismatches(
 }
 
 /// Formats untrusted peer version lists without unbounded log lines.
-fn format_versions(versions: &[u16]) -> String {
+fn format_versions(versions: &[CapabilityVersion]) -> String {
     let shown = &versions[..versions.len().min(MAX_LOGGED_VERSIONS)];
     match versions.len() - shown.len() {
         0 => format!("{shown:?}"),
@@ -141,10 +145,19 @@ mod tests {
 
     #[test]
     fn truncates_long_version_lists() {
-        assert_eq!(format_versions(&[1, 2]), "[1, 2]");
+        let versions: Vec<_> = (0..10)
+            .map(|revision| {
+                CapabilityVersion::new(2026, 10, 16).with_revision(revision)
+            })
+            .collect();
         assert_eq!(
-            format_versions(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
-            "[1, 2, 3, 4, 5, 6, 7, 8] (+2 more)"
+            format_versions(&versions[..2]),
+            "[2026.10.16, 2026.10.16.1]"
+        );
+        assert_eq!(
+            format_versions(&versions),
+            "[2026.10.16, 2026.10.16.1, 2026.10.16.2, 2026.10.16.3, \
+             2026.10.16.4, 2026.10.16.5, 2026.10.16.6, 2026.10.16.7] (+2 more)"
         );
     }
 }
