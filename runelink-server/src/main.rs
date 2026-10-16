@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
+use clap::Parser;
 use sqlx::migrate::Migrator;
 use tokio::{net::TcpListener, sync::RwLock, task::JoinSet};
 
@@ -24,8 +25,14 @@ mod ws;
 // Embed all sql migrations in binary
 static MIGRATOR: Migrator = sqlx::migrate!();
 
+#[derive(Parser)]
+#[command(version)]
+struct Cli {}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    Cli::parse();
+
     // Initialize logger - reads RUST_LOG environment variable
     // Examples: RUST_LOG=info, RUST_LOG=debug, RUST_LOG=runelink_server=debug
     // Defaults to info level if RUST_LOG is not set
