@@ -1,3 +1,4 @@
+use reqwest::StatusCode;
 use runelink_client::requests;
 use runelink_types::SignupRequest;
 use uuid::Uuid;
@@ -17,6 +18,8 @@ use super::{
     context::CliContext,
     select::select_inline,
 };
+
+const MAX_PASSWORD_ATTEMPTS: u32 = 3;
 
 #[derive(clap::Args, Debug)]
 pub struct AccountArgs {
@@ -191,9 +194,6 @@ pub async fn handle_account_commands(
                      (use --name and --host to change)"
                 );
             }
-            let password = read_password("Password: ")?.ok_or_else(|| {
-                CliError::InvalidArgument("Password is required.".into())
-            })?;
 
             // TODO: Don't generate a random client_id for each session
             let client_id = Uuid::new_v4().to_string();
@@ -201,15 +201,42 @@ pub async fn handle_account_commands(
             let api_url =
                 resolve_api_url(ctx.client, ctx.config, &account_user_ref.host)
                     .await?;
-            let token_response = requests::auth::token_password(
-                ctx.client,
-                &api_url,
-                &account_user_ref.name,
-                &password,
-                None,
-                Some(&client_id),
-            )
-            .await?;
+
+            // Re-prompt on empty or rejected passwords, like sudo
+            let mut token_response = None;
+            for attempt in 0..MAX_PASSWORD_ATTEMPTS {
+                if attempt > 0 {
+                    println!("Sorry, try again.");
+                }
+                let Some(password) = read_password("Password: ")? else {
+                    continue;
+                };
+                match requests::auth::token_password(
+                    ctx.client,
+                    &api_url,
+                    &account_user_ref.name,
+                    &password,
+                    None,
+                    Some(&client_id),
+                )
+                .await
+                {
+                    Ok(response) => {
+                        token_response = Some(response);
+                        break;
+                    }
+                    Err(runelink_client::Error::Status(
+                        StatusCode::UNAUTHORIZED,
+                        _,
+                    )) => {}
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            let token_response = token_response.ok_or_else(|| {
+                CliError::AuthenticationFailed(format!(
+                    "{MAX_PASSWORD_ATTEMPTS} incorrect password attempts."
+                ))
+            })?;
 
             // Store auth data
             let account_auth = AccountAuth {
