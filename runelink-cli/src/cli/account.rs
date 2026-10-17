@@ -143,6 +143,8 @@ pub async fn handle_account_commands(
 
         AccountCommands::Login(login_args) => {
             // Get or discover account
+            let explicit_account =
+                login_args.name.is_some() && login_args.host.is_some();
             let account = if let (Some(name), Some(host)) =
                 (&login_args.name, &login_args.host)
             {
@@ -176,6 +178,19 @@ pub async fn handle_account_commands(
             let account_user_ref = account.user_ref.clone();
             let account_display = account.to_string();
 
+            if ctx.auth_cache.has_auth(&account_user_ref) {
+                println!("Already logged in: {account_display}");
+                return Ok(());
+            }
+
+            if explicit_account {
+                println!("Logging in to {account_display}");
+            } else {
+                println!(
+                    "Logging in to {account_display} \
+                     (use --name and --host to change)"
+                );
+            }
             let password = read_password("Password: ")?.ok_or_else(|| {
                 CliError::InvalidArgument("Password is required.".into())
             })?;
