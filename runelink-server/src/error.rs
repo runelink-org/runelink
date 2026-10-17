@@ -19,8 +19,8 @@ pub enum ApiError {
     #[error("Unique constraint violation")]
     UniqueViolation,
 
-    #[error("Conflict: {0}")]
-    Conflict(String),
+    #[error("A referenced resource no longer exists")]
+    ForeignKeyViolation,
 
     #[error("Resource not found")]
     NotFound,
@@ -56,9 +56,7 @@ impl From<sqlx::Error> for ApiError {
                 // A concurrent change removed a referenced row
                 Some("23503") => {
                     log::warn!("Foreign key violation: {}", db_err.message());
-                    ApiError::Conflict(
-                        "A referenced resource no longer exists".into(),
-                    )
+                    ApiError::ForeignKeyViolation
                 }
                 _ => ApiError::DatabaseError(db_err.message().to_string()),
             },
@@ -88,7 +86,7 @@ impl IntoResponse for ApiError {
             | ApiError::DatabaseError(_)
             | ApiError::Internal(_)
             | ApiError::Unknown(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            ApiError::UniqueViolation | ApiError::Conflict(_) => {
+            ApiError::UniqueViolation | ApiError::ForeignKeyViolation => {
                 StatusCode::CONFLICT
             }
             ApiError::NotFound => StatusCode::NOT_FOUND,
@@ -112,7 +110,9 @@ impl From<ApiError> for WsError {
             ApiError::AuthError(_) => "auth_error",
             ApiError::BadRequest(_) => "bad_request",
             ApiError::NotFound => "not_found",
-            ApiError::UniqueViolation | ApiError::Conflict(_) => "conflict",
+            ApiError::UniqueViolation | ApiError::ForeignKeyViolation => {
+                "conflict"
+            }
             ApiError::DbConnectionError(_)
             | ApiError::DatabaseError(_)
             | ApiError::Internal(_)

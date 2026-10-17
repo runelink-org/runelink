@@ -97,28 +97,18 @@ pub async fn get_by_id(
     Ok(channel)
 }
 
-/// Get the server channel that owns a text channel.
-pub async fn get_by_text_channel(
+/// Get the server whose channel owns a text channel.
+pub async fn get_server_id_by_text_channel(
     pool: &DbPool,
     text_channel_id: TextChannelId,
-) -> ApiResult<ServerChannel> {
-    let channel = sqlx::query_as!(
-        ServerChannel,
-        r#"
-        SELECT
-            id, server_id, kind AS "kind: ServerChannelKind", title,
-            description,
-            text_channel_id AS "text_channel_id: TextChannelId",
-            parent_channel_id AS "parent_channel_id: ServerChannelId",
-            position, created_at, updated_at
-        FROM server_channels
-        WHERE text_channel_id = $1;
-        "#,
+) -> ApiResult<ServerId> {
+    let server_id = sqlx::query_scalar!(
+        "SELECT server_id FROM server_channels WHERE text_channel_id = $1;",
         text_channel_id.as_uuid(),
     )
     .fetch_one(pool)
     .await?;
-    Ok(channel)
+    Ok(server_id.into())
 }
 
 pub async fn get_all(pool: &DbPool) -> ApiResult<Vec<ServerChannel>> {

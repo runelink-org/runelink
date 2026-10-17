@@ -282,10 +282,11 @@ async fn server_of_text_channel(
     state: &AppState,
     text_channel_id: TextChannelId,
 ) -> ApiResult<ServerId> {
-    let channel =
-        queries::channels::get_by_text_channel(&state.db_pool, text_channel_id)
-            .await?;
-    Ok(channel.server_id)
+    queries::channels::get_server_id_by_text_channel(
+        &state.db_pool,
+        text_channel_id,
+    )
+    .await
 }
 
 /// Auth requirements for message operations.
