@@ -284,7 +284,7 @@ pub async fn handle_channel_commands(
                 delete_args.channel_id,
                 delete_args.server_id,
                 target_host.as_deref(),
-                None,
+                false,
             )
             .await?;
             let channel = &selection.channel;
@@ -311,7 +311,7 @@ pub async fn handle_channel_commands(
                 move_args.channel_id,
                 move_args.server_id,
                 target_host.as_deref(),
-                None,
+                false,
             )
             .await?;
             let channel = &selection.channel;

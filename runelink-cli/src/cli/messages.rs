@@ -1,6 +1,6 @@
 use runelink_client::requests;
 use runelink_types::{
-    channel::{ServerChannelId, ServerChannelKind, TextChannelId},
+    channel::{ServerChannelId, TextChannelId},
     message::{MessageId, NewMessage},
     server::ServerId,
 };
@@ -97,7 +97,7 @@ pub async fn handle_message_commands(
                 list_args.channel_id,
                 list_args.server_id,
                 target_host.as_deref(),
-                Some(ServerChannelKind::Text),
+                true,
             )
             .await?;
             let api_url = ctx.home_api_url().await?;
@@ -150,7 +150,7 @@ pub async fn handle_message_commands(
                 send_args.channel_id,
                 send_args.server_id,
                 target_host.as_deref(),
-                Some(ServerChannelKind::Text),
+                true,
             )
             .await?;
             let body = unwrap_or_prompt(send_args.body.clone(), "Message")?;
