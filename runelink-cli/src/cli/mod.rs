@@ -27,10 +27,10 @@ pub struct Cli {
     #[clap(subcommand)]
     pub command: Commands,
     /// Optional: The account's username
-    #[clap(long)]
+    #[clap(long, requires = "host")]
     pub name: Option<String>,
     /// Optional: The host name of the account's host
-    #[clap(long)]
+    #[clap(long, requires = "name")]
     pub host: Option<String>,
     /// Disable automatic identity input normalization and fail on non-canonical values
     #[clap(long)]

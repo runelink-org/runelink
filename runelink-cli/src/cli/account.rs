@@ -1,3 +1,4 @@
+use reqwest::StatusCode;
 use runelink_client::requests;
 use runelink_types::SignupRequest;
 
@@ -43,48 +44,48 @@ pub enum AccountCommands {
 #[derive(clap::Args, Debug)]
 pub struct NameAndHostArgs {
     /// The account's username
-    #[clap(long)]
+    #[clap(long, requires = "host")]
     pub name: Option<String>,
     /// The host name of the account's host
-    #[clap(long)]
+    #[clap(long, requires = "name")]
     pub host: Option<String>,
 }
 
 #[derive(clap::Args, Clone, Debug)]
 pub struct LoginArgs {
     /// The account's username
-    #[clap(long)]
+    #[clap(long, requires = "host")]
     pub name: Option<String>,
     /// The host name of the account's host
-    #[clap(long)]
+    #[clap(long, requires = "name")]
     pub host: Option<String>,
 }
 
 #[derive(clap::Args, Clone, Debug)]
 pub struct LogoutArgs {
     /// The account's username
-    #[clap(long)]
+    #[clap(long, requires = "host")]
     pub name: Option<String>,
     /// The host name of the account's host
-    #[clap(long)]
+    #[clap(long, requires = "name")]
     pub host: Option<String>,
 }
 
 #[derive(clap::Args, Debug)]
 pub struct StatusArgs {
     /// The account's username
-    #[clap(long)]
+    #[clap(long, requires = "host")]
     pub name: Option<String>,
     /// The host name of the account's host
-    #[clap(long)]
+    #[clap(long, requires = "name")]
     pub host: Option<String>,
 }
 
 #[derive(clap::Args, Debug)]
 pub struct DeleteAccountArgs {
-    #[clap(long)]
+    #[clap(long, requires = "host")]
     pub name: Option<String>,
-    #[clap(long)]
+    #[clap(long, requires = "name")]
     pub host: Option<String>,
 }
 
@@ -130,10 +131,20 @@ pub async fn handle_account_commands(
             })?;
             let api_url =
                 resolve_api_url(ctx.client, ctx.config, &host).await?;
+            let user_display = format!("{name}@{host}");
             let signup_req = SignupRequest { name, password };
             let user =
                 requests::auth::signup(ctx.client, &api_url, &signup_req)
-                    .await?;
+                    .await
+                    .map_err(|error| match error {
+                        runelink_client::Error::Status(
+                            StatusCode::CONFLICT,
+                            _,
+                        ) => CliError::InvalidArgument(format!(
+                            "Name already taken: {user_display}"
+                        )),
+                        error => error.into(),
+                    })?;
             ctx.config.get_or_create_account_config(user.as_ref());
             ctx.config.save()?;
             println!("Created account: {user}");
@@ -156,13 +167,23 @@ pub async fn handle_account_commands(
                 } else {
                     // Account doesn't exist, fetch it from server
                     let api_url =
-                        resolve_api_url(ctx.client, ctx.config, host).await?;
+                        resolve_api_url(ctx.client, ctx.config, &user_ref.host)
+                            .await?;
                     let user = requests::users::fetch_by_ref(
                         ctx.client,
                         &api_url,
                         user_ref.clone(),
                     )
-                    .await?;
+                    .await
+                    .map_err(|error| match error {
+                        runelink_client::Error::Status(
+                            StatusCode::NOT_FOUND,
+                            _,
+                        ) => CliError::NotFound(format!(
+                            "User not found: {user_ref}"
+                        )),
+                        error => error.into(),
+                    })?;
                     ctx.config.get_or_create_account_config(user.as_ref());
                     ctx.config.save()?;
                     ctx.config
@@ -199,15 +220,11 @@ pub async fn handle_account_commands(
             let account = if let (Some(name), Some(host)) =
                 (&logout_args.name, &logout_args.host)
             {
+                let user_ref =
+                    parse_user_ref_input(name, host, ctx.strict_input)?;
                 ctx.config
-                    .get_account_config(parse_user_ref_input(
-                        name,
-                        host,
-                        ctx.strict_input,
-                    )?)
-                    .ok_or_else(|| {
-                        CliError::InvalidArgument("Account not found.".into())
-                    })?
+                    .get_account_config(user_ref.clone())
+                    .ok_or_else(|| CliError::account_not_found(&user_ref))?
             } else {
                 ctx.account.ok_or(CliError::MissingAccount)?
             };
@@ -216,7 +233,7 @@ pub async fn handle_account_commands(
                 ctx.auth_cache.save()?;
                 println!("Logged out successfully: {account}");
             } else {
-                println!("No authentication data found for: {account}");
+                println!("Not logged in: {account}");
             }
         }
 
@@ -226,9 +243,9 @@ pub async fn handle_account_commands(
             {
                 let user_ref =
                     parse_user_ref_input(name, host, ctx.strict_input)?;
-                ctx.config.get_account_config(user_ref).ok_or_else(|| {
-                    CliError::InvalidArgument("Account not found.".into())
-                })?
+                ctx.config
+                    .get_account_config(user_ref.clone())
+                    .ok_or_else(|| CliError::account_not_found(&user_ref))?
             } else {
                 ctx.account.ok_or(CliError::MissingAccount)?
             };
@@ -277,19 +294,12 @@ pub async fn handle_account_commands(
             let user_ref = if let (Some(name), Some(host)) =
                 (&delete_args.name, &delete_args.host)
             {
-                let account = ctx
-                    .config
-                    .get_account_config(parse_user_ref_input(
-                        name,
-                        host,
-                        ctx.strict_input,
-                    )?)
-                    .ok_or_else(|| {
-                        CliError::InvalidArgument(
-                            "Account not found in local config.".into(),
-                        )
-                    })?;
-                account.user_ref.clone()
+                let user_ref =
+                    parse_user_ref_input(name, host, ctx.strict_input)?;
+                ctx.config
+                    .get_account_config(user_ref.clone())
+                    .ok_or_else(|| CliError::account_not_found(&user_ref))?;
+                user_ref
             } else {
                 let account = select_inline(
                     &ctx.config.accounts,

@@ -1,5 +1,6 @@
 use reqwest::StatusCode;
 use runelink_client::Error as ClientError;
+use runelink_types::UserRef;
 use std::process::ExitCode;
 
 #[allow(dead_code)]
@@ -8,7 +9,7 @@ pub enum CliError {
     #[error("API request failed: {0}")]
     ReqwestError(#[from] reqwest::Error),
 
-    #[error("API returned error status {status}: {message}")]
+    #[error("Host returned {status}{}", api_error_suffix(message))]
     ApiStatusError { status: StatusCode, message: String },
 
     #[error("Failed to deserialize JSON: {0}")]
@@ -29,8 +30,17 @@ pub enum CliError {
     #[error("Missing Context: {0}")]
     MissingContext(String),
 
-    #[error("Missing Account: Specify an account or set a default account")]
+    #[error(
+        "No account selected. Pass --name and --host, or set a default with \
+         `rune account default set`."
+    )]
     MissingAccount,
+
+    #[error("{0}")]
+    NotFound(String),
+
+    #[error("Could not reach host: {0}")]
+    HostUnreachable(String),
 
     #[error("No Action Possible: {0}")]
     NoActionPossible(String),
@@ -79,6 +89,38 @@ impl CliError {
         }
     }
 }
+impl CliError {
+    pub fn account_not_found(user_ref: &UserRef) -> Self {
+        CliError::NotFound(format!(
+            "Account not found in local config: {user_ref}"
+        ))
+    }
+}
+
+/// Formats the message from a host's JSON error body as `: <message>`.
+/// Bodies that aren't short plain text (such as proxy HTML pages) are omitted.
+fn api_error_suffix(body: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct ErrorBody {
+        #[serde(alias = "message")]
+        error: String,
+    }
+    let message = match serde_json::from_str::<ErrorBody>(body) {
+        Ok(body) => body.error,
+        Err(_) if body.len() <= 200 && !body.contains(['<', '\n']) => {
+            body.to_string()
+        }
+        Err(_) => String::new(),
+    };
+    let message: String =
+        message.trim().chars().filter(|c| !c.is_control()).collect();
+    if message.is_empty() {
+        String::new()
+    } else {
+        format!(": {message}")
+    }
+}
+
 // sysexits.h inspired exit codes
 const _EX_OK: u8 = 0;
 const EX_USAGE: u8 = 64; // command line usage error
@@ -117,6 +159,8 @@ impl From<CliError> for ExitCode {
             CliError::ConfigError(_) => EX_CONFIG,
             CliError::MissingContext(_) => EX_USAGE,
             CliError::MissingAccount => EX_USAGE,
+            CliError::NotFound(_) => EX_NOUSER,
+            CliError::HostUnreachable(_) => EX_TEMPFAIL,
             CliError::NoActionPossible(_) => EX_USAGE,
             CliError::AuthenticationFailed(_) => EX_NOPERM,
             CliError::Cancellation => EX_USER_CANCEL,

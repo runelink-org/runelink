@@ -127,7 +127,7 @@ pub async fn resolve_api_url(
         attempts.push(false);
     }
 
-    let mut last_transport_error = None;
+    let mut transport_failed = false;
     for secure in attempts {
         let api_url = get_api_url(host, secure);
         match requests::ping(client, &api_url).await {
@@ -143,17 +143,19 @@ pub async fn resolve_api_url(
                 return Ok(api_url);
             }
             Err(error) if is_transport_error(&error) => {
-                last_transport_error = Some(error);
+                log::debug!("Failed to reach `{api_url}`: {error:?}");
+                transport_failed = true;
             }
             Err(error) => return Err(error.into()),
         }
     }
 
-    Err(match last_transport_error {
-        Some(error) => error.into(),
-        None => CliError::ConfigError(format!(
+    Err(if transport_failed {
+        CliError::HostUnreachable(host.to_string())
+    } else {
+        CliError::ConfigError(format!(
             "Unable to resolve API URL for host `{host}`"
-        )),
+        ))
     })
 }
 

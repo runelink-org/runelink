@@ -136,6 +136,14 @@ impl<'a> CliContext<'a> {
                     StatusCode::UNAUTHORIZED,
                     _,
                 )) => {}
+                Err(runelink_client::Error::Status(
+                    StatusCode::NOT_FOUND,
+                    _,
+                )) => {
+                    return Err(CliError::NotFound(format!(
+                        "Account not found on host: {user_ref}"
+                    )));
+                }
                 Err(e) => return Err(e.into()),
             }
         }

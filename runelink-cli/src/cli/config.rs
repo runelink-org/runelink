@@ -47,10 +47,10 @@ pub enum DefaultAccountCommands {
 #[derive(clap::Args, Debug)]
 pub struct NameAndHostArgs {
     /// The account's username
-    #[clap(long)]
+    #[clap(long, requires = "host")]
     pub name: Option<String>,
     /// The host name of the account's host
-    #[clap(long)]
+    #[clap(long, requires = "name")]
     pub host: Option<String>,
 }
 
@@ -63,7 +63,7 @@ pub async fn handle_default_account_commands(
             if let Some(account) = ctx.config.get_default_account() {
                 println!("{account}");
             } else {
-                println!("No default host set.");
+                println!("No default account set.");
             }
         }
 
@@ -73,10 +73,15 @@ pub async fn handle_default_account_commands(
             {
                 let user_ref =
                     parse_user_ref_input(name, host, ctx.strict_input)?;
-                ctx.config.get_account_config(user_ref).ok_or_else(|| {
-                    CliError::InvalidArgument("Account not found.".into())
-                })?
+                ctx.config
+                    .get_account_config(user_ref.clone())
+                    .ok_or_else(|| CliError::account_not_found(&user_ref))?
             } else {
+                if ctx.config.accounts.is_empty() {
+                    return Err(CliError::InvalidArgument(
+                        "No accounts in local config.".into(),
+                    ));
+                }
                 let tmp = select_inline(
                     &ctx.config.accounts,
                     "Select account",
