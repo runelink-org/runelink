@@ -5,25 +5,39 @@ use runelink_types::{
     },
     server::ServerId,
 };
-use sqlx::PgConnection;
+use sqlx::{PgConnection, PgExecutor};
 use uuid::Uuid;
 
 use crate::{db::DbPool, error::ApiResult};
 
+/// Lock a server's channel tree until the transaction ends, serializing
+/// changes to it. Fails with `NotFound` if the server does not exist.
+pub async fn lock_tree(
+    conn: &mut PgConnection,
+    server_id: ServerId,
+) -> ApiResult<()> {
+    sqlx::query_scalar!(
+        "SELECT id FROM servers WHERE id = $1 FOR NO KEY UPDATE;",
+        server_id.as_uuid(),
+    )
+    .fetch_one(conn)
+    .await?;
+    Ok(())
+}
+
 /// Insert a server channel after its siblings, along with the text channel
 /// it owns if it is a text channel.
 pub async fn insert(
-    pool: &DbPool,
+    conn: &mut PgConnection,
     server_id: ServerId,
     new_channel: &NewServerChannel,
 ) -> ApiResult<ServerChannel> {
-    let mut tx = pool.begin().await?;
     let text_channel_id = match new_channel.kind {
         ServerChannelKind::Text => Some(
             sqlx::query_scalar!(
                 "INSERT INTO text_channels DEFAULT VALUES RETURNING id;"
             )
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut *conn)
             .await?,
         ),
         ServerChannelKind::Category => None,
@@ -55,14 +69,13 @@ pub async fn insert(
         text_channel_id,
         new_channel.parent_channel_id.map(|id| id.as_uuid()),
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(conn)
     .await?;
-    tx.commit().await?;
     Ok(channel)
 }
 
 pub async fn get_by_id(
-    pool: &DbPool,
+    executor: impl PgExecutor<'_>,
     channel_id: ServerChannelId,
 ) -> ApiResult<ServerChannel> {
     let channel = sqlx::query_as!(
@@ -79,7 +92,7 @@ pub async fn get_by_id(
         "#,
         channel_id.as_uuid(),
     )
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await?;
     Ok(channel)
 }
@@ -128,7 +141,7 @@ pub async fn get_all(pool: &DbPool) -> ApiResult<Vec<ServerChannel>> {
 }
 
 pub async fn get_by_server(
-    pool: &DbPool,
+    executor: impl PgExecutor<'_>,
     server_id: ServerId,
 ) -> ApiResult<Vec<ServerChannel>> {
     let channels = sqlx::query_as!(
@@ -146,33 +159,7 @@ pub async fn get_by_server(
         "#,
         server_id.as_uuid(),
     )
-    .fetch_all(pool)
-    .await?;
-    Ok(channels)
-}
-
-/// Get and lock a server's channels, serializing changes to its tree.
-pub async fn get_by_server_for_update(
-    conn: &mut PgConnection,
-    server_id: ServerId,
-) -> ApiResult<Vec<ServerChannel>> {
-    let channels = sqlx::query_as!(
-        ServerChannel,
-        r#"
-        SELECT
-            id, server_id, kind AS "kind: ServerChannelKind", title,
-            description,
-            text_channel_id AS "text_channel_id: TextChannelId",
-            parent_channel_id AS "parent_channel_id: ServerChannelId",
-            position, created_at, updated_at
-        FROM server_channels
-        WHERE server_id = $1
-        ORDER BY position, id
-        FOR UPDATE;
-        "#,
-        server_id.as_uuid(),
-    )
-    .fetch_all(conn)
+    .fetch_all(executor)
     .await?;
     Ok(channels)
 }
@@ -213,18 +200,21 @@ pub async fn update_placements(
 }
 
 pub async fn has_children(
-    pool: &DbPool,
+    executor: impl PgExecutor<'_>,
+    server_id: ServerId,
     channel_id: ServerChannelId,
 ) -> ApiResult<bool> {
     let has_children = sqlx::query_scalar!(
         r#"
         SELECT EXISTS (
-            SELECT 1 FROM server_channels WHERE parent_channel_id = $1
+            SELECT 1 FROM server_channels
+            WHERE server_id = $1 AND parent_channel_id = $2
         ) AS "exists!";
         "#,
+        server_id.as_uuid(),
         channel_id.as_uuid(),
     )
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await?;
     Ok(has_children)
 }
@@ -232,14 +222,14 @@ pub async fn has_children(
 /// Delete a server channel. Its text channel and messages are deleted by
 /// a database trigger.
 pub async fn delete(
-    pool: &DbPool,
+    executor: impl PgExecutor<'_>,
     channel_id: ServerChannelId,
 ) -> ApiResult<()> {
     sqlx::query!(
         "DELETE FROM server_channels WHERE id = $1;",
         channel_id.as_uuid()
     )
-    .execute(pool)
+    .execute(executor)
     .await?;
     Ok(())
 }

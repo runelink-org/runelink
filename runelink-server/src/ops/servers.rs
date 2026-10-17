@@ -177,7 +177,7 @@ pub async fn get_with_channels(
         // Handle local case
         let (server, channels) = tokio::join!(
             queries::servers::get_by_id(state, server_id),
-            queries::channels::get_by_server(&state.db_pool, server_id),
+            queries::channels::get_by_server(&*state.db_pool, server_id),
         );
         Ok(ServerWithChannels {
             server: server?,

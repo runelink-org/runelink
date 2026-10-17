@@ -518,7 +518,7 @@ pub(super) async fn handle_client_request(
             Ok(ClientWsReply::MessagesGetByServer(messages))
         }
 
-        ClientWsRequest::MessagesGetByChannel {
+        ClientWsRequest::MessagesGetByTextChannel {
             text_channel_id,
             target_host,
         } => {
@@ -537,7 +537,7 @@ pub(super) async fn handle_client_request(
                 target_host,
             )
             .await?;
-            Ok(ClientWsReply::MessagesGetByChannel(messages))
+            Ok(ClientWsReply::MessagesGetByTextChannel(messages))
         }
 
         ClientWsRequest::MessagesGetById {

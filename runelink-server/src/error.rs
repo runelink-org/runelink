@@ -50,6 +50,10 @@ impl From<sqlx::Error> for ApiError {
 
             sqlx::Error::Database(db_err) => match db_err.code().as_deref() {
                 Some("23505") => ApiError::UniqueViolation,
+                // A concurrent change removed a referenced row
+                Some("23503") => ApiError::BadRequest(
+                    "A referenced resource no longer exists".into(),
+                ),
                 _ => ApiError::DatabaseError(db_err.message().to_string()),
             },
 

@@ -158,7 +158,7 @@ pub enum ClientWsRequest {
         server_id: ServerId,
         target_host: Option<String>,
     },
-    MessagesGetByChannel {
+    MessagesGetByTextChannel {
         text_channel_id: TextChannelId,
         target_host: Option<String>,
     },
@@ -212,7 +212,7 @@ impl ClientWsRequest {
             Self::MessagesCreate { .. } => Capability::MessagesCreate,
             Self::MessagesGetAll { .. }
             | Self::MessagesGetByServer { .. }
-            | Self::MessagesGetByChannel { .. }
+            | Self::MessagesGetByTextChannel { .. }
             | Self::MessagesGetById { .. } => Capability::MessagesRead,
             Self::MessagesDelete { .. } => Capability::MessagesDelete,
         }
@@ -254,7 +254,7 @@ pub enum ClientWsReply {
     MessagesCreate(Message),
     MessagesGetAll(Vec<Message>),
     MessagesGetByServer(Vec<Message>),
-    MessagesGetByChannel(Vec<Message>),
+    MessagesGetByTextChannel(Vec<Message>),
     MessagesGetById(Message),
     MessagesDelete,
 }
@@ -331,7 +331,7 @@ pub enum FederationWsRequest {
     MessagesGetByServer {
         server_id: ServerId,
     },
-    MessagesGetByChannel {
+    MessagesGetByTextChannel {
         text_channel_id: TextChannelId,
     },
     MessagesGetById {
@@ -372,7 +372,7 @@ impl FederationWsRequest {
             Self::MessagesCreate { .. } => Capability::MessagesCreate,
             Self::MessagesGetAll
             | Self::MessagesGetByServer { .. }
-            | Self::MessagesGetByChannel { .. }
+            | Self::MessagesGetByTextChannel { .. }
             | Self::MessagesGetById { .. } => Capability::MessagesRead,
             Self::MessagesDelete { .. } => Capability::MessagesDelete,
         }
@@ -407,7 +407,7 @@ pub enum FederationWsReply {
     MessagesCreate(Message),
     MessagesGetAll(Vec<Message>),
     MessagesGetByServer(Vec<Message>),
-    MessagesGetByChannel(Vec<Message>),
+    MessagesGetByTextChannel(Vec<Message>),
     MessagesGetById(Message),
     MessagesDelete,
 }

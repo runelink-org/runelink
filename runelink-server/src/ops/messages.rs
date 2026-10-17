@@ -173,12 +173,13 @@ pub async fn get_by_text_channel(
             state,
             host,
             Some(user_ref.clone()),
-            FederationWsRequest::MessagesGetByChannel { text_channel_id },
+            FederationWsRequest::MessagesGetByTextChannel { text_channel_id },
         )
         .await?;
-        let FederationWsReply::MessagesGetByChannel(messages) = reply else {
+        let FederationWsReply::MessagesGetByTextChannel(messages) = reply
+        else {
             return Err(ApiError::Internal(format!(
-                "Unexpected federation reply from {host} for messages.get_by_channel"
+                "Unexpected federation reply from {host} for messages.get_by_text_channel"
             )));
         };
         Ok(messages)
