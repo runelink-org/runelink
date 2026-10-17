@@ -3,7 +3,7 @@ use runelink_types::SignupRequest;
 use uuid::Uuid;
 
 use crate::{
-    cli::input::{read_input, read_input_preserving_whitespace},
+    cli::input::{read_input_preserving_whitespace, read_password},
     error::CliError,
     storage::{AccountConfig, resolve_api_url},
     storage_auth::AccountAuth,
@@ -127,7 +127,7 @@ pub async fn handle_account_commands(
             };
             let host = parse_host_input(&raw_host, ctx.strict_input)?;
             let name = parse_username_input(&raw_name, ctx.strict_input)?;
-            let password = read_input("Password: ")?.ok_or_else(|| {
+            let password = read_password("Password: ")?.ok_or_else(|| {
                 CliError::InvalidArgument("Password is required.".into())
             })?;
             let api_url =
@@ -176,7 +176,7 @@ pub async fn handle_account_commands(
             let account_user_ref = account.user_ref.clone();
             let account_display = account.to_string();
 
-            let password = read_input("Password: ")?.ok_or_else(|| {
+            let password = read_password("Password: ")?.ok_or_else(|| {
                 CliError::InvalidArgument("Password is required.".into())
             })?;
 

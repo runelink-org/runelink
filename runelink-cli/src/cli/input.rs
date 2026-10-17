@@ -10,6 +10,11 @@ pub fn read_input(prompt: &str) -> io::Result<Option<String>> {
     read_input_internal(prompt, true)
 }
 
+pub fn read_password(prompt: &str) -> io::Result<Option<String>> {
+    let password = rpassword::prompt_password(prompt)?;
+    Ok((!password.is_empty()).then_some(password))
+}
+
 pub fn read_input_preserving_whitespace(
     prompt: &str,
 ) -> io::Result<Option<String>> {
