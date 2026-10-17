@@ -27,7 +27,11 @@ pub async fn create(
 ) -> ApiResult<Message> {
     // Handle local case
     if !state.config.is_remote_host(target_host) {
-        let server_id = server_of_text_channel(state, text_channel_id).await?;
+        let server_id = queries::channels::get_server_id_by_text_channel(
+            &state.db_pool,
+            text_channel_id,
+        )
+        .await?;
         let message = queries::messages::insert(
             &state.db_pool,
             text_channel_id,
@@ -235,7 +239,11 @@ pub async fn delete(
         let message =
             queries::messages::get_by_id(&state.db_pool, message_id).await?;
         let text_channel_id = message.text_channel_id;
-        let server_id = server_of_text_channel(state, text_channel_id).await?;
+        let server_id = queries::channels::get_server_id_by_text_channel(
+            &state.db_pool,
+            text_channel_id,
+        )
+        .await?;
         queries::messages::delete(&state.db_pool, message_id).await?;
         fanout::fanout_update(
             state,
@@ -277,18 +285,6 @@ pub async fn delete(
     }
 }
 
-/// Get the server whose channel owns a local text channel.
-async fn server_of_text_channel(
-    state: &AppState,
-    text_channel_id: TextChannelId,
-) -> ApiResult<ServerId> {
-    queries::channels::get_server_id_by_text_channel(
-        &state.db_pool,
-        text_channel_id,
-    )
-    .await
-}
-
 /// Auth requirements for message operations.
 ///
 /// Requests for another host only require client auth here, since the
@@ -302,7 +298,11 @@ pub mod auth {
         state: &AppState,
         text_channel_id: TextChannelId,
     ) -> ApiResult<Req> {
-        let server_id = server_of_text_channel(state, text_channel_id).await?;
+        let server_id = queries::channels::get_server_id_by_text_channel(
+            &state.db_pool,
+            text_channel_id,
+        )
+        .await?;
         Ok(Req::ServerMember(server_id))
     }
 
@@ -321,8 +321,11 @@ pub mod auth {
     ) -> ApiResult<Req> {
         let message =
             queries::messages::get_by_id(&state.db_pool, message_id).await?;
-        let server_id =
-            server_of_text_channel(state, message.text_channel_id).await?;
+        let server_id = queries::channels::get_server_id_by_text_channel(
+            &state.db_pool,
+            message.text_channel_id,
+        )
+        .await?;
         if let Some(author) = message.author {
             Ok(or!(Req::User(author.into()), Req::ServerAdmin(server_id)))
         } else {
