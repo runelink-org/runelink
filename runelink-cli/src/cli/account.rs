@@ -50,7 +50,7 @@ pub struct NameAndHostArgs {
     pub host: Option<String>,
 }
 
-#[derive(clap::Args, Debug)]
+#[derive(clap::Args, Clone, Debug)]
 pub struct LoginArgs {
     /// The account's username
     #[clap(long)]
@@ -60,7 +60,7 @@ pub struct LoginArgs {
     pub host: Option<String>,
 }
 
-#[derive(clap::Args, Debug)]
+#[derive(clap::Args, Clone, Debug)]
 pub struct LogoutArgs {
     /// The account's username
     #[clap(long)]
@@ -90,9 +90,9 @@ pub struct DeleteAccountArgs {
 
 pub async fn handle_account_commands(
     ctx: &mut CliContext<'_>,
-    account_args: &AccountArgs,
+    command: &AccountCommands,
 ) -> Result<(), CliError> {
-    match &account_args.command {
+    match command {
         AccountCommands::List => {
             if ctx.config.accounts.is_empty() {
                 println!("No accounts.");
