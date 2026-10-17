@@ -631,7 +631,7 @@ mod tests {
 
     use runelink_types::{
         capability::{Capability, versions::messages},
-        ids::{ChannelId, MessageId, ServerId},
+        ids::{MessageId, TextChannelId},
         ws::{ClientWsEnvelope, ClientWsUpdate},
     };
     use tokio::sync::mpsc;
@@ -663,8 +663,7 @@ mod tests {
         let envelope = ClientWsEnvelope::Update {
             event_id: runelink_types::EventId::new(),
             update: ClientWsUpdate::MessageDeleted {
-                server_id: ServerId::new(),
-                channel_id: ChannelId::new(),
+                text_channel_id: TextChannelId::new(),
                 message_id: MessageId::new(),
             },
         };

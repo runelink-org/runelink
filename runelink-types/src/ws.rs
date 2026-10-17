@@ -6,7 +6,10 @@ use crate::{
         AuthTokenPasswordRequest, AuthTokenRefreshRequest, JwksResponse,
         OidcDiscoveryDocument, SignupRequest, TokenResponse,
     },
-    channel::{Channel, ChannelId, NewChannel},
+    channel::{
+        NewServerChannel, ServerChannel, ServerChannelId, ServerChannelMove,
+        TextChannelId,
+    },
     message::{Message, MessageId, NewMessage},
     server::{
         FullServerMembership, NewServer, NewServerMembership,
@@ -117,7 +120,7 @@ pub enum ClientWsRequest {
     },
     ChannelsCreate {
         server_id: ServerId,
-        new_channel: NewChannel,
+        new_channel: NewServerChannel,
         target_host: Option<String>,
     },
     ChannelsGetAll {
@@ -129,17 +132,22 @@ pub enum ClientWsRequest {
     },
     ChannelsGetById {
         server_id: ServerId,
-        channel_id: ChannelId,
+        channel_id: ServerChannelId,
         target_host: Option<String>,
     },
     ChannelsDelete {
         server_id: ServerId,
-        channel_id: ChannelId,
+        channel_id: ServerChannelId,
+        target_host: Option<String>,
+    },
+    ChannelsMove {
+        server_id: ServerId,
+        channel_id: ServerChannelId,
+        channel_move: ServerChannelMove,
         target_host: Option<String>,
     },
     MessagesCreate {
-        server_id: ServerId,
-        channel_id: ChannelId,
+        text_channel_id: TextChannelId,
         new_message: NewMessage,
         target_host: Option<String>,
     },
@@ -151,19 +159,14 @@ pub enum ClientWsRequest {
         target_host: Option<String>,
     },
     MessagesGetByChannel {
-        server_id: ServerId,
-        channel_id: ChannelId,
+        text_channel_id: TextChannelId,
         target_host: Option<String>,
     },
     MessagesGetById {
-        server_id: ServerId,
-        channel_id: ChannelId,
         message_id: MessageId,
         target_host: Option<String>,
     },
     MessagesDelete {
-        server_id: ServerId,
-        channel_id: ChannelId,
         message_id: MessageId,
         target_host: Option<String>,
     },
@@ -205,6 +208,7 @@ impl ClientWsRequest {
             | Self::ChannelsGetByServer { .. }
             | Self::ChannelsGetById { .. } => Capability::ChannelsRead,
             Self::ChannelsDelete { .. } => Capability::ChannelsDelete,
+            Self::ChannelsMove { .. } => Capability::ChannelsMove,
             Self::MessagesCreate { .. } => Capability::MessagesCreate,
             Self::MessagesGetAll { .. }
             | Self::MessagesGetByServer { .. }
@@ -241,11 +245,12 @@ pub enum ClientWsReply {
     ServersGetById(Server),
     ServersGetWithChannels(ServerWithChannels),
     ServersDelete,
-    ChannelsCreate(Channel),
-    ChannelsGetAll(Vec<Channel>),
-    ChannelsGetByServer(Vec<Channel>),
-    ChannelsGetById(Channel),
+    ChannelsCreate(ServerChannel),
+    ChannelsGetAll(Vec<ServerChannel>),
+    ChannelsGetByServer(Vec<ServerChannel>),
+    ChannelsGetById(ServerChannel),
     ChannelsDelete,
+    ChannelsMove(Vec<ServerChannel>),
     MessagesCreate(Message),
     MessagesGetAll(Vec<Message>),
     MessagesGetByServer(Vec<Message>),
@@ -299,7 +304,7 @@ pub enum FederationWsRequest {
     },
     ChannelsCreate {
         server_id: ServerId,
-        new_channel: NewChannel,
+        new_channel: NewServerChannel,
     },
     ChannelsGetAll,
     ChannelsGetByServer {
@@ -307,15 +312,19 @@ pub enum FederationWsRequest {
     },
     ChannelsGetById {
         server_id: ServerId,
-        channel_id: ChannelId,
+        channel_id: ServerChannelId,
     },
     ChannelsDelete {
         server_id: ServerId,
-        channel_id: ChannelId,
+        channel_id: ServerChannelId,
+    },
+    ChannelsMove {
+        server_id: ServerId,
+        channel_id: ServerChannelId,
+        channel_move: ServerChannelMove,
     },
     MessagesCreate {
-        server_id: ServerId,
-        channel_id: ChannelId,
+        text_channel_id: TextChannelId,
         new_message: NewMessage,
     },
     MessagesGetAll,
@@ -323,17 +332,12 @@ pub enum FederationWsRequest {
         server_id: ServerId,
     },
     MessagesGetByChannel {
-        server_id: ServerId,
-        channel_id: ChannelId,
+        text_channel_id: TextChannelId,
     },
     MessagesGetById {
-        server_id: ServerId,
-        channel_id: ChannelId,
         message_id: MessageId,
     },
     MessagesDelete {
-        server_id: ServerId,
-        channel_id: ChannelId,
         message_id: MessageId,
     },
 }
@@ -364,6 +368,7 @@ impl FederationWsRequest {
             | Self::ChannelsGetByServer { .. }
             | Self::ChannelsGetById { .. } => Capability::ChannelsRead,
             Self::ChannelsDelete { .. } => Capability::ChannelsDelete,
+            Self::ChannelsMove { .. } => Capability::ChannelsMove,
             Self::MessagesCreate { .. } => Capability::MessagesCreate,
             Self::MessagesGetAll
             | Self::MessagesGetByServer { .. }
@@ -393,11 +398,12 @@ pub enum FederationWsReply {
     ServersGetAll(Vec<Server>),
     ServersGetById(Server),
     ServersGetWithChannels(ServerWithChannels),
-    ChannelsCreate(Channel),
-    ChannelsGetAll(Vec<Channel>),
-    ChannelsGetByServer(Vec<Channel>),
-    ChannelsGetById(Channel),
+    ChannelsCreate(ServerChannel),
+    ChannelsGetAll(Vec<ServerChannel>),
+    ChannelsGetByServer(Vec<ServerChannel>),
+    ChannelsGetById(ServerChannel),
     ChannelsDelete,
+    ChannelsMove(Vec<ServerChannel>),
     MessagesCreate(Message),
     MessagesGetAll(Vec<Message>),
     MessagesGetByServer(Vec<Message>),
@@ -423,15 +429,14 @@ pub enum ClientWsUpdate {
     ServerDeleted {
         server_id: ServerId,
     },
-    ChannelUpserted(Channel),
+    ChannelUpserted(ServerChannel),
     ChannelDeleted {
         server_id: ServerId,
-        channel_id: ChannelId,
+        channel_id: ServerChannelId,
     },
     MessageUpserted(Message),
     MessageDeleted {
-        server_id: ServerId,
-        channel_id: ChannelId,
+        text_channel_id: TextChannelId,
         message_id: MessageId,
     },
 }
@@ -471,10 +476,10 @@ pub enum FederationWsUpdate {
     ServerDeleted {
         server_id: ServerId,
     },
-    ChannelUpserted(Channel),
+    ChannelUpserted(ServerChannel),
     ChannelDeleted {
         server_id: ServerId,
-        channel_id: ChannelId,
+        channel_id: ServerChannelId,
     },
     MessageUpserted {
         server_id: ServerId,
@@ -482,7 +487,7 @@ pub enum FederationWsUpdate {
     },
     MessageDeleted {
         server_id: ServerId,
-        channel_id: ChannelId,
+        text_channel_id: TextChannelId,
         message_id: MessageId,
     },
     RemoteUserDeleted {
@@ -608,7 +613,7 @@ mod tests {
                 "type": "hello",
                 "data": {
                     "negotiation_version": 1,
-                    "capabilities": { "messages.read": ["2026.10.16"] }
+                    "capabilities": { "messages.read": ["2026.10.17"] }
                 }
             })
         );

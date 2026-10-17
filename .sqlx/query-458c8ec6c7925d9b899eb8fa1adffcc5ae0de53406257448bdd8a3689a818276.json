@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            id, server_id, kind AS \"kind: ServerChannelKind\", title,\n            description,\n            text_channel_id AS \"text_channel_id: TextChannelId\",\n            parent_channel_id AS \"parent_channel_id: ServerChannelId\",\n            position, created_at, updated_at\n        FROM server_channels\n        WHERE text_channel_id = $1;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "server_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "kind: ServerChannelKind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "text_channel_id: TextChannelId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "parent_channel_id: ServerChannelId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "position",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "458c8ec6c7925d9b899eb8fa1adffcc5ae0de53406257448bdd8a3689a818276"
+}

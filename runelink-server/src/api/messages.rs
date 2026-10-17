@@ -5,7 +5,7 @@ use axum::{
 };
 use log::info;
 use runelink_types::{
-    channel::ChannelId,
+    channel::TextChannelId,
     message::{MessageId, NewMessage},
     server::ServerId,
 };
@@ -23,31 +23,32 @@ pub struct MessageQueryParams {
     pub target_host: Option<String>,
 }
 
-/// POST /servers/{server_id}/channels/{channel_id}/messages
+/// POST /text_channels/{text_channel_id}/messages
 pub async fn create(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((server_id, channel_id)): Path<(ServerId, ChannelId)>,
+    Path(text_channel_id): Path<TextChannelId>,
     Query(params): Query<MessageQueryParams>,
     Json(new_message): Json<NewMessage>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
-        "POST /servers/{server_id}/channels/{channel_id}/messages?target_host={:?}\nnew_message = {:#?}",
+        "POST /text_channels/{text_channel_id}/messages?target_host={:?}\nnew_message = {:#?}",
         params.target_host, new_message
     );
+    let target_host = params.target_host.as_deref();
     let session = authorize(
         &state,
         Principal::from_client_headers(&headers, &state)?,
-        ops::messages::auth::create(server_id),
+        ops::messages::auth::create(&state, text_channel_id, target_host)
+            .await?,
     )
     .await?;
     let message = ops::messages::create(
         &state,
         &session,
-        server_id,
-        channel_id,
+        text_channel_id,
         &new_message,
-        params.target_host.as_deref(),
+        target_host,
     )
     .await?;
     Ok((StatusCode::CREATED, Json(message)))
@@ -99,96 +100,81 @@ pub async fn get_by_server(
     Ok((StatusCode::OK, Json(messages)))
 }
 
-/// GET /servers/{server_id}/channels/{channel_id}/messages
-pub async fn get_by_channel(
+/// GET /text_channels/{text_channel_id}/messages
+pub async fn get_by_text_channel(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((server_id, channel_id)): Path<(ServerId, ChannelId)>,
+    Path(text_channel_id): Path<TextChannelId>,
     Query(params): Query<MessageQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
-        "GET /servers/{server_id}/channels/{channel_id}/messages?target_host={:?}",
+        "GET /text_channels/{text_channel_id}/messages?target_host={:?}",
         params.target_host
     );
+    let target_host = params.target_host.as_deref();
     let session = authorize(
         &state,
         Principal::from_client_headers(&headers, &state)?,
-        ops::messages::auth::get_by_channel(server_id),
+        ops::messages::auth::get_by_text_channel(
+            &state,
+            text_channel_id,
+            target_host,
+        )
+        .await?,
     )
     .await?;
-    let messages = ops::messages::get_by_channel(
+    let messages = ops::messages::get_by_text_channel(
         &state,
         &session,
-        server_id,
-        channel_id,
-        params.target_host.as_deref(),
+        text_channel_id,
+        target_host,
     )
     .await?;
     Ok((StatusCode::OK, Json(messages)))
 }
 
-/// GET /servers/{server_id}/channels/{channel_id}/messages/{message_id}
+/// GET /messages/{message_id}
 pub async fn get_by_id(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((server_id, channel_id, message_id)): Path<(
-        ServerId,
-        ChannelId,
-        MessageId,
-    )>,
+    Path(message_id): Path<MessageId>,
     Query(params): Query<MessageQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
-        "GET /servers/{server_id}/channels/{channel_id}/messages/{message_id}?target_host={:?}",
+        "GET /messages/{message_id}?target_host={:?}",
         params.target_host
     );
+    let target_host = params.target_host.as_deref();
     let session = authorize(
         &state,
         Principal::from_client_headers(&headers, &state)?,
-        ops::messages::auth::get_by_id(server_id),
+        ops::messages::auth::get_by_id(&state, message_id, target_host).await?,
     )
     .await?;
-    let message = ops::messages::get_by_id(
-        &state,
-        &session,
-        server_id,
-        channel_id,
-        message_id,
-        params.target_host.as_deref(),
-    )
-    .await?;
+    let message =
+        ops::messages::get_by_id(&state, &session, message_id, target_host)
+            .await?;
     Ok((StatusCode::OK, Json(message)))
 }
 
-/// DELETE /servers/{server_id}/channels/{channel_id}/messages/{message_id}
+/// DELETE /messages/{message_id}
 pub async fn delete(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((server_id, channel_id, message_id)): Path<(
-        ServerId,
-        ChannelId,
-        MessageId,
-    )>,
+    Path(message_id): Path<MessageId>,
     Query(params): Query<MessageQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
-        "DELETE /servers/{server_id}/channels/{channel_id}/messages/{message_id}?target_host={:?}",
+        "DELETE /messages/{message_id}?target_host={:?}",
         params.target_host
     );
+    let target_host = params.target_host.as_deref();
     let session = authorize(
         &state,
         Principal::from_client_headers(&headers, &state)?,
-        ops::messages::auth::delete(&state, server_id, message_id).await?,
+        ops::messages::auth::delete(&state, message_id, target_host).await?,
     )
     .await?;
-    ops::messages::delete(
-        &state,
-        &session,
-        server_id,
-        channel_id,
-        message_id,
-        params.target_host.as_deref(),
-    )
-    .await?;
+    ops::messages::delete(&state, &session, message_id, target_host).await?;
     Ok(StatusCode::NO_CONTENT)
 }

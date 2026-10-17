@@ -5,7 +5,7 @@ use axum::{
 };
 use log::info;
 use runelink_types::{
-    channel::{ChannelId, NewChannel},
+    channel::{NewServerChannel, ServerChannelId, ServerChannelMove},
     server::ServerId,
 };
 use serde::Deserialize;
@@ -28,7 +28,7 @@ pub async fn create(
     headers: HeaderMap,
     Path(server_id): Path<ServerId>,
     Query(params): Query<ChannelQueryParams>,
-    Json(new_channel): Json<NewChannel>,
+    Json(new_channel): Json<NewServerChannel>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
         "POST /servers/{server_id}/channels?target_host={:?}\nnew_channel = {:#?}",
@@ -101,7 +101,7 @@ pub async fn get_by_server(
 pub async fn get_by_id(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((server_id, channel_id)): Path<(ServerId, ChannelId)>,
+    Path((server_id, channel_id)): Path<(ServerId, ServerChannelId)>,
     Query(params): Query<ChannelQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
@@ -129,7 +129,7 @@ pub async fn get_by_id(
 pub async fn delete(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((server_id, channel_id)): Path<(ServerId, ChannelId)>,
+    Path((server_id, channel_id)): Path<(ServerId, ServerChannelId)>,
     Query(params): Query<ChannelQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
@@ -151,4 +151,34 @@ pub async fn delete(
     )
     .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// POST /servers/{server_id}/channels/{channel_id}/move
+pub async fn move_channel(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((server_id, channel_id)): Path<(ServerId, ServerChannelId)>,
+    Query(params): Query<ChannelQueryParams>,
+    Json(channel_move): Json<ServerChannelMove>,
+) -> ApiResult<impl IntoResponse> {
+    info!(
+        "POST /servers/{server_id}/channels/{channel_id}/move?target_host={:?}\nchannel_move = {:#?}",
+        params.target_host, channel_move,
+    );
+    let session = authorize(
+        &state,
+        Principal::from_client_headers(&headers, &state)?,
+        ops::channels::auth::move_channel(server_id),
+    )
+    .await?;
+    let channels = ops::channels::move_channel(
+        &state,
+        &session,
+        server_id,
+        channel_id,
+        &channel_move,
+        params.target_host.as_deref(),
+    )
+    .await?;
+    Ok((StatusCode::OK, Json(channels)))
 }

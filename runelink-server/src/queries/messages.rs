@@ -1,5 +1,5 @@
 use runelink_types::{
-    channel::ChannelId,
+    channel::TextChannelId,
     message::{Message, MessageId, NewMessage},
     server::ServerId,
     user::User,
@@ -14,7 +14,7 @@ use crate::{db::DbPool, error::ApiResult};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DbMessage {
     pub id: MessageId,
-    pub channel_id: ChannelId,
+    pub text_channel_id: TextChannelId,
     pub author: Option<Json<User>>,
     pub body: String,
     #[serde(with = "time::serde::rfc3339")]
@@ -27,7 +27,7 @@ impl From<DbMessage> for Message {
     fn from(msg: DbMessage) -> Self {
         Message {
             id: msg.id,
-            channel_id: msg.channel_id,
+            text_channel_id: msg.text_channel_id,
             author: msg.author.map(|json_user| json_user.0),
             body: msg.body,
             created_at: msg.created_at,
@@ -38,16 +38,16 @@ impl From<DbMessage> for Message {
 
 pub async fn insert(
     pool: &DbPool,
-    channel_id: ChannelId,
+    text_channel_id: TextChannelId,
     new_message: &NewMessage,
 ) -> ApiResult<Message> {
     let new_id: Uuid = sqlx::query_scalar!(
         r#"
-        INSERT INTO messages (channel_id, author_name, author_host, body)
+        INSERT INTO messages (text_channel_id, author_name, author_host, body)
         VALUES ($1, $2, $3, $4)
         RETURNING id;
         "#,
-        channel_id.as_uuid(),
+        text_channel_id.as_uuid(),
         new_message.author.name,
         new_message.author.host,
         new_message.body,
@@ -64,7 +64,7 @@ pub async fn get_all(pool: &DbPool) -> ApiResult<Vec<Message>> {
         r#"
         SELECT
             m.id,
-            m.channel_id,
+            m.text_channel_id,
             m.body,
             m.created_at,
             m.updated_at,
@@ -89,14 +89,14 @@ pub async fn get_by_server(
         r#"
         SELECT
             m.id,
-            m.channel_id,
+            m.text_channel_id,
             m.body,
             m.created_at,
             m.updated_at,
             to_jsonb(a) AS "author: Json<User>"
         FROM messages m
         LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host
-        JOIN channels c ON c.id = m.channel_id
+        JOIN server_channels c ON c.text_channel_id = m.text_channel_id
         WHERE c.server_id = $1
         ORDER BY m.created_at DESC;
         "#,
@@ -108,26 +108,26 @@ pub async fn get_by_server(
     Ok(messages)
 }
 
-pub async fn get_by_channel(
+pub async fn get_by_text_channel(
     pool: &DbPool,
-    channel_id: ChannelId,
+    text_channel_id: TextChannelId,
 ) -> ApiResult<Vec<Message>> {
     let rows = sqlx::query_as!(
         DbMessage,
         r#"
         SELECT
             m.id,
-            m.channel_id,
+            m.text_channel_id,
             m.body,
             m.created_at,
             m.updated_at,
             to_jsonb(a) AS "author: Json<User>"
         FROM messages m
         LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host
-        WHERE m.channel_id = $1
+        WHERE m.text_channel_id = $1
         ORDER BY m.created_at DESC;
         "#,
-        channel_id.as_uuid(),
+        text_channel_id.as_uuid(),
     )
     .fetch_all(pool)
     .await?;
@@ -141,7 +141,7 @@ pub async fn get_by_id(pool: &DbPool, msg_id: MessageId) -> ApiResult<Message> {
         r#"
         SELECT
             m.id,
-            m.channel_id,
+            m.text_channel_id,
             m.body,
             m.created_at,
             m.updated_at,

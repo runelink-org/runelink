@@ -1,6 +1,10 @@
 use crate::{state::AppState, ws};
 use axum::{
-    Router, extract::Query, middleware, response::IntoResponse, routing::get,
+    Router,
+    extract::Query,
+    middleware,
+    response::IntoResponse,
+    routing::{get, post},
 };
 use log::info;
 use serde::Deserialize;
@@ -45,8 +49,12 @@ pub fn router() -> Router<AppState> {
         )
         .route("/messages", get(messages::get_all))
         .route(
-            "/servers/{server_id}/channels/{channel_id}/messages/{message_id}",
+            "/messages/{message_id}",
             get(messages::get_by_id).delete(messages::delete),
+        )
+        .route(
+            "/text_channels/{text_channel_id}/messages",
+            get(messages::get_by_text_channel).post(messages::create),
         )
         .route("/channels", get(channels::get_all))
         .route(
@@ -54,8 +62,8 @@ pub fn router() -> Router<AppState> {
             get(channels::get_by_id).delete(channels::delete),
         )
         .route(
-            "/servers/{server_id}/channels/{channel_id}/messages",
-            get(messages::get_by_channel).post(messages::create),
+            "/servers/{server_id}/channels/{channel_id}/move",
+            post(channels::move_channel),
         )
         .route("/servers", get(servers::get_all).post(servers::create))
         .route(

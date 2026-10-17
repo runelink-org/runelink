@@ -3,7 +3,7 @@ use std::fmt;
 use time::OffsetDateTime;
 
 use crate::{
-    channel::Channel,
+    channel::ServerChannel,
     user::{User, UserRef},
 };
 
@@ -31,7 +31,7 @@ pub struct NewServer {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ServerWithChannels {
     pub server: Server,
-    pub channels: Vec<Channel>,
+    pub channels: Vec<ServerChannel>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]

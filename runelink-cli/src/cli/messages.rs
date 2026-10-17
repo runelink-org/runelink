@@ -1,6 +1,6 @@
 use runelink_client::requests;
 use runelink_types::{
-    channel::ChannelId,
+    channel::{ServerChannelId, ServerChannelKind, TextChannelId},
     message::{MessageId, NewMessage},
     server::ServerId,
 };
@@ -8,8 +8,9 @@ use runelink_types::{
 use crate::{error::CliError, util::parse_optional_host_input};
 
 use super::{
-    context::CliContext, input::unwrap_or_prompt,
-    select::get_channel_selection_with_inputs,
+    context::CliContext,
+    input::unwrap_or_prompt,
+    select::{ChannelSelection, get_channel_selection_with_inputs},
 };
 
 #[derive(clap::Args, Debug)]
@@ -37,7 +38,7 @@ pub struct MessageListArgs {
     pub server_id: Option<ServerId>,
     /// Optional: Filter messages by Channel ID
     #[clap(long)]
-    pub channel_id: Option<ChannelId>,
+    pub channel_id: Option<ServerChannelId>,
     /// The host of the server
     #[clap(long)]
     pub host: Option<String>,
@@ -48,12 +49,6 @@ pub struct MessageGetArgs {
     /// The ID of the message to fetch
     #[clap(long)]
     pub message_id: MessageId,
-    /// The ID of the channel the message is in
-    #[clap(long)]
-    pub channel_id: ChannelId,
-    /// The ID of the server the message is in
-    #[clap(long)]
-    pub server_id: ServerId,
     /// The host of the server the message is in
     #[clap(long)]
     pub host: Option<String>,
@@ -69,7 +64,7 @@ pub struct MessageSendArgs {
     pub server_id: Option<ServerId>,
     /// The channel ID
     #[clap(long)]
-    pub channel_id: Option<ChannelId>,
+    pub channel_id: Option<ServerChannelId>,
     /// The host of the server
     #[clap(long)]
     pub host: Option<String>,
@@ -77,12 +72,6 @@ pub struct MessageSendArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct MessageDeleteArgs {
-    /// The ID of the server
-    #[clap(long)]
-    pub server_id: ServerId,
-    /// The ID of the channel
-    #[clap(long)]
-    pub channel_id: ChannelId,
     /// The ID of the message to delete
     #[clap(long)]
     pub message_id: MessageId,
@@ -108,6 +97,7 @@ pub async fn handle_message_commands(
                 list_args.channel_id,
                 list_args.server_id,
                 target_host.as_deref(),
+                Some(ServerChannelKind::Text),
             )
             .await?;
             let api_url = ctx.home_api_url().await?;
@@ -117,12 +107,11 @@ pub async fn handle_message_commands(
             } else {
                 None
             };
-            let messages = requests::messages::fetch_by_channel(
+            let messages = requests::messages::fetch_by_text_channel(
                 ctx.client,
                 &api_url,
                 &access_token,
-                selection.server_id,
-                selection.channel_id,
+                text_channel_id(&selection)?,
                 target_host,
             )
             .await?;
@@ -143,8 +132,6 @@ pub async fn handle_message_commands(
                 ctx.client,
                 &api_url,
                 &access_token,
-                get_args.server_id,
-                get_args.channel_id,
                 get_args.message_id,
                 target_host.as_deref(),
             )
@@ -163,6 +150,7 @@ pub async fn handle_message_commands(
                 send_args.channel_id,
                 send_args.server_id,
                 target_host.as_deref(),
+                Some(ServerChannelKind::Text),
             )
             .await?;
             let body = unwrap_or_prompt(send_args.body.clone(), "Message")?;
@@ -181,8 +169,7 @@ pub async fn handle_message_commands(
                 ctx.client,
                 &api_url,
                 &access_token,
-                selection.server_id,
-                selection.channel_id,
+                text_channel_id(&selection)?,
                 &new_message,
                 target_host,
             )
@@ -202,8 +189,6 @@ pub async fn handle_message_commands(
                 ctx.client,
                 &api_url,
                 &access_token,
-                delete_args.server_id,
-                delete_args.channel_id,
                 delete_args.message_id,
                 target_host.as_deref(),
             )
@@ -212,4 +197,15 @@ pub async fn handle_message_commands(
         }
     };
     Ok(())
+}
+
+fn text_channel_id(
+    selection: &ChannelSelection,
+) -> Result<TextChannelId, CliError> {
+    selection.channel.text_channel_id.ok_or_else(|| {
+        CliError::InvalidArgument(format!(
+            "{} is not a text channel.",
+            selection.channel.verbose()
+        ))
+    })
 }

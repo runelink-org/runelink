@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            m.id,\n            m.channel_id,\n            m.body,\n            m.created_at,\n            m.updated_at,\n            to_jsonb(a) AS \"author: Json<User>\"\n        FROM messages m\n        LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host\n        ORDER BY m.created_at DESC;\n        ",
+  "query": "\n        SELECT\n            m.id,\n            m.text_channel_id,\n            m.body,\n            m.created_at,\n            m.updated_at,\n            to_jsonb(a) AS \"author: Json<User>\"\n        FROM messages m\n        LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host\n        JOIN server_channels c ON c.text_channel_id = m.text_channel_id\n        WHERE c.server_id = $1\n        ORDER BY m.created_at DESC;\n        ",
   "describe": {
     "columns": [
       {
@@ -10,7 +10,7 @@
       },
       {
         "ordinal": 1,
-        "name": "channel_id",
+        "name": "text_channel_id",
         "type_info": "Uuid"
       },
       {
@@ -35,7 +35,9 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Uuid"
+      ]
     },
     "nullable": [
       false,
@@ -46,5 +48,5 @@
       null
     ]
   },
-  "hash": "a0a6aa9c0d38338f1bc9ccfe8e068aa432c523d3484b3f2ae2db03bc6be0aba7"
+  "hash": "1d1237d71c35164837e5dd9de741c52f468e34ba0770892fbf8dc0ba61819d1e"
 }
