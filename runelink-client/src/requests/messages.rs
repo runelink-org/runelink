@@ -2,7 +2,7 @@ use log::info;
 use reqwest::Client;
 use runelink_types::{
     capability::Capability,
-    channel::ChannelId,
+    channel::TextChannelId,
     message::{Message, MessageId, NewMessage},
     server::ServerId,
 };
@@ -15,13 +15,11 @@ pub async fn create(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: ServerId,
-    channel_id: ChannelId,
+    text_channel_id: TextChannelId,
     new_message: &NewMessage,
     target_host: Option<&str>,
 ) -> Result<Message> {
-    let mut url =
-        format!("{api_url}/servers/{server_id}/channels/{channel_id}/messages");
+    let mut url = format!("{api_url}/text_channels/{text_channel_id}/messages");
     if let Some(host) = target_host {
         url = format!("{url}?target_host={host}");
     }
@@ -79,16 +77,14 @@ pub async fn fetch_by_server(
     .await
 }
 
-pub async fn fetch_by_channel(
+pub async fn fetch_by_text_channel(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: ServerId,
-    channel_id: ChannelId,
+    text_channel_id: TextChannelId,
     target_host: Option<&str>,
 ) -> Result<Vec<Message>> {
-    let mut url =
-        format!("{api_url}/servers/{server_id}/channels/{channel_id}/messages");
+    let mut url = format!("{api_url}/text_channels/{text_channel_id}/messages");
     if let Some(host) = target_host {
         url = format!("{url}?target_host={host}");
     }
@@ -106,14 +102,10 @@ pub async fn fetch_by_id(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: ServerId,
-    channel_id: ChannelId,
     message_id: MessageId,
     target_host: Option<&str>,
 ) -> Result<Message> {
-    let mut url = format!(
-        "{api_url}/servers/{server_id}/channels/{channel_id}/messages/{message_id}"
-    );
+    let mut url = format!("{api_url}/messages/{message_id}");
     if let Some(host) = target_host {
         url = format!("{url}?target_host={host}");
     }
@@ -131,14 +123,10 @@ pub async fn delete(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: ServerId,
-    channel_id: ChannelId,
     message_id: MessageId,
     target_host: Option<&str>,
 ) -> Result<()> {
-    let mut url = format!(
-        "{api_url}/servers/{server_id}/channels/{channel_id}/messages/{message_id}"
-    );
+    let mut url = format!("{api_url}/messages/{message_id}");
     if let Some(host) = target_host {
         url = format!("{url}?target_host={host}");
     }

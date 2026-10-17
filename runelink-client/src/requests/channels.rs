@@ -2,7 +2,9 @@ use log::info;
 use reqwest::Client;
 use runelink_types::{
     capability::Capability,
-    channel::{Channel, ChannelId, NewChannel},
+    channel::{
+        NewServerChannel, ServerChannel, ServerChannelId, ServerChannelMove,
+    },
     server::ServerId,
 };
 
@@ -15,15 +17,15 @@ pub async fn create(
     api_url: &str,
     access_token: &str,
     server_id: ServerId,
-    new_channel: &NewChannel,
+    new_channel: &NewServerChannel,
     target_host: Option<&str>,
-) -> Result<Channel> {
+) -> Result<ServerChannel> {
     let mut url = format!("{api_url}/servers/{server_id}/channels");
     if let Some(host) = target_host {
         url = format!("{url}?target_host={host}");
     }
     info!("creating channel: {url}");
-    post_json_authed::<NewChannel, Channel>(
+    post_json_authed::<NewServerChannel, ServerChannel>(
         client,
         &url,
         access_token,
@@ -38,13 +40,13 @@ pub async fn fetch_all(
     api_url: &str,
     access_token: &str,
     target_host: Option<&str>,
-) -> Result<Vec<Channel>> {
+) -> Result<Vec<ServerChannel>> {
     let mut url = format!("{api_url}/channels");
     if let Some(host) = target_host {
         url = format!("{url}?target_host={host}");
     }
     info!("fetching all channels: {url}");
-    fetch_json_authed::<Vec<Channel>>(
+    fetch_json_authed::<Vec<ServerChannel>>(
         client,
         &url,
         access_token,
@@ -59,13 +61,13 @@ pub async fn fetch_by_server(
     access_token: &str,
     server_id: ServerId,
     target_host: Option<&str>,
-) -> Result<Vec<Channel>> {
+) -> Result<Vec<ServerChannel>> {
     let mut url = format!("{api_url}/servers/{server_id}/channels");
     if let Some(host) = target_host {
         url = format!("{url}?target_host={host}");
     }
     info!("fetching channels by server: {url}");
-    fetch_json_authed::<Vec<Channel>>(
+    fetch_json_authed::<Vec<ServerChannel>>(
         client,
         &url,
         access_token,
@@ -79,16 +81,16 @@ pub async fn fetch_by_id(
     api_url: &str,
     access_token: &str,
     server_id: ServerId,
-    channel_id: ChannelId,
+    channel_id: ServerChannelId,
     target_host: Option<&str>,
-) -> Result<Channel> {
+) -> Result<ServerChannel> {
     let mut url =
         format!("{api_url}/servers/{server_id}/channels/{channel_id}");
     if let Some(host) = target_host {
         url = format!("{url}?target_host={host}");
     }
     info!("fetching channel: {url}");
-    fetch_json_authed::<Channel>(
+    fetch_json_authed::<ServerChannel>(
         client,
         &url,
         access_token,
@@ -102,7 +104,7 @@ pub async fn delete(
     api_url: &str,
     access_token: &str,
     server_id: ServerId,
-    channel_id: ChannelId,
+    channel_id: ServerChannelId,
     target_host: Option<&str>,
 ) -> Result<()> {
     let mut url =
@@ -112,4 +114,29 @@ pub async fn delete(
     }
     info!("deleting channel: {url}");
     delete_authed(client, &url, access_token, Capability::ChannelsDelete).await
+}
+
+pub async fn move_channel(
+    client: &Client,
+    api_url: &str,
+    access_token: &str,
+    server_id: ServerId,
+    channel_id: ServerChannelId,
+    channel_move: &ServerChannelMove,
+    target_host: Option<&str>,
+) -> Result<Vec<ServerChannel>> {
+    let mut url =
+        format!("{api_url}/servers/{server_id}/channels/{channel_id}/move");
+    if let Some(host) = target_host {
+        url = format!("{url}?target_host={host}");
+    }
+    info!("moving channel: {url}");
+    post_json_authed::<ServerChannelMove, Vec<ServerChannel>>(
+        client,
+        &url,
+        access_token,
+        channel_move,
+        Capability::ChannelsMove,
+    )
+    .await
 }

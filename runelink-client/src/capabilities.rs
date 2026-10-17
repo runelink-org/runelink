@@ -16,6 +16,7 @@ pub const fn http(capability: &Capability) -> &'static [CapabilityVersion] {
         Capability::ChannelsCreate => channels::CREATE_VERSIONS,
         Capability::ChannelsDelete => channels::DELETE_VERSIONS,
         Capability::ChannelsEvents => &[],
+        Capability::ChannelsMove => channels::MOVE_VERSIONS,
         Capability::ChannelsRead => channels::READ_VERSIONS,
         Capability::ConnectionState => &[],
         Capability::MembershipsEvents => &[],

@@ -7,7 +7,7 @@ use crossterm::{
 };
 use runelink_client::requests;
 use runelink_types::{
-    channel::{Channel, ChannelId},
+    channel::{ServerChannel, ServerChannelId, ServerChannelKind},
     server::{Server, ServerId},
 };
 use std::collections::HashSet;
@@ -208,14 +208,46 @@ pub async fn get_server_selection(
 #[derive(Debug, Clone)]
 pub struct ChannelSelection {
     pub host: String,
-    pub server_id: ServerId,
-    pub channel_id: ChannelId,
+    pub channel: ServerChannel,
 }
 
+/// Order channels depth-first through the category tree, with each
+/// channel's depth. Channels with a missing parent are shown at the root.
+pub fn tree_order(channels: &[ServerChannel]) -> Vec<(usize, &ServerChannel)> {
+    let ids: HashSet<_> = channels.iter().map(|c| c.id).collect();
+    let mut sorted: Vec<_> = channels.iter().collect();
+    sorted.sort_by_key(|c| (c.position, c.id.as_uuid()));
+    let mut ordered = Vec::with_capacity(channels.len());
+    let mut stack: Vec<_> = sorted
+        .iter()
+        .rev()
+        .filter(|c| c.parent_channel_id.is_none_or(|p| !ids.contains(&p)))
+        .map(|c| (0, *c))
+        .collect();
+    while let Some((depth, channel)) = stack.pop() {
+        ordered.push((depth, channel));
+        stack.extend(
+            sorted
+                .iter()
+                .rev()
+                .filter(|c| c.parent_channel_id == Some(channel.id))
+                .map(|c| (depth + 1, *c)),
+        );
+    }
+    ordered
+}
+
+/// Display a channel indented by its tree depth.
+pub fn indented(depth: usize, channel: &ServerChannel) -> String {
+    format!("{}{channel}", "  ".repeat(depth))
+}
+
+/// Interactively select a channel, optionally only of one kind.
 pub async fn get_channel_selection(
     ctx: &mut CliContext<'_>,
     server_id: ServerId,
     server_host: &str,
+    kind: Option<ServerChannelKind>,
 ) -> Result<ChannelSelection, CliError> {
     let api_url = ctx.home_api_url().await?;
     let access_token = ctx.get_access_token().await?;
@@ -227,51 +259,81 @@ pub async fn get_channel_selection(
         Some(server_host),
     )
     .await?;
-    if channels.is_empty() {
+    let choices: Vec<_> = tree_order(&channels)
+        .into_iter()
+        .filter(|(_, c)| kind.is_none_or(|kind| c.kind == kind))
+        .collect();
+    if choices.is_empty() {
         return Err(CliError::NoActionPossible(
             "No channels available.\n\
                 For more information, try `rune channel --help`."
                 .into(),
         ));
     }
-    let channel =
-        select_inline(&channels, "Select channel", Channel::to_string)?
-            .ok_or(CliError::Cancellation)?;
+    let (_, channel) =
+        select_inline(&choices, "Select channel", |(depth, c)| {
+            indented(*depth, c)
+        })?
+        .ok_or(CliError::Cancellation)?;
     println!();
     Ok(ChannelSelection {
         host: server_host.to_string(),
-        server_id,
-        channel_id: channel.id,
+        channel: (*channel).clone(),
     })
 }
 
+/// Resolve a channel from IDs, prompting for whatever is missing.
 pub async fn get_channel_selection_with_inputs(
     ctx: &mut CliContext<'_>,
-    channel_id: Option<ChannelId>,
+    channel_id: Option<ServerChannelId>,
     server_id: Option<ServerId>,
     host: Option<&str>,
+    kind: Option<ServerChannelKind>,
 ) -> Result<ChannelSelection, CliError> {
     let host = match host {
         Some(host) => host.to_string(),
         None => ctx.home_host()?.to_string(),
     };
-    match (channel_id, server_id) {
-        (Some(channel_id), Some(server_id)) => Ok(ChannelSelection {
-            host,
-            server_id,
-            channel_id,
-        }),
-        (Some(_channel_id), None) => Err(CliError::MissingContext(
-            "Server ID must be passed with channel ID.".into(),
-        )),
+    let selection = match (channel_id, server_id) {
+        (Some(channel_id), Some(server_id)) => {
+            let api_url = ctx.home_api_url().await?;
+            let access_token = ctx.get_access_token().await?;
+            let channel = requests::channels::fetch_by_id(
+                ctx.client,
+                &api_url,
+                &access_token,
+                server_id,
+                channel_id,
+                Some(host.as_str()),
+            )
+            .await?;
+            ChannelSelection { host, channel }
+        }
+        (Some(_channel_id), None) => {
+            return Err(CliError::MissingContext(
+                "Server ID must be passed with channel ID.".into(),
+            ));
+        }
         (None, Some(server_id)) => {
-            get_channel_selection(ctx, server_id, host.as_str()).await
+            get_channel_selection(ctx, server_id, host.as_str(), kind).await?
         }
         (None, None) => {
             let server =
                 get_server_selection(ctx, ServerSelectionType::MemberOnly)
                     .await?;
-            get_channel_selection(ctx, server.id, server.host.as_str()).await
+            get_channel_selection(ctx, server.id, server.host.as_str(), kind)
+                .await?
         }
+    };
+    if let Some(kind) = kind.filter(|kind| selection.channel.kind != *kind) {
+        let kind = match kind {
+            ServerChannelKind::Text => "text channel",
+            ServerChannelKind::Category => "category",
+        };
+        return Err(CliError::InvalidArgument(format!(
+            "{} is not a {kind}.",
+            selection.channel.verbose()
+        )));
     }
+    Ok(selection)
 }

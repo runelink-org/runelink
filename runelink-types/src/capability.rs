@@ -68,6 +68,7 @@ define_capabilities! {
     ChannelsCreate => "channels.create",
     ChannelsDelete => "channels.delete",
     ChannelsEvents => "channels.events",
+    ChannelsMove => "channels.move",
     ChannelsRead => "channels.read",
     ConnectionState => "connection.state",
     MembershipsEvents => "memberships.events",

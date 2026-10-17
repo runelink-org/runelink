@@ -11,7 +11,12 @@ pub struct ServerId(Uuid);
 #[repr(transparent)]
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::Type))]
-pub struct ChannelId(Uuid);
+pub struct ServerChannelId(Uuid);
+
+#[repr(transparent)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(sqlx::Type))]
+pub struct TextChannelId(Uuid);
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,7 +41,17 @@ impl ServerId {
     }
 }
 
-impl ChannelId {
+impl ServerChannelId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+
+    pub fn as_uuid(&self) -> Uuid {
+        self.0
+    }
+}
+
+impl TextChannelId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
@@ -82,7 +97,13 @@ impl From<Uuid> for ServerId {
     }
 }
 
-impl From<Uuid> for ChannelId {
+impl From<Uuid> for ServerChannelId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Uuid> for TextChannelId {
     fn from(value: Uuid) -> Self {
         Self(value)
     }
@@ -112,8 +133,14 @@ impl From<ServerId> for Uuid {
     }
 }
 
-impl From<ChannelId> for Uuid {
-    fn from(value: ChannelId) -> Self {
+impl From<ServerChannelId> for Uuid {
+    fn from(value: ServerChannelId) -> Self {
+        value.0
+    }
+}
+
+impl From<TextChannelId> for Uuid {
+    fn from(value: TextChannelId) -> Self {
         value.0
     }
 }
@@ -148,13 +175,25 @@ impl fmt::Debug for ServerId {
     }
 }
 
-impl fmt::Display for ChannelId {
+impl fmt::Display for ServerChannelId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl fmt::Debug for ChannelId {
+impl fmt::Display for TextChannelId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl fmt::Debug for ServerChannelId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl fmt::Debug for TextChannelId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -204,7 +243,15 @@ impl FromStr for ServerId {
     }
 }
 
-impl FromStr for ChannelId {
+impl FromStr for ServerChannelId {
+    type Err = uuid::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(Uuid::parse_str(s)?))
+    }
+}
+
+impl FromStr for TextChannelId {
     type Err = uuid::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {

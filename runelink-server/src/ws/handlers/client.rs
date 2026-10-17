@@ -437,25 +437,49 @@ pub(super) async fn handle_client_request(
             Ok(ClientWsReply::ChannelsDelete)
         }
 
-        ClientWsRequest::MessagesCreate {
+        ClientWsRequest::ChannelsMove {
             server_id,
             channel_id,
-            new_message,
+            channel_move,
             target_host,
         } => {
             let session = authorize_client(
                 state,
                 conn_id,
-                ops::messages::auth::create(server_id),
+                ops::channels::auth::move_channel(server_id),
             )
             .await?;
-            let message = ops::messages::create(
+            let channels = ops::channels::move_channel(
                 state,
                 &session,
                 server_id,
                 channel_id,
-                &new_message,
+                &channel_move,
                 target_host.as_deref(),
+            )
+            .await?;
+            Ok(ClientWsReply::ChannelsMove(channels))
+        }
+
+        ClientWsRequest::MessagesCreate {
+            text_channel_id,
+            new_message,
+            target_host,
+        } => {
+            let target_host = target_host.as_deref();
+            let requirement = ops::messages::auth::create(
+                state,
+                text_channel_id,
+                target_host,
+            )
+            .await?;
+            let session = authorize_client(state, conn_id, requirement).await?;
+            let message = ops::messages::create(
+                state,
+                &session,
+                text_channel_id,
+                &new_message,
+                target_host,
             )
             .await?;
             Ok(ClientWsReply::MessagesCreate(message))
@@ -495,74 +519,57 @@ pub(super) async fn handle_client_request(
         }
 
         ClientWsRequest::MessagesGetByChannel {
-            server_id,
-            channel_id,
+            text_channel_id,
             target_host,
         } => {
-            let session = authorize_client(
+            let target_host = target_host.as_deref();
+            let requirement = ops::messages::auth::get_by_text_channel(
                 state,
-                conn_id,
-                ops::messages::auth::get_by_channel(server_id),
+                text_channel_id,
+                target_host,
             )
             .await?;
-            let messages = ops::messages::get_by_channel(
+            let session = authorize_client(state, conn_id, requirement).await?;
+            let messages = ops::messages::get_by_text_channel(
                 state,
                 &session,
-                server_id,
-                channel_id,
-                target_host.as_deref(),
+                text_channel_id,
+                target_host,
             )
             .await?;
             Ok(ClientWsReply::MessagesGetByChannel(messages))
         }
 
         ClientWsRequest::MessagesGetById {
-            server_id,
-            channel_id,
             message_id,
             target_host,
         } => {
-            let session = authorize_client(
-                state,
-                conn_id,
-                ops::messages::auth::get_by_id(server_id),
-            )
-            .await?;
+            let target_host = target_host.as_deref();
+            let requirement =
+                ops::messages::auth::get_by_id(state, message_id, target_host)
+                    .await?;
+            let session = authorize_client(state, conn_id, requirement).await?;
             let message = ops::messages::get_by_id(
                 state,
                 &session,
-                server_id,
-                channel_id,
                 message_id,
-                target_host.as_deref(),
+                target_host,
             )
             .await?;
             Ok(ClientWsReply::MessagesGetById(message))
         }
 
         ClientWsRequest::MessagesDelete {
-            server_id,
-            channel_id,
             message_id,
             target_host,
         } => {
+            let target_host = target_host.as_deref();
             let requirement =
-                if state.config.is_remote_host(target_host.as_deref()) {
-                    ops::messages::auth::delete_remote(server_id)
-                } else {
-                    ops::messages::auth::delete(state, server_id, message_id)
-                        .await?
-                };
+                ops::messages::auth::delete(state, message_id, target_host)
+                    .await?;
             let session = authorize_client(state, conn_id, requirement).await?;
-            ops::messages::delete(
-                state,
-                &session,
-                server_id,
-                channel_id,
-                message_id,
-                target_host.as_deref(),
-            )
-            .await?;
+            ops::messages::delete(state, &session, message_id, target_host)
+                .await?;
             Ok(ClientWsReply::MessagesDelete)
         }
     }

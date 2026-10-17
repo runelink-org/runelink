@@ -11,6 +11,7 @@ mod auth;
 mod auth_service;
 mod bearer_auth;
 mod capabilities;
+mod channel_tree;
 mod config;
 mod db;
 mod error;

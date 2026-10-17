@@ -36,17 +36,20 @@ pub mod channels {
     use crate::capability::CapabilityVersion;
 
     pub const CREATE_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 10, 16);
+        CapabilityVersion::new(2026, 10, 17);
     pub const DELETE_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 10, 16);
+        CapabilityVersion::new(2026, 10, 17);
     pub const EVENTS_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 10, 16);
+        CapabilityVersion::new(2026, 10, 17);
+    pub const MOVE_VERSION: CapabilityVersion =
+        CapabilityVersion::new(2026, 10, 17);
     pub const READ_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 10, 16);
+        CapabilityVersion::new(2026, 10, 17);
 
     pub const CREATE_VERSIONS: &[CapabilityVersion] = &[CREATE_VERSION];
     pub const DELETE_VERSIONS: &[CapabilityVersion] = &[DELETE_VERSION];
     pub const EVENTS_VERSIONS: &[CapabilityVersion] = &[EVENTS_VERSION];
+    pub const MOVE_VERSIONS: &[CapabilityVersion] = &[MOVE_VERSION];
     pub const READ_VERSIONS: &[CapabilityVersion] = &[READ_VERSION];
 }
 
@@ -69,13 +72,13 @@ pub mod messages {
     use crate::capability::CapabilityVersion;
 
     pub const CREATE_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 10, 16);
+        CapabilityVersion::new(2026, 10, 17);
     pub const DELETE_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 10, 16);
+        CapabilityVersion::new(2026, 10, 17);
     pub const EVENTS_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 10, 16);
+        CapabilityVersion::new(2026, 10, 17);
     pub const READ_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 10, 16);
+        CapabilityVersion::new(2026, 10, 17);
 
     pub const CREATE_VERSIONS: &[CapabilityVersion] = &[CREATE_VERSION];
     pub const DELETE_VERSIONS: &[CapabilityVersion] = &[DELETE_VERSION];
@@ -93,7 +96,7 @@ pub mod servers {
     pub const EVENTS_VERSION: CapabilityVersion =
         CapabilityVersion::new(2026, 10, 16);
     pub const READ_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 10, 16);
+        CapabilityVersion::new(2026, 10, 17);
 
     pub const CREATE_VERSIONS: &[CapabilityVersion] = &[CREATE_VERSION];
     pub const DELETE_VERSIONS: &[CapabilityVersion] = &[DELETE_VERSION];

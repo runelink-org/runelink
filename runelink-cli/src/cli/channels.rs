@@ -1,13 +1,15 @@
 use runelink_client::requests;
 use runelink_types::{
-    channel::{ChannelId, NewChannel},
+    channel::{
+        NewServerChannel, ServerChannelId, ServerChannelKind, ServerChannelMove,
+    },
     server::ServerId,
 };
 
 use crate::{
     cli::select::{
-        ChannelSelection, ServerSelectionType,
-        get_channel_selection_with_inputs, get_server_selection,
+        ServerSelectionType, get_channel_selection_with_inputs,
+        get_server_selection, indented, select_inline, tree_order,
     },
     error::CliError,
     util::parse_optional_host_input,
@@ -32,8 +34,10 @@ pub enum ChannelCommands {
     Get(ChannelGetArgs),
     /// Create a new channel
     Create(ChannelCreateArgs),
-    /// Delete a channel
+    /// Delete a channel or an empty category
     Delete(ChannelDeleteArgs),
+    /// Move a channel or category within its server
+    Move(ChannelMoveArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -59,7 +63,7 @@ pub struct ChannelGetArgs {
     pub host: Option<String>,
     /// The ID of the channel
     #[clap(long)]
-    pub channel_id: ChannelId,
+    pub channel_id: ServerChannelId,
 }
 
 #[derive(clap::Args, Debug)]
@@ -73,6 +77,12 @@ pub struct ChannelCreateArgs {
     /// Skip description cli prompt
     #[clap(long)]
     pub no_description: bool,
+    /// Create a category instead of a text channel
+    #[clap(long)]
+    pub category: bool,
+    /// The parent category ID (defaults to the server root)
+    #[clap(long)]
+    pub parent_id: Option<ServerChannelId>,
     /// The server ID
     #[clap(long)]
     pub server_id: Option<ServerId>,
@@ -88,7 +98,29 @@ pub struct ChannelDeleteArgs {
     pub server_id: Option<ServerId>,
     /// The ID of the channel to delete
     #[clap(long)]
-    pub channel_id: Option<ChannelId>,
+    pub channel_id: Option<ServerChannelId>,
+    /// The host of the server
+    #[clap(long)]
+    pub host: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ChannelMoveArgs {
+    /// The ID of the server
+    #[clap(long)]
+    pub server_id: Option<ServerId>,
+    /// The ID of the channel to move
+    #[clap(long)]
+    pub channel_id: Option<ServerChannelId>,
+    /// The new parent category ID
+    #[clap(long, conflicts_with = "root")]
+    pub parent_id: Option<ServerChannelId>,
+    /// Move to the server root
+    #[clap(long)]
+    pub root: bool,
+    /// The new index among its siblings, starting from 0
+    #[clap(long)]
+    pub index: Option<u32>,
     /// The host of the server
     #[clap(long)]
     pub host: Option<String>,
@@ -154,8 +186,8 @@ pub async fn handle_channel_commands(
                     For more information, try `rune channel --help`."
                 )
             }
-            for channel in channels {
-                println!("{}", channel.verbose());
+            for (depth, channel) in tree_order(&channels) {
+                println!("{}  ({})", indented(depth, channel), channel.id);
             }
         }
 
@@ -211,9 +243,16 @@ pub async fn handle_channel_commands(
             } else {
                 read_input("Channel Description (leave blank for none):\n> ")?
             };
-            let new_channel = NewChannel {
+            let kind = if create_args.category {
+                ServerChannelKind::Category
+            } else {
+                ServerChannelKind::Text
+            };
+            let new_channel = NewServerChannel {
+                kind,
                 title,
                 description: desc,
+                parent_channel_id: create_args.parent_id,
             };
             let target_host = if server.host != account.user_ref.host {
                 Some(server.host.as_str())
@@ -240,41 +279,101 @@ pub async fn handle_channel_commands(
                 delete_args.host.as_deref(),
                 ctx.strict_input,
             )?;
-            let selection =
-                match (delete_args.server_id, delete_args.channel_id) {
-                    (Some(server_id), Some(channel_id)) => {
-                        // Both IDs provided, use them directly
-                        let host = match &target_host {
-                            Some(host) => host.to_string(),
-                            None => ctx.home_host()?.to_string(),
-                        };
-                        ChannelSelection {
-                            host,
-                            server_id,
-                            channel_id,
-                        }
-                    }
-                    _ => {
-                        // Need to select server and/or channel
-                        get_channel_selection_with_inputs(
-                            ctx,
-                            delete_args.channel_id,
-                            delete_args.server_id,
-                            target_host.as_deref(),
-                        )
-                        .await?
-                    }
-                };
+            let selection = get_channel_selection_with_inputs(
+                ctx,
+                delete_args.channel_id,
+                delete_args.server_id,
+                target_host.as_deref(),
+                None,
+            )
+            .await?;
+            let channel = &selection.channel;
             requests::channels::delete(
                 ctx.client,
                 &api_url,
                 &access_token,
-                selection.server_id,
-                selection.channel_id,
+                channel.server_id,
+                channel.id,
                 Some(&selection.host),
             )
             .await?;
-            println!("Deleted channel: {}", selection.channel_id);
+            println!("Deleted channel: {}", channel.verbose());
+        }
+
+        ChannelCommands::Move(move_args) => {
+            ctx.account.ok_or(CliError::MissingAccount)?;
+            let target_host = parse_optional_host_input(
+                move_args.host.as_deref(),
+                ctx.strict_input,
+            )?;
+            let selection = get_channel_selection_with_inputs(
+                ctx,
+                move_args.channel_id,
+                move_args.server_id,
+                target_host.as_deref(),
+                None,
+            )
+            .await?;
+            let channel = &selection.channel;
+            let api_url = ctx.home_api_url().await?;
+            let access_token = ctx.get_access_token().await?;
+            let parent_channel_id = match (move_args.parent_id, move_args.root)
+            {
+                (Some(parent_id), _) => Some(parent_id),
+                (None, true) => None,
+                (None, false) => {
+                    let channels = requests::channels::fetch_by_server(
+                        ctx.client,
+                        &api_url,
+                        &access_token,
+                        channel.server_id,
+                        Some(&selection.host),
+                    )
+                    .await?;
+                    let mut parents = vec![(0, None)];
+                    parents.extend(
+                        tree_order(&channels)
+                            .into_iter()
+                            .filter(|(_, c)| {
+                                c.kind == ServerChannelKind::Category
+                                    && c.id != channel.id
+                            })
+                            .map(|(depth, c)| (depth + 1, Some(c))),
+                    );
+                    let (_, parent) =
+                        select_inline(&parents, "Select parent", |entry| {
+                            match entry {
+                                (_, None) => "(server root)".into(),
+                                (depth, Some(c)) => indented(*depth, c),
+                            }
+                        })?
+                        .ok_or(CliError::Cancellation)?;
+                    println!();
+                    parent.map(|c| c.id)
+                }
+            };
+            let index = unwrap_or_prompt(
+                move_args.index,
+                "Index among siblings (0 is first)",
+            )?;
+            let changed = requests::channels::move_channel(
+                ctx.client,
+                &api_url,
+                &access_token,
+                channel.server_id,
+                channel.id,
+                &ServerChannelMove {
+                    parent_channel_id,
+                    index,
+                },
+                Some(&selection.host),
+            )
+            .await?;
+            if changed.is_empty() {
+                println!("Channel already in place: {}", channel.verbose());
+            } else {
+                println!("Moved channel: {}", channel.verbose());
+            }
         }
     };
     Ok(())

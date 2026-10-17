@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE server_channels sc\n        SET parent_channel_id = p.parent_channel_id, position = p.position\n        FROM UNNEST($1::UUID[], $2::UUID[], $3::INTEGER[])\n            AS p (id, parent_channel_id, position)\n        WHERE sc.id = p.id\n        RETURNING\n            sc.id, sc.server_id, sc.kind AS \"kind: ServerChannelKind\",\n            sc.title, sc.description,\n            sc.text_channel_id AS \"text_channel_id: TextChannelId\",\n            sc.parent_channel_id AS \"parent_channel_id: ServerChannelId\",\n            sc.position, sc.created_at, sc.updated_at;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "server_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "kind: ServerChannelKind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "text_channel_id: TextChannelId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "parent_channel_id: ServerChannelId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "position",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "UuidArray",
+        "Int4Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8c7e2ac6e263f2d5de7f18177a57533bc761919db107c9d183a82e7a82f5db0f"
+}

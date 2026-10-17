@@ -1,5 +1,5 @@
 use runelink_types::{
-    channel::ChannelId,
+    channel::TextChannelId,
     message::{Message, MessageId, NewMessage},
     server::ServerId,
     ws::{
@@ -21,23 +21,19 @@ use crate::{
 pub async fn create(
     state: &AppState,
     session: &Session,
-    server_id: ServerId,
-    channel_id: ChannelId,
+    text_channel_id: TextChannelId,
     new_message: &NewMessage,
     target_host: Option<&str>,
 ) -> ApiResult<Message> {
     // Handle local case
     if !state.config.is_remote_host(target_host) {
-        let channel =
-            queries::channels::get_by_id(&state.db_pool, channel_id).await?;
-        if channel.server_id != server_id {
-            return Err(ApiError::AuthError(
-                "Channel not found in specified server".into(),
-            ));
-        }
-        let message =
-            queries::messages::insert(&state.db_pool, channel_id, new_message)
-                .await?;
+        let server_id = server_of_text_channel(state, text_channel_id).await?;
+        let message = queries::messages::insert(
+            &state.db_pool,
+            text_channel_id,
+            new_message,
+        )
+        .await?;
         fanout::fanout_update(
             state,
             fanout::resolve_server_targets(state, server_id).await?,
@@ -63,8 +59,7 @@ pub async fn create(
             host,
             Some(user_ref.clone()),
             FederationWsRequest::MessagesCreate {
-                server_id,
-                channel_id,
+                text_channel_id,
                 new_message: new_message.clone(),
             },
         )
@@ -150,19 +145,20 @@ pub async fn get_by_server(
     }
 }
 
-/// Get messages in a channel.
-pub async fn get_by_channel(
+/// Get messages in a text channel.
+pub async fn get_by_text_channel(
     state: &AppState,
     session: &Session,
-    server_id: ServerId,
-    channel_id: ChannelId,
+    text_channel_id: TextChannelId,
     target_host: Option<&str>,
 ) -> ApiResult<Vec<Message>> {
     // Handle local case
     if !state.config.is_remote_host(target_host) {
-        let messages =
-            queries::messages::get_by_channel(&state.db_pool, channel_id)
-                .await?;
+        let messages = queries::messages::get_by_text_channel(
+            &state.db_pool,
+            text_channel_id,
+        )
+        .await?;
         Ok(messages)
     } else {
         // Fetch from remote host using federation
@@ -177,10 +173,7 @@ pub async fn get_by_channel(
             state,
             host,
             Some(user_ref.clone()),
-            FederationWsRequest::MessagesGetByChannel {
-                server_id,
-                channel_id,
-            },
+            FederationWsRequest::MessagesGetByChannel { text_channel_id },
         )
         .await?;
         let FederationWsReply::MessagesGetByChannel(messages) = reply else {
@@ -196,8 +189,6 @@ pub async fn get_by_channel(
 pub async fn get_by_id(
     state: &AppState,
     session: &Session,
-    server_id: ServerId,
-    channel_id: ChannelId,
     message_id: MessageId,
     target_host: Option<&str>,
 ) -> ApiResult<Message> {
@@ -205,18 +196,6 @@ pub async fn get_by_id(
     if !state.config.is_remote_host(target_host) {
         let message =
             queries::messages::get_by_id(&state.db_pool, message_id).await?;
-        if message.channel_id != channel_id {
-            return Err(ApiError::AuthError(
-                "Message not found in specified channel".into(),
-            ));
-        }
-        let channel =
-            queries::channels::get_by_id(&state.db_pool, channel_id).await?;
-        if channel.server_id != server_id {
-            return Err(ApiError::AuthError(
-                "Message not found in specified server".into(),
-            ));
-        }
         Ok(message)
     } else {
         // Fetch from remote host using federation
@@ -231,11 +210,7 @@ pub async fn get_by_id(
             state,
             host,
             Some(user_ref.clone()),
-            FederationWsRequest::MessagesGetById {
-                server_id,
-                channel_id,
-                message_id,
-            },
+            FederationWsRequest::MessagesGetById { message_id },
         )
         .await?;
         let FederationWsReply::MessagesGetById(message) = reply else {
@@ -251,41 +226,26 @@ pub async fn get_by_id(
 pub async fn delete(
     state: &AppState,
     session: &Session,
-    server_id: ServerId,
-    channel_id: ChannelId,
     message_id: MessageId,
     target_host: Option<&str>,
 ) -> ApiResult<()> {
     // Handle local case
     if !state.config.is_remote_host(target_host) {
-        // Verify the message belongs to the channel and server
-        // TODO: This should be done with one database query
         let message =
             queries::messages::get_by_id(&state.db_pool, message_id).await?;
-        if message.channel_id != channel_id {
-            return Err(ApiError::AuthError(
-                "Message not found in specified channel".into(),
-            ));
-        }
-        let channel =
-            queries::channels::get_by_id(&state.db_pool, channel_id).await?;
-        if channel.server_id != server_id {
-            return Err(ApiError::AuthError(
-                "Message not found in specified server".into(),
-            ));
-        }
+        let text_channel_id = message.text_channel_id;
+        let server_id = server_of_text_channel(state, text_channel_id).await?;
         queries::messages::delete(&state.db_pool, message_id).await?;
         fanout::fanout_update(
             state,
             fanout::resolve_server_targets(state, server_id).await?,
             ClientWsUpdate::MessageDeleted {
-                server_id,
-                channel_id,
+                text_channel_id,
                 message_id,
             },
             FederationWsUpdate::MessageDeleted {
                 server_id,
-                channel_id,
+                text_channel_id,
                 message_id,
             },
         )
@@ -304,11 +264,7 @@ pub async fn delete(
             state,
             host,
             Some(user_ref.clone()),
-            FederationWsRequest::MessagesDelete {
-                server_id,
-                channel_id,
-                message_id,
-            },
+            FederationWsRequest::MessagesDelete { message_id },
         )
         .await?;
         let FederationWsReply::MessagesDelete = reply else {
@@ -320,14 +276,64 @@ pub async fn delete(
     }
 }
 
+/// Get the server whose channel owns a local text channel.
+async fn server_of_text_channel(
+    state: &AppState,
+    text_channel_id: TextChannelId,
+) -> ApiResult<ServerId> {
+    let channel =
+        queries::channels::get_by_text_channel(&state.db_pool, text_channel_id)
+            .await?;
+    Ok(channel.server_id)
+}
+
 /// Auth requirements for message operations.
+///
+/// Requests for another host only require client auth here, since the
+/// owning host authorizes them.
 pub mod auth {
     use super::*;
     use crate::auth::Requirement as Req;
     use crate::or;
 
-    pub fn create(server_id: ServerId) -> Req {
-        Req::ServerMember(server_id).or_admin().client_only()
+    async fn text_channel_member(
+        state: &AppState,
+        text_channel_id: TextChannelId,
+    ) -> ApiResult<Req> {
+        let server_id = server_of_text_channel(state, text_channel_id).await?;
+        Ok(Req::ServerMember(server_id))
+    }
+
+    async fn message_member(
+        state: &AppState,
+        message_id: MessageId,
+    ) -> ApiResult<Req> {
+        let message =
+            queries::messages::get_by_id(&state.db_pool, message_id).await?;
+        text_channel_member(state, message.text_channel_id).await
+    }
+
+    async fn delete_base(
+        state: &AppState,
+        message_id: MessageId,
+    ) -> ApiResult<Req> {
+        let message =
+            queries::messages::get_by_id(&state.db_pool, message_id).await?;
+        let server_id =
+            server_of_text_channel(state, message.text_channel_id).await?;
+        if let Some(author) = message.author {
+            Ok(or!(Req::User(author.into()), Req::ServerAdmin(server_id)))
+        } else {
+            Ok(Req::ServerAdmin(server_id))
+        }
+    }
+
+    pub async fn create(
+        state: &AppState,
+        text_channel_id: TextChannelId,
+        target_host: Option<&str>,
+    ) -> ApiResult<Req> {
+        get_by_text_channel(state, text_channel_id, target_host).await
     }
 
     pub fn get_all() -> Req {
@@ -338,46 +344,50 @@ pub mod auth {
         Req::ServerMember(server_id).or_admin().client_only()
     }
 
-    pub fn get_by_channel(server_id: ServerId) -> Req {
-        Req::ServerMember(server_id).or_admin().client_only()
-    }
-
-    pub fn get_by_id(server_id: ServerId) -> Req {
-        Req::ServerMember(server_id).or_admin().client_only()
-    }
-
-    async fn delete_base(
+    pub async fn get_by_text_channel(
         state: &AppState,
-        server_id: ServerId,
-        message_id: MessageId,
+        text_channel_id: TextChannelId,
+        target_host: Option<&str>,
     ) -> ApiResult<Req> {
-        let message =
-            queries::messages::get_by_id(&state.db_pool, message_id).await?;
-        if let Some(author) = message.author {
-            Ok(or!(Req::User(author.into()), Req::ServerAdmin(server_id)))
-        } else {
-            Ok(Req::ServerAdmin(server_id))
+        if state.config.is_remote_host(target_host) {
+            return Ok(Req::Client);
         }
+        let base = text_channel_member(state, text_channel_id).await?;
+        Ok(base.or_admin().client_only())
+    }
+
+    pub async fn get_by_id(
+        state: &AppState,
+        message_id: MessageId,
+        target_host: Option<&str>,
+    ) -> ApiResult<Req> {
+        if state.config.is_remote_host(target_host) {
+            return Ok(Req::Client);
+        }
+        let base = message_member(state, message_id).await?;
+        Ok(base.or_admin().client_only())
     }
 
     pub async fn delete(
         state: &AppState,
-        server_id: ServerId,
         message_id: MessageId,
+        target_host: Option<&str>,
     ) -> ApiResult<Req> {
-        let base = delete_base(state, server_id, message_id).await?;
+        if state.config.is_remote_host(target_host) {
+            return Ok(Req::Client);
+        }
+        let base = delete_base(state, message_id).await?;
         Ok(base.or_admin().client_only())
-    }
-
-    pub fn delete_remote(server_id: ServerId) -> Req {
-        Req::ServerMember(server_id).client_only()
     }
 
     pub mod federated {
         use super::*;
 
-        pub fn create(server_id: ServerId) -> Req {
-            Req::ServerMember(server_id).federated_only()
+        pub async fn create(
+            state: &AppState,
+            text_channel_id: TextChannelId,
+        ) -> ApiResult<Req> {
+            get_by_text_channel(state, text_channel_id).await
         }
 
         pub fn get_all() -> Req {
@@ -388,21 +398,28 @@ pub mod auth {
             Req::ServerMember(server_id).federated_only()
         }
 
-        pub fn get_by_channel(server_id: ServerId) -> Req {
-            Req::ServerMember(server_id).federated_only()
+        pub async fn get_by_text_channel(
+            state: &AppState,
+            text_channel_id: TextChannelId,
+        ) -> ApiResult<Req> {
+            let base = text_channel_member(state, text_channel_id).await?;
+            Ok(base.federated_only())
         }
 
-        pub fn get_by_id(server_id: ServerId) -> Req {
-            Req::ServerMember(server_id).federated_only()
+        pub async fn get_by_id(
+            state: &AppState,
+            message_id: MessageId,
+        ) -> ApiResult<Req> {
+            let base = message_member(state, message_id).await?;
+            Ok(base.federated_only())
         }
 
         pub async fn delete(
             state: &AppState,
-            server_id: ServerId,
             message_id: MessageId,
         ) -> ApiResult<Req> {
             // TODO: Check if the author is from the same host as the server
-            let base = delete_base(state, server_id, message_id).await?;
+            let base = delete_base(state, message_id).await?;
             Ok(base.federated_only())
         }
     }

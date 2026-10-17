@@ -3,7 +3,7 @@ use std::fmt;
 use time::OffsetDateTime;
 
 use crate::{
-    ids::ChannelId,
+    ids::TextChannelId,
     user::{User, UserRef},
 };
 
@@ -12,7 +12,7 @@ pub use crate::ids::MessageId;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Message {
     pub id: MessageId,
-    pub channel_id: ChannelId,
+    pub text_channel_id: TextChannelId,
     pub author: Option<User>,
     pub body: String,
     #[serde(with = "time::serde::rfc3339")]
