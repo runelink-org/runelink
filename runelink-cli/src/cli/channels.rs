@@ -330,16 +330,21 @@ pub async fn handle_channel_commands(
                         Some(&selection.host),
                     )
                     .await?;
+                    // Offer categories outside the moved channel's subtree,
+                    // which follows it in tree order at a greater depth
                     let mut parents = vec![(0, None)];
-                    parents.extend(
-                        tree_order(&channels)
-                            .into_iter()
-                            .filter(|(_, c)| {
-                                c.kind == ServerChannelKind::Category
-                                    && c.id != channel.id
-                            })
-                            .map(|(depth, c)| (depth + 1, Some(c))),
-                    );
+                    let mut subtree_depth = None;
+                    for (depth, c) in tree_order(&channels) {
+                        if subtree_depth.is_some_and(|d| depth > d) {
+                            continue;
+                        }
+                        subtree_depth = (c.id == channel.id).then_some(depth);
+                        if subtree_depth.is_none()
+                            && c.kind == ServerChannelKind::Category
+                        {
+                            parents.push((depth + 1, Some(c)));
+                        }
+                    }
                     let (_, parent) =
                         select_inline(&parents, "Select parent", |entry| {
                             match entry {

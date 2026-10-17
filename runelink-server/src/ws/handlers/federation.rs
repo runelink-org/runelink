@@ -506,7 +506,7 @@ pub(super) async fn handle_federation_request(
             Ok(FederationWsReply::MessagesGetByServer(messages))
         }
 
-        FederationWsRequest::MessagesGetByChannel { text_channel_id } => {
+        FederationWsRequest::MessagesGetByTextChannel { text_channel_id } => {
             let requirement =
                 ops::messages::auth::federated::get_by_text_channel(
                     state,
@@ -527,7 +527,7 @@ pub(super) async fn handle_federation_request(
                 None,
             )
             .await?;
-            Ok(FederationWsReply::MessagesGetByChannel(messages))
+            Ok(FederationWsReply::MessagesGetByTextChannel(messages))
         }
 
         FederationWsRequest::MessagesGetById { message_id } => {

@@ -29,22 +29,22 @@ pub async fn create(
 ) -> ApiResult<ServerChannel> {
     // Handle local case
     if !state.config.is_remote_host(target_host) {
+        let mut tx = state.db_pool.begin().await?;
+        queries::channels::lock_tree(&mut tx, server_id).await?;
         if let Some(parent_id) = new_channel.parent_channel_id {
-            let parent =
-                queries::channels::get_by_id(&state.db_pool, parent_id)
-                    .await
-                    .map_err(|error| match error {
-                        ApiError::NotFound => ApiError::BadRequest(
-                            "Parent channel not found in specified server"
-                                .into(),
-                        ),
-                        error => error,
-                    })?;
+            let parent = queries::channels::get_by_id(&mut *tx, parent_id)
+                .await
+                .map_err(|error| match error {
+                    ApiError::NotFound => ApiError::BadRequest(
+                        "Parent channel not found in specified server".into(),
+                    ),
+                    error => error,
+                })?;
             channel_tree::check_parent(server_id, &parent)?;
         }
         let channel =
-            queries::channels::insert(&state.db_pool, server_id, new_channel)
-                .await?;
+            queries::channels::insert(&mut tx, server_id, new_channel).await?;
+        tx.commit().await?;
         fanout::fanout_update(
             state,
             fanout::resolve_server_targets(state, server_id).await?,
@@ -125,7 +125,7 @@ pub async fn get_by_server(
 ) -> ApiResult<Vec<ServerChannel>> {
     if !state.config.is_remote_host(target_host) {
         // Handle local case
-        queries::channels::get_by_server(&state.db_pool, server_id).await
+        queries::channels::get_by_server(&*state.db_pool, server_id).await
     } else {
         // Fetch from remote host using federation
         let host = target_host.unwrap();
@@ -162,7 +162,7 @@ pub async fn get_by_id(
     if !state.config.is_remote_host(target_host) {
         // Handle local case
         let channel =
-            queries::channels::get_by_id(&state.db_pool, channel_id).await?;
+            queries::channels::get_by_id(&*state.db_pool, channel_id).await?;
         if channel.server_id != server_id {
             return Err(ApiError::NotFound);
         }
@@ -205,20 +205,25 @@ pub async fn delete(
 ) -> ApiResult<()> {
     // Handle local case
     if !state.config.is_remote_host(target_host) {
+        let mut tx = state.db_pool.begin().await?;
+        queries::channels::lock_tree(&mut tx, server_id).await?;
         // Verify the channel belongs to the server
         let channel =
-            queries::channels::get_by_id(&state.db_pool, channel_id).await?;
+            queries::channels::get_by_id(&mut *tx, channel_id).await?;
         if channel.server_id != server_id {
             return Err(ApiError::AuthError(
                 "Channel not found in specified server".into(),
             ));
         }
-        if queries::channels::has_children(&state.db_pool, channel_id).await? {
+        if queries::channels::has_children(&mut *tx, server_id, channel_id)
+            .await?
+        {
             return Err(ApiError::BadRequest(
                 "Only empty categories can be deleted".into(),
             ));
         }
-        queries::channels::delete(&state.db_pool, channel_id).await?;
+        queries::channels::delete(&mut *tx, channel_id).await?;
+        tx.commit().await?;
         fanout::fanout_update(
             state,
             fanout::resolve_server_targets(state, server_id).await?,
@@ -275,9 +280,9 @@ pub async fn move_channel(
     // Handle local case
     if !state.config.is_remote_host(target_host) {
         let mut tx = state.db_pool.begin().await?;
+        queries::channels::lock_tree(&mut tx, server_id).await?;
         let channels =
-            queries::channels::get_by_server_for_update(&mut tx, server_id)
-                .await?;
+            queries::channels::get_by_server(&mut *tx, server_id).await?;
         let planned =
             channel_tree::plan_move(&channels, channel_id, channel_move)?;
         let changed =
