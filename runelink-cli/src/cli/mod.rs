@@ -44,6 +44,10 @@ pub struct Cli {
 pub enum Commands {
     /// Manage accounts
     Account(account::AccountArgs),
+    /// Login to an account (alias for `account login`)
+    Login(account::LoginArgs),
+    /// Logout from an account (alias for `account logout`)
+    Logout(account::LogoutArgs),
     /// Manage channels
     Channel(channels::ChannelArgs),
     /// Manage messages
@@ -100,7 +104,15 @@ pub async fn handle_cli(
 
     match &cli.command {
         Commands::Account(args) => {
-            account::handle_account_commands(ctx, args).await?;
+            account::handle_account_commands(ctx, &args.command).await?;
+        }
+        Commands::Login(args) => {
+            let command = account::AccountCommands::Login(args.clone());
+            account::handle_account_commands(ctx, &command).await?;
+        }
+        Commands::Logout(args) => {
+            let command = account::AccountCommands::Logout(args.clone());
+            account::handle_account_commands(ctx, &command).await?;
         }
         Commands::Channel(args) => {
             channels::handle_channel_commands(ctx, args).await?;
