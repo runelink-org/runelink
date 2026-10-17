@@ -35,6 +35,9 @@ pub enum CliError {
     #[error("No Action Possible: {0}")]
     NoActionPossible(String),
 
+    #[error("Authentication Failed: {0}")]
+    AuthenticationFailed(String),
+
     #[error("Operation Canceled")]
     Cancellation,
 
@@ -71,6 +74,7 @@ impl CliError {
             }
             CliError::InvalidArgument(msg) => eprintln!("{}", msg),
             CliError::NoActionPossible(msg) => eprintln!("{}", msg),
+            CliError::AuthenticationFailed(msg) => eprintln!("{}", msg),
             other_error => eprintln!("{}", other_error),
         }
     }
@@ -114,6 +118,7 @@ impl From<CliError> for ExitCode {
             CliError::MissingContext(_) => EX_USAGE,
             CliError::MissingAccount => EX_USAGE,
             CliError::NoActionPossible(_) => EX_USAGE,
+            CliError::AuthenticationFailed(_) => EX_NOPERM,
             CliError::Cancellation => EX_USER_CANCEL,
             CliError::Unknown(_) => EX_SOFTWARE,
         })
