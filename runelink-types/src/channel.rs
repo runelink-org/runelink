@@ -66,12 +66,8 @@ impl ServerChannel {
 impl fmt::Display for ServerChannel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.kind {
-            ServerChannelKind::Text => write!(f, "#{}", self.title)?,
-            ServerChannelKind::Category => write!(f, "{}", self.title)?,
+            ServerChannelKind::Text => write!(f, "#{}", self.title),
+            ServerChannelKind::Category => write!(f, "{}", self.title),
         }
-        if let Some(desc) = &self.description {
-            write!(f, " - {desc}")?;
-        }
-        Ok(())
     }
 }

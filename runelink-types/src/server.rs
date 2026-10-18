@@ -106,11 +106,7 @@ impl Server {
 
 impl fmt::Display for Server {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(desc) = &self.description {
-            write!(f, "{} - {}", self.title, desc)
-        } else {
-            write!(f, "{}", self.title)
-        }
+        write!(f, "{}", self.title)
     }
 }
 
