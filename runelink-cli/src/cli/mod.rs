@@ -48,7 +48,7 @@ pub enum Commands {
     Login(account::LoginArgs),
     /// Logout from an account (alias for `account logout`)
     Logout(account::LogoutArgs),
-    /// Manage channels
+    /// Manage channels and categories
     Channel(channels::ChannelArgs),
     /// Manage messages
     Message(messages::MessageArgs),

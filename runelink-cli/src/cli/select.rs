@@ -2,7 +2,7 @@ use crossterm::{
     cursor::{Hide, MoveToColumn, MoveUp, Show},
     event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     execute,
-    style::Print,
+    style::{Print, Stylize},
     terminal::{Clear, ClearType, disable_raw_mode, enable_raw_mode},
 };
 use runelink_client::requests;
@@ -11,6 +11,7 @@ use runelink_types::{
     server::{Server, ServerId},
 };
 use std::collections::HashSet;
+use std::fmt;
 use std::io::Write;
 
 use crate::error::CliError;
@@ -25,11 +26,51 @@ pub fn select_inline<'a, T, F>(
 where
     F: Fn(&T) -> String,
 {
-    if items.is_empty() {
+    select_tree_inline(items, prompt, |_| 0, |_| true, display)
+}
+
+/// Like `select_inline`, indenting items by their tree depth while choosing.
+/// Unselectable items are shown dimmed and skipped by the cursor. The
+/// confirmed item is shown without its indentation.
+pub fn select_tree_inline<'a, T, D, S, F>(
+    items: &'a [T],
+    prompt: &str,
+    depth: D,
+    selectable: S,
+    display: F,
+) -> std::io::Result<Option<&'a T>>
+where
+    D: Fn(&T) -> usize,
+    S: Fn(&T) -> bool,
+    F: Fn(&T) -> String,
+{
+    let (Some(first), Some(last)) = (
+        items.iter().position(&selectable),
+        items.iter().rposition(&selectable),
+    ) else {
         println!("(no items to select)");
         return Ok(None);
-    }
+    };
     let mut stdout = std::io::stdout();
+    let draw = |stdout: &mut std::io::Stdout, selected: usize| {
+        for (i, item) in items.iter().enumerate() {
+            let prefix = if i == selected { "> " } else { "  " };
+            let row = indented(depth(item), display(item));
+            let row = if selectable(item) {
+                row.stylize()
+            } else {
+                row.dim()
+            };
+            execute!(
+                stdout,
+                Clear(ClearType::CurrentLine),
+                MoveToColumn(0),
+                Print(format!("{prefix}{row}\n"))
+            )?;
+        }
+        stdout.flush()
+    };
+
     enable_raw_mode()?;
     execute!(
         stdout,
@@ -37,18 +78,8 @@ where
         MoveToColumn(0),
         Print(format!("{}\n", prompt))
     )?;
-
-    for (i, item) in items.iter().enumerate() {
-        let prefix = if i == 0 { "> " } else { "  " };
-        execute!(
-            stdout,
-            MoveToColumn(0),
-            Print(format!("{}{}\n", prefix, display(item)))
-        )?;
-    }
-    stdout.flush()?;
-
-    let mut selected = 0;
+    let mut selected = first;
+    draw(&mut stdout, selected)?;
     loop {
         if let Event::Key(KeyEvent {
             kind: KeyEventKind::Press,
@@ -89,40 +120,35 @@ where
                 }
                 // Up or 'k'
                 (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {
-                    selected = if selected == 0 { 0 } else { selected - 1 };
+                    if let Some(i) =
+                        items[..selected].iter().rposition(&selectable)
+                    {
+                        selected = i;
+                    }
                 }
                 // Down or 'j'
                 (KeyCode::Down, _) | (KeyCode::Char('j'), _) => {
-                    selected = if selected == items.len() - 1 {
-                        items.len() - 1
-                    } else {
-                        selected + 1
-                    };
+                    if let Some(i) =
+                        items[selected + 1..].iter().position(&selectable)
+                    {
+                        selected += 1 + i;
+                    }
                 }
                 (KeyCode::Char('g'), KeyModifiers::NONE)
                 | (KeyCode::Home, _) => {
-                    selected = 0;
+                    selected = first;
                 }
                 (KeyCode::Char('g'), KeyModifiers::SHIFT)
                 | (KeyCode::Char('G'), _)
                 | (KeyCode::End, _) => {
-                    selected = items.len() - 1;
+                    selected = last;
                 }
                 _ => {}
             }
 
             // Redraw the list in place
             execute!(stdout, MoveUp(items.len() as u16))?;
-            for (i, item) in items.iter().enumerate() {
-                let prefix = if i == selected { "> " } else { "  " };
-                execute!(
-                    stdout,
-                    Clear(ClearType::CurrentLine),
-                    MoveToColumn(0),
-                    Print(format!("{}{}\n", prefix, display(item)))
-                )?;
-            }
-            stdout.flush()?;
+            draw(&mut stdout, selected)?;
         }
     }
 }
@@ -236,9 +262,9 @@ pub fn tree_order(channels: &[ServerChannel]) -> Vec<(usize, &ServerChannel)> {
     ordered
 }
 
-/// Display a channel indented by its tree depth.
-pub fn indented(depth: usize, channel: &ServerChannel) -> String {
-    format!("{}{channel}", "  ".repeat(depth))
+/// Display an item indented by its tree depth.
+pub fn indented(depth: usize, item: impl fmt::Display) -> String {
+    format!("{}{item}", "  ".repeat(depth))
 }
 
 /// Interactively select a channel, optionally only text channels.
@@ -258,22 +284,31 @@ pub async fn get_channel_selection(
         Some(server_host),
     )
     .await?;
-    let choices: Vec<_> = tree_order(&channels)
-        .into_iter()
-        .filter(|(_, c)| !text_only || c.kind == ServerChannelKind::Text)
-        .collect();
-    if choices.is_empty() {
+    // Categories stay visible for context when only text channels can be
+    // chosen
+    let selectable =
+        |c: &ServerChannel| !text_only || c.kind == ServerChannelKind::Text;
+    let choices = tree_order(&channels);
+    if !choices.iter().any(|(_, c)| selectable(c)) {
         return Err(CliError::NoActionPossible(
             "No channels available.\n\
                 For more information, try `rune channel --help`."
                 .into(),
         ));
     }
-    let (_, channel) =
-        select_inline(&choices, "Select channel", |(depth, c)| {
-            indented(*depth, c)
-        })?
-        .ok_or(CliError::Cancellation)?;
+    let prompt = if text_only {
+        "Select channel"
+    } else {
+        "Select channel or category"
+    };
+    let (_, channel) = select_tree_inline(
+        &choices,
+        prompt,
+        |(depth, _)| *depth,
+        |(_, c)| selectable(c),
+        |(_, c)| c.to_string(),
+    )?
+    .ok_or(CliError::Cancellation)?;
     println!();
     Ok(ChannelSelection {
         host: server_host.to_string(),

@@ -1,7 +1,8 @@
 use runelink_client::requests;
 use runelink_types::{
     channel::{
-        NewServerChannel, ServerChannelId, ServerChannelKind, ServerChannelMove,
+        NewServerChannel, ServerChannel, ServerChannelId, ServerChannelKind,
+        ServerChannelMove,
     },
     server::ServerId,
 };
@@ -9,7 +10,8 @@ use runelink_types::{
 use crate::{
     cli::select::{
         ServerSelectionType, get_channel_selection_with_inputs,
-        get_server_selection, indented, select_inline, tree_order,
+        get_server_selection, indented, select_inline, select_tree_inline,
+        tree_order,
     },
     error::CliError,
     util::parse_optional_host_input,
@@ -20,6 +22,61 @@ use super::{
     input::{read_input, unwrap_or_prompt},
 };
 
+// The word for a server channel of this kind in prompts and output
+fn label(kind: ServerChannelKind) -> &'static str {
+    match kind {
+        ServerChannelKind::Text => "Channel",
+        ServerChannelKind::Category => "Category",
+    }
+}
+
+// A sibling index, with -1 for last. The host places indices past the end
+// last.
+fn parse_index(input: &str) -> Result<u32, String> {
+    match input {
+        "-1" => Ok(u32::MAX),
+        _ => input.parse().map_err(|_| {
+            format!("Invalid index {input:?}, expected 0 or more, or -1.")
+        }),
+    }
+}
+
+// Prompt for a parent among the server root and the categories outside
+// `excluded`'s subtree, skipping the prompt when only the root remains
+fn select_parent(
+    channels: &[ServerChannel],
+    excluded: Option<ServerChannelId>,
+) -> Result<Option<ServerChannelId>, CliError> {
+    // The excluded subtree follows it in tree order at a greater depth
+    let mut parents = vec![(0, None)];
+    let mut subtree_depth = None;
+    for (depth, c) in tree_order(channels) {
+        if subtree_depth.is_some_and(|d| depth > d) {
+            continue;
+        }
+        subtree_depth = (Some(c.id) == excluded).then_some(depth);
+        if subtree_depth.is_none() && c.kind == ServerChannelKind::Category {
+            parents.push((depth + 1, Some(c)));
+        }
+    }
+    if parents.len() == 1 {
+        return Ok(None);
+    }
+    let (_, parent) = select_tree_inline(
+        &parents,
+        "Select location",
+        |(depth, _)| *depth,
+        |_| true,
+        |(_, parent)| match parent {
+            None => "(server root)".into(),
+            Some(c) => c.to_string(),
+        },
+    )?
+    .ok_or(CliError::Cancellation)?;
+    println!();
+    Ok(parent.map(|c| c.id))
+}
+
 #[derive(clap::Args, Debug)]
 pub struct ChannelArgs {
     #[clap(subcommand)]
@@ -28,11 +85,11 @@ pub struct ChannelArgs {
 
 #[derive(clap::Subcommand, Debug)]
 pub enum ChannelCommands {
-    /// List all channels
+    /// List all channels and categories
     List(ChannelListArgs),
-    /// Get a channel by ID
+    /// Get a channel or category by ID
     Get(ChannelGetArgs),
-    /// Create a new channel
+    /// Create a new channel or category
     Create(ChannelCreateArgs),
     /// Delete a channel or an empty category
     Delete(ChannelDeleteArgs),
@@ -42,10 +99,10 @@ pub enum ChannelCommands {
 
 #[derive(clap::Args, Debug)]
 pub struct ChannelListArgs {
-    /// Optional: Filter channels by Server ID
+    /// Optional: Filter channels and categories by Server ID
     #[clap(long)]
     pub server_id: Option<ServerId>,
-    /// Include channels from all servers you are a member of
+    /// Include channels and categories from all servers you are a member of
     #[clap(short, long)]
     pub all: bool,
     /// The host of host or server
@@ -61,28 +118,34 @@ pub struct ChannelGetArgs {
     /// The host of the server
     #[clap(long)]
     pub host: Option<String>,
-    /// The ID of the channel
+    /// The ID of the channel or category
     #[clap(long)]
     pub channel_id: ServerChannelId,
 }
 
 #[derive(clap::Args, Debug)]
 pub struct ChannelCreateArgs {
-    /// The title of the channel
+    /// The title of the channel or category
     #[clap(long)]
     pub title: Option<String>,
-    /// The description of the channel
+    /// The description of the channel or category
     #[clap(long)]
     pub description: Option<String>,
     /// Skip description cli prompt
     #[clap(long)]
     pub no_description: bool,
-    /// Create a category instead of a text channel
+    /// Create a text channel
+    #[clap(long, conflicts_with = "category")]
+    pub text: bool,
+    /// Create a category
     #[clap(long)]
     pub category: bool,
-    /// The parent category ID (defaults to the server root)
-    #[clap(long)]
+    /// The parent category ID
+    #[clap(long, conflicts_with = "root")]
     pub parent_id: Option<ServerChannelId>,
+    /// Create at the server root
+    #[clap(long)]
+    pub root: bool,
     /// The server ID
     #[clap(long)]
     pub server_id: Option<ServerId>,
@@ -96,7 +159,7 @@ pub struct ChannelDeleteArgs {
     /// The ID of the server
     #[clap(long)]
     pub server_id: Option<ServerId>,
-    /// The ID of the channel to delete
+    /// The ID of the channel or category to delete
     #[clap(long)]
     pub channel_id: Option<ServerChannelId>,
     /// The host of the server
@@ -109,7 +172,7 @@ pub struct ChannelMoveArgs {
     /// The ID of the server
     #[clap(long)]
     pub server_id: Option<ServerId>,
-    /// The ID of the channel to move
+    /// The ID of the channel or category to move
     #[clap(long)]
     pub channel_id: Option<ServerChannelId>,
     /// The new parent category ID
@@ -118,8 +181,8 @@ pub struct ChannelMoveArgs {
     /// Move to the server root
     #[clap(long)]
     pub root: bool,
-    /// The new index among its siblings, starting from 0
-    #[clap(long)]
+    /// The new index among its siblings, starting from 0, or -1 for last
+    #[clap(long, allow_negative_numbers = true, value_parser = parse_index)]
     pub index: Option<u32>,
     /// The host of the server
     #[clap(long)]
@@ -234,30 +297,68 @@ pub async fn handle_channel_commands(
                         .await?
                 }
             };
-            let title =
-                unwrap_or_prompt(create_args.title.clone(), "Channel Title")?;
+            let target_host = if server.host != account.user_ref.host {
+                Some(server.host.as_str())
+            } else {
+                None
+            };
+            let parent_channel_id =
+                match (create_args.parent_id, create_args.root) {
+                    (Some(parent_id), _) => Some(parent_id),
+                    (None, true) => None,
+                    (None, false) => {
+                        let channels = requests::channels::fetch_by_server(
+                            ctx.client,
+                            &api_url,
+                            &access_token,
+                            server.id,
+                            target_host,
+                        )
+                        .await?;
+                        select_parent(&channels, None)?
+                    }
+                };
+            let kind = match (create_args.text, create_args.category) {
+                (true, _) => ServerChannelKind::Text,
+                (_, true) => ServerChannelKind::Category,
+                _ => {
+                    let kinds =
+                        [ServerChannelKind::Text, ServerChannelKind::Category];
+                    let kind =
+                        *select_inline(
+                            &kinds,
+                            "Select type",
+                            |kind| match kind {
+                                ServerChannelKind::Text => "Text".into(),
+                                ServerChannelKind::Category => {
+                                    "Category".into()
+                                }
+                            },
+                        )?
+                        .ok_or(CliError::Cancellation)?;
+                    println!();
+                    kind
+                }
+            };
+            let kind_label = label(kind);
+            let title = unwrap_or_prompt(
+                create_args.title.clone(),
+                &format!("{kind_label} Title"),
+            )?;
             let desc = if create_args.description.is_some() {
                 create_args.description.clone()
             } else if create_args.no_description {
                 None
             } else {
-                read_input("Channel Description (leave blank for none):\n> ")?
-            };
-            let kind = if create_args.category {
-                ServerChannelKind::Category
-            } else {
-                ServerChannelKind::Text
+                read_input(&format!(
+                    "{kind_label} Description (leave blank for none):\n> "
+                ))?
             };
             let new_channel = NewServerChannel {
                 kind,
                 title,
                 description: desc,
-                parent_channel_id: create_args.parent_id,
-            };
-            let target_host = if server.host != account.user_ref.host {
-                Some(server.host.as_str())
-            } else {
-                None
+                parent_channel_id,
             };
             let channel = requests::channels::create(
                 ctx.client,
@@ -268,7 +369,11 @@ pub async fn handle_channel_commands(
                 target_host,
             )
             .await?;
-            println!("Created channel: {}", channel.verbose());
+            println!(
+                "Created {}: {}",
+                label(channel.kind).to_lowercase(),
+                channel.verbose()
+            );
         }
 
         ChannelCommands::Delete(delete_args) => {
@@ -297,7 +402,11 @@ pub async fn handle_channel_commands(
                 Some(&selection.host),
             )
             .await?;
-            println!("Deleted channel: {}", channel.verbose());
+            println!(
+                "Deleted {}: {}",
+                label(channel.kind).to_lowercase(),
+                channel.verbose()
+            );
         }
 
         ChannelCommands::Move(move_args) => {
@@ -330,37 +439,17 @@ pub async fn handle_channel_commands(
                         Some(&selection.host),
                     )
                     .await?;
-                    // Offer categories outside the moved channel's subtree,
-                    // which follows it in tree order at a greater depth
-                    let mut parents = vec![(0, None)];
-                    let mut subtree_depth = None;
-                    for (depth, c) in tree_order(&channels) {
-                        if subtree_depth.is_some_and(|d| depth > d) {
-                            continue;
-                        }
-                        subtree_depth = (c.id == channel.id).then_some(depth);
-                        if subtree_depth.is_none()
-                            && c.kind == ServerChannelKind::Category
-                        {
-                            parents.push((depth + 1, Some(c)));
-                        }
-                    }
-                    let (_, parent) =
-                        select_inline(&parents, "Select parent", |entry| {
-                            match entry {
-                                (_, None) => "(server root)".into(),
-                                (depth, Some(c)) => indented(*depth, c),
-                            }
-                        })?
-                        .ok_or(CliError::Cancellation)?;
-                    println!();
-                    parent.map(|c| c.id)
+                    select_parent(&channels, Some(channel.id))?
                 }
             };
-            let index = unwrap_or_prompt(
-                move_args.index,
-                "Index among siblings (0 is first)",
-            )?;
+            let index = match move_args.index {
+                Some(index) => index,
+                None => {
+                    read_input("Index among siblings (defaults to last): ")?
+                        .map_or(Ok(u32::MAX), |input| parse_index(&input))
+                        .map_err(CliError::InvalidArgument)?
+                }
+            };
             let changed = requests::channels::move_channel(
                 ctx.client,
                 &api_url,
@@ -375,9 +464,17 @@ pub async fn handle_channel_commands(
             )
             .await?;
             if changed.is_empty() {
-                println!("Channel already in place: {}", channel.verbose());
+                println!(
+                    "{} already in place: {}",
+                    label(channel.kind),
+                    channel.verbose()
+                );
             } else {
-                println!("Moved channel: {}", channel.verbose());
+                println!(
+                    "Moved {}: {}",
+                    label(channel.kind).to_lowercase(),
+                    channel.verbose()
+                );
             }
         }
     };
