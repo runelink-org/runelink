@@ -175,6 +175,8 @@ pub async fn delete(
         ops::messages::auth::delete(&state, message_id, target_host).await?,
     )
     .await?;
-    ops::messages::delete(&state, &session, message_id, target_host).await?;
-    Ok(StatusCode::NO_CONTENT)
+    let message =
+        ops::messages::delete(&state, &session, message_id, target_host)
+            .await?;
+    Ok((StatusCode::OK, Json(message)))
 }

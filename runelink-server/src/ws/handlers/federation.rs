@@ -138,22 +138,6 @@ pub(super) async fn handle_federation_update(
             .await?;
         }
 
-        FederationWsUpdate::MessageDeleted {
-            server_id,
-            text_channel_id,
-            message_id,
-        } => {
-            fanout_remote_server_update(
-                state,
-                server_id,
-                ClientWsUpdate::MessageDeleted {
-                    text_channel_id,
-                    message_id,
-                },
-            )
-            .await?;
-        }
-
         FederationWsUpdate::RemoteUserDeleted { user_ref } => {
             let _ = state
                 .client_ws_manager
@@ -558,8 +542,10 @@ pub(super) async fn handle_federation_request(
                 requirement,
             )
             .await?;
-            ops::messages::delete(state, &session, message_id, None).await?;
-            Ok(FederationWsReply::MessagesDelete)
+            let message =
+                ops::messages::delete(state, &session, message_id, None)
+                    .await?;
+            Ok(FederationWsReply::MessagesDelete(message))
         }
     }
 }

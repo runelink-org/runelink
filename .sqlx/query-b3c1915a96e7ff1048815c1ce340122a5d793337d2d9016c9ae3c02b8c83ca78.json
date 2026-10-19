@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            m.id,\n            m.text_channel_id,\n            m.body,\n            m.reply_to AS \"reply_to: MessageId\",\n            m.deleted_at,\n            m.created_at,\n            m.updated_at,\n            to_jsonb(a) AS \"author: Json<User>\"\n        FROM messages m\n        LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host\n        WHERE m.id = $1;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "text_channel_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "body",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "reply_to: MessageId",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "deleted_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "author: Json<User>",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "b3c1915a96e7ff1048815c1ce340122a5d793337d2d9016c9ae3c02b8c83ca78"
+}

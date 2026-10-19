@@ -27,6 +27,6 @@ build:
 	$(CARGO) +$(TOOLCHAIN) build
 
 test:
-	$(CARGO) +$(TOOLCHAIN) test
+	$(CARGO) +$(TOOLCHAIN) test $(TEST_ARGS)
 
 verify: fmt sqlx-prepare build test

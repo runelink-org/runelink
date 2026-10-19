@@ -568,9 +568,10 @@ pub(super) async fn handle_client_request(
                 ops::messages::auth::delete(state, message_id, target_host)
                     .await?;
             let session = authorize_client(state, conn_id, requirement).await?;
-            ops::messages::delete(state, &session, message_id, target_host)
-                .await?;
-            Ok(ClientWsReply::MessagesDelete)
+            let message =
+                ops::messages::delete(state, &session, message_id, target_host)
+                    .await?;
+            Ok(ClientWsReply::MessagesDelete(message))
         }
     }
 }
