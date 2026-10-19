@@ -32,6 +32,23 @@ pub async fn create(
             text_channel_id,
         )
         .await?;
+        if let Some(reply_to) = new_message.reply_to {
+            // Deleted targets remain valid. Channel restrictions belong here,
+            // rather than in the schema, to allow broader scopes in the future.
+            let target = queries::messages::get_by_id(&state.db_pool, reply_to)
+                .await
+                .map_err(|error| match error {
+                    ApiError::NotFound => ApiError::BadRequest(
+                        "Reply target not found in this text channel".into(),
+                    ),
+                    error => error,
+                })?;
+            if target.text_channel_id != text_channel_id {
+                return Err(ApiError::BadRequest(
+                    "Reply target not found in this text channel".into(),
+                ));
+            }
+        }
         let message = queries::messages::insert(
             &state.db_pool,
             text_channel_id,
@@ -233,7 +250,7 @@ pub async fn delete(
     session: &Session,
     message_id: MessageId,
     target_host: Option<&str>,
-) -> ApiResult<()> {
+) -> ApiResult<Message> {
     // Handle local case
     if !state.config.is_remote_host(target_host) {
         let message =
@@ -244,22 +261,19 @@ pub async fn delete(
             text_channel_id,
         )
         .await?;
-        queries::messages::delete(&state.db_pool, message_id).await?;
+        let message =
+            queries::messages::delete(&state.db_pool, message_id).await?;
         fanout::fanout_update(
             state,
             fanout::resolve_server_targets(state, server_id).await?,
-            ClientWsUpdate::MessageDeleted {
-                text_channel_id,
-                message_id,
-            },
-            FederationWsUpdate::MessageDeleted {
+            ClientWsUpdate::MessageUpserted(message.clone()),
+            FederationWsUpdate::MessageUpserted {
                 server_id,
-                text_channel_id,
-                message_id,
+                message: message.clone(),
             },
         )
         .await;
-        Ok(())
+        Ok(message)
     } else {
         // Delete on remote host using federation
         let host = target_host.unwrap();
@@ -276,12 +290,12 @@ pub async fn delete(
             FederationWsRequest::MessagesDelete { message_id },
         )
         .await?;
-        let FederationWsReply::MessagesDelete = reply else {
+        let FederationWsReply::MessagesDelete(message) = reply else {
             return Err(ApiError::Internal(format!(
                 "Unexpected federation reply from {host} for messages.delete"
             )));
         };
-        Ok(())
+        Ok(message)
     }
 }
 

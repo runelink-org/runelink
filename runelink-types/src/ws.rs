@@ -256,7 +256,7 @@ pub enum ClientWsReply {
     MessagesGetByServer(Vec<Message>),
     MessagesGetByTextChannel(Vec<Message>),
     MessagesGetById(Message),
-    MessagesDelete,
+    MessagesDelete(Message),
 }
 
 /// Request enum for federation websocket traffic.
@@ -409,7 +409,7 @@ pub enum FederationWsReply {
     MessagesGetByServer(Vec<Message>),
     MessagesGetByTextChannel(Vec<Message>),
     MessagesGetById(Message),
-    MessagesDelete,
+    MessagesDelete(Message),
 }
 
 /// Client websocket updates are push-only events and do not map 1:1 with requests.
@@ -435,10 +435,6 @@ pub enum ClientWsUpdate {
         channel_id: ServerChannelId,
     },
     MessageUpserted(Message),
-    MessageDeleted {
-        text_channel_id: TextChannelId,
-        message_id: MessageId,
-    },
 }
 
 impl ClientWsUpdate {
@@ -456,9 +452,7 @@ impl ClientWsUpdate {
             Self::ChannelUpserted(_) | Self::ChannelDeleted { .. } => {
                 Capability::ChannelsEvents
             }
-            Self::MessageUpserted(_) | Self::MessageDeleted { .. } => {
-                Capability::MessagesEvents
-            }
+            Self::MessageUpserted(_) => Capability::MessagesEvents,
         }
     }
 }
@@ -485,11 +479,6 @@ pub enum FederationWsUpdate {
         server_id: ServerId,
         message: Message,
     },
-    MessageDeleted {
-        server_id: ServerId,
-        text_channel_id: TextChannelId,
-        message_id: MessageId,
-    },
     RemoteUserDeleted {
         user_ref: UserRef,
     },
@@ -508,9 +497,7 @@ impl FederationWsUpdate {
             Self::ChannelUpserted(_) | Self::ChannelDeleted { .. } => {
                 Capability::ChannelsEvents
             }
-            Self::MessageUpserted { .. } | Self::MessageDeleted { .. } => {
-                Capability::MessagesEvents
-            }
+            Self::MessageUpserted { .. } => Capability::MessagesEvents,
         }
     }
 }
@@ -613,7 +600,7 @@ mod tests {
                 "type": "hello",
                 "data": {
                     "negotiation_version": 1,
-                    "capabilities": { "messages.read": ["2026.10.17"] }
+                    "capabilities": { "messages.read": ["2026.10.19"] }
                 }
             })
         );

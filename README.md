@@ -180,3 +180,25 @@ For useful workspace commands, refer to the [makefile](./Makefile).
 ## License
 
 GPL-3.0. See [LICENSE](./LICENSE).
+
+## Message replies and deletion
+
+`rune message send --reply-to <message-id>` sends a reply. The API currently
+requires the target to be in the same underlying text channel, including when
+sending through a peer host. Deleted targets remain valid API reply targets.
+The reply foreign key permits cross-channel relationships for future server and
+DM scopes.
+
+Message capabilities use version `2026.10.19`. Messages include `reply_to` and
+one of two content states: a string `body` with `deleted_at: null`, or
+`body: null` with a deletion timestamp. Deletion clears text while retaining
+identity, author, timestamps, and reply relationships. DELETE returns the cleared
+message, and clients and peer hosts receive it as a `message_upserted` event.
+History includes deleted records so clients can resolve reply references.
+
+The PostgreSQL message tests use rolled-back transactions on a migrated database
+and do not require database creation privileges. Run them explicitly with:
+
+```sh
+DATABASE_URL=postgresql:///runelink make test TEST_ARGS='-- --ignored'
+```

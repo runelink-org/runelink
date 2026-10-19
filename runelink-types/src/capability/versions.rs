@@ -72,13 +72,13 @@ pub mod messages {
     use crate::capability::CapabilityVersion;
 
     pub const CREATE_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 10, 17);
+        CapabilityVersion::new(2026, 10, 19);
     pub const DELETE_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 10, 17);
+        CapabilityVersion::new(2026, 10, 19);
     pub const EVENTS_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 10, 17);
+        CapabilityVersion::new(2026, 10, 19);
     pub const READ_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 10, 17);
+        CapabilityVersion::new(2026, 10, 19);
 
     pub const CREATE_VERSIONS: &[CapabilityVersion] = &[CREATE_VERSION];
     pub const DELETE_VERSIONS: &[CapabilityVersion] = &[DELETE_VERSION];

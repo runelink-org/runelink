@@ -662,10 +662,20 @@ mod tests {
         .await;
         let envelope = ClientWsEnvelope::Update {
             event_id: runelink_types::EventId::new(),
-            update: ClientWsUpdate::MessageDeleted {
-                text_channel_id: TextChannelId::new(),
-                message_id: MessageId::new(),
-            },
+            update: ClientWsUpdate::MessageUpserted(
+                runelink_types::message::Message {
+                    id: MessageId::new(),
+                    text_channel_id: TextChannelId::new(),
+                    author: None,
+                    reply_to: None,
+                    content: runelink_types::message::MessageContent::Deleted {
+                        body: (),
+                        deleted_at: time::OffsetDateTime::now_utc(),
+                    },
+                    created_at: time::OffsetDateTime::now_utc(),
+                    updated_at: time::OffsetDateTime::now_utc(),
+                },
+            ),
         };
 
         assert!(

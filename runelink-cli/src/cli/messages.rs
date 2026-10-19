@@ -56,6 +56,9 @@ pub struct MessageGetArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct MessageSendArgs {
+    /// The message to reply to, within the same text channel
+    #[clap(long)]
+    pub reply_to: Option<MessageId>,
     /// The body of the message
     #[clap(long)]
     pub body: Option<String>,
@@ -115,7 +118,11 @@ pub async fn handle_message_commands(
                 target_host,
             )
             .await?;
-            for message in messages.iter().rev() {
+            for message in messages
+                .iter()
+                .rev()
+                .filter(|message| message.content.body().is_some())
+            {
                 println!("{message}");
             }
         }
@@ -159,6 +166,7 @@ pub async fn handle_message_commands(
             let new_message = NewMessage {
                 author: account.user_ref.clone(),
                 body,
+                reply_to: send_args.reply_to,
             };
             let target_host = if selection.host != account.user_ref.host {
                 Some(selection.host.as_str())
@@ -174,7 +182,7 @@ pub async fn handle_message_commands(
                 target_host,
             )
             .await?;
-            println!("Sent message: {}", message.body);
+            println!("Sent message: {message}");
         }
 
         MessageCommands::Delete(delete_args) => {
