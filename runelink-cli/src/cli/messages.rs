@@ -264,26 +264,30 @@ fn reply_preview(
     columns: usize,
     show_ids: bool,
 ) -> String {
-    let preview = match target {
+    let (prefix, preview) = match target {
         Some(message) => match message.content.body() {
             Some(body) => {
                 let (first_line, more_lines) = body
                     .split_once(['\r', '\n'])
                     .map_or((body, false), |(first, _)| (first, true));
-                // A preview occupies one terminal line, even if its text has tabs
-                // or other control characters.
+                // Keep tabs and other controls from changing the preview layout.
                 let first_line = first_line.replace(char::is_control, " ");
-                format!(
-                    "  ┌─ {}: {first_line}{}",
-                    author_label(message, show_ids),
-                    if more_lines { " ..." } else { "" }
+                (
+                    format!("  ┌─ {}: ", author_label(message, show_ids)),
+                    format!(
+                        "{first_line}{}",
+                        if more_lines { " ..." } else { "" }
+                    ),
                 )
             }
-            None => "  ┌─ Original message was deleted".into(),
+            None => ("  ┌─ ".into(), "Original message was deleted".into()),
         },
-        None => "  ┌─ Original message unavailable".into(),
+        None => ("  ┌─ ".into(), "Original message unavailable".into()),
     };
-    truncate_preview(&preview, columns)
+    let prefix_width = prefix.graphemes(true).map(preview_grapheme_width).sum();
+    // Preserve the label and a complete ellipsis even in a narrower terminal.
+    let text_columns = columns.saturating_sub(prefix_width).max(3);
+    format!("{prefix}{}", truncate_preview(&preview, text_columns))
 }
 
 fn truncate_preview(preview: &str, columns: usize) -> String {
@@ -400,6 +404,16 @@ mod tests {
             reply_preview(Some(&message), 61, true),
             format!("  ┌─ mandar [{id}]: abcdef...")
         );
+        for columns in [0, 1, 2, 8, 16] {
+            assert_eq!(
+                reply_preview(Some(&message), columns, true),
+                format!("  ┌─ mandar [{id}]: ...")
+            );
+            assert_eq!(
+                reply_preview(Some(&message), columns, false),
+                "  ┌─ mandar: ..."
+            );
+        }
     }
 
     #[test]
@@ -414,10 +428,7 @@ mod tests {
             assert_eq!(truncate_preview(input, columns), expected);
         }
         for columns in 0..3 {
-            assert_eq!(
-                reply_preview(Some(&original("hello")), columns, false),
-                ".".repeat(columns)
-            );
+            assert_eq!(truncate_preview("hello", columns), ".".repeat(columns));
         }
         let preview = reply_preview(
             Some(&original(
