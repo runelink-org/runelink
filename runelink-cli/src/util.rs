@@ -1,6 +1,6 @@
 use runelink_client::validation::{validate_host, validate_username};
 use runelink_types::{ServerMembership, UserRef};
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use crate::error::CliError;
 
@@ -73,4 +73,17 @@ pub fn parse_user_ref_input(
         parse_username_input(name, strict)?,
         parse_host_input(host, strict)?,
     ))
+}
+
+/// Format an optional full ID consistently across CLI lists.
+pub fn list_label(
+    label: impl Display,
+    id: impl Display,
+    show_ids: bool,
+) -> String {
+    if show_ids {
+        format!("{label} [{id}]")
+    } else {
+        label.to_string()
+    }
 }

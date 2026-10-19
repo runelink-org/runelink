@@ -7,7 +7,7 @@ use runelink_types::server::{
     NewServer, NewServerMembership, ServerId, ServerRole,
 };
 
-use crate::util::parse_optional_host_input;
+use crate::util::{list_label, parse_optional_host_input};
 use crate::{error::CliError, util::group_memberships_by_host};
 
 use super::{
@@ -40,6 +40,12 @@ pub enum ServerCommands {
 
 #[derive(clap::Args, Debug)]
 pub struct ServerListArgs {
+    /// Show the full server ID
+    #[clap(long, conflicts_with = "hide_ids")]
+    pub show_ids: bool,
+    /// Hide IDs (the default)
+    #[clap(long)]
+    pub hide_ids: bool,
     /// The host to list servers from (if not provided, lists servers the user is a member of)
     #[clap(long)]
     pub host: Option<String>,
@@ -107,6 +113,7 @@ pub async fn handle_server_commands(
 ) -> Result<(), CliError> {
     match &server_args.command {
         ServerCommands::List(list_args) => {
+            let show_ids = list_args.show_ids && !list_args.hide_ids;
             let api_url = ctx.home_api_url().await?;
             let target_host = parse_optional_host_input(
                 list_args.host.as_deref(),
@@ -125,7 +132,10 @@ pub async fn handle_server_commands(
                     println!("No servers found in host: {host}");
                 } else {
                     for server in servers {
-                        println!("{}", server.verbose());
+                        println!(
+                            "{}",
+                            list_label(&server, server.id, show_ids)
+                        );
                     }
                 }
             } else {
@@ -155,7 +165,10 @@ pub async fn handle_server_commands(
                     println!("{host}");
                     for membership in memberships {
                         let server = &membership.server;
-                        print!("    {}", server.verbose());
+                        print!(
+                            "    {}",
+                            list_label(server, server.id, show_ids)
+                        );
                         if membership.role == ServerRole::Admin {
                             println!(" - admin");
                         } else {
