@@ -1,7 +1,11 @@
+use std::collections::HashMap;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
 use runelink_client::requests;
 use runelink_types::{
     channel::{ServerChannelId, TextChannelId},
-    message::{MessageId, NewMessage},
+    message::{Message, MessageId, NewMessage},
     server::ServerId,
 };
 
@@ -118,12 +122,29 @@ pub async fn handle_message_commands(
                 target_host,
             )
             .await?;
-            for message in messages
+            let messages_by_id: HashMap<_, _> = messages
                 .iter()
-                .rev()
-                .filter(|message| message.content.body().is_some())
-            {
-                println!("{message}");
+                .map(|message| (message.id, message))
+                .collect();
+            let width = crossterm::terminal::size()
+                .ok()
+                .map(|(columns, _)| usize::from(columns))
+                .filter(|columns| *columns > 0)
+                .unwrap_or(80);
+            for message in messages.iter().rev() {
+                let Some(body) = message.content.body() else {
+                    continue;
+                };
+                if let Some(reply_to) = message.reply_to {
+                    println!(
+                        "{}",
+                        reply_preview(
+                            messages_by_id.get(&reply_to).copied(),
+                            width
+                        )
+                    );
+                }
+                println!("{}: {body}", author_name(message));
             }
         }
 
@@ -216,4 +237,178 @@ fn text_channel_id(
             selection.channel.verbose()
         ))
     })
+}
+
+fn author_name(message: &Message) -> &str {
+    message
+        .author
+        .as_ref()
+        .map(|author| author.name.as_str())
+        .unwrap_or("anon")
+}
+
+fn reply_preview(target: Option<&Message>, columns: usize) -> String {
+    let preview = match target {
+        Some(message) => match message.content.body() {
+            Some(body) => {
+                let (first_line, more_lines) = body
+                    .split_once(['\r', '\n'])
+                    .map_or((body, false), |(first, _)| (first, true));
+                // A preview occupies one terminal line, even if its text has tabs
+                // or other control characters.
+                let first_line = first_line.replace(char::is_control, " ");
+                format!(
+                    "  ┌─ {}: {first_line}{}",
+                    author_name(message),
+                    if more_lines { " ..." } else { "" }
+                )
+            }
+            None => "  ┌─ Original message was deleted".into(),
+        },
+        None => "  ┌─ Original message unavailable".into(),
+    };
+    truncate_preview(&preview, columns)
+}
+
+fn truncate_preview(preview: &str, columns: usize) -> String {
+    if preview
+        .graphemes(true)
+        .map(preview_grapheme_width)
+        .sum::<usize>()
+        <= columns
+    {
+        return preview.into();
+    }
+    if columns < 3 {
+        return ".".repeat(columns);
+    }
+    let mut result = String::new();
+    let mut width = 0;
+    for grapheme in preview.graphemes(true) {
+        let next_width = preview_grapheme_width(grapheme);
+        if width + next_width > columns - 3 {
+            break;
+        }
+        result.push_str(grapheme);
+        width += next_width;
+    }
+    format!("{}...", result.trim_end())
+}
+
+// Some terminals render joined emoji as separate glyphs. Reserve enough
+// columns for either rendering, while still keeping the entire grapheme intact.
+fn preview_grapheme_width(grapheme: &str) -> usize {
+    let separate_width = grapheme
+        .chars()
+        .map(|character| character.width().unwrap_or(0))
+        .sum();
+    grapheme.width().max(separate_width)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runelink_types::{
+        message::MessageContent,
+        user::{User, UserRole},
+    };
+    use time::OffsetDateTime;
+
+    fn original(body: &str) -> Message {
+        Message {
+            id: MessageId::new(),
+            text_channel_id: TextChannelId::new(),
+            author: Some(User {
+                name: "mandar".into(),
+                host: "localhost".into(),
+                role: UserRole::User,
+                created_at: OffsetDateTime::UNIX_EPOCH,
+                updated_at: OffsetDateTime::UNIX_EPOCH,
+                synced_at: None,
+            }),
+            reply_to: None,
+            content: MessageContent::Active {
+                body: body.into(),
+                deleted_at: (),
+            },
+            created_at: OffsetDateTime::UNIX_EPOCH,
+            updated_at: OffsetDateTime::UNIX_EPOCH,
+        }
+    }
+
+    #[test]
+    fn preview_includes_author_and_only_the_first_line() {
+        assert_eq!(
+            reply_preview(Some(&original("Does 5 PM work for you?")), 80),
+            "  ┌─ mandar: Does 5 PM work for you?"
+        );
+        for body in [
+            "First line\nSecond line",
+            "First line\r\nSecond line",
+            "First line\n",
+        ] {
+            assert_eq!(
+                reply_preview(Some(&original(body)), 80),
+                "  ┌─ mandar: First line ..."
+            );
+        }
+    }
+
+    #[test]
+    fn width_limit_includes_indent_author_and_multiline_marker() {
+        assert_eq!(
+            reply_preview(Some(&original("abcdefghijklmnop")), 22),
+            "  ┌─ mandar: abcdef..."
+        );
+        assert_eq!(
+            reply_preview(Some(&original("First line\nSecond")), 26),
+            "  ┌─ mandar: First line..."
+        );
+    }
+
+    #[test]
+    fn unicode_previews_preserve_graphemes_and_fit_unjoined_emoji() {
+        // Keep graphemes intact and allow eight columns for four unjoined emoji.
+        // Even the fast path must allow for terminals that do not join them.
+        for (input, columns, expected) in [
+            ("a界e\u{301}👨‍👩‍👧‍👦bcdef", 8, "a界e\u{301}..."),
+            ("👨‍👩‍👧‍👦123456789", 12, "👨‍👩‍👧‍👦1..."),
+            ("👨‍👩‍👧‍👦abcd", 8, "..."),
+        ] {
+            assert_eq!(truncate_preview(input, columns), expected);
+        }
+        for columns in 0..3 {
+            assert_eq!(
+                reply_preview(Some(&original("hello")), columns),
+                ".".repeat(columns)
+            );
+        }
+        let preview = reply_preview(
+            Some(&original(
+                "5. Unicode width: 界界界 cafe\u{301} 👨‍👩‍👧‍👦. Wide characters and combined emoji should stay intact when truncated.",
+            )),
+            80,
+        );
+        let separate_columns: usize =
+            preview.chars().map(|c| c.width().unwrap_or(0)).sum();
+        assert!(separate_columns <= 80);
+        assert!(preview.ends_with("..."));
+    }
+
+    #[test]
+    fn deleted_or_missing_targets_do_not_expose_text() {
+        let mut message = original("erased text");
+        message.content = MessageContent::Deleted {
+            body: (),
+            deleted_at: OffsetDateTime::UNIX_EPOCH,
+        };
+        assert_eq!(
+            reply_preview(Some(&message), 80),
+            "  ┌─ Original message was deleted"
+        );
+        assert_eq!(
+            reply_preview(None, 80),
+            "  ┌─ Original message unavailable"
+        );
+    }
 }
