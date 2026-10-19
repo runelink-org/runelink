@@ -9,7 +9,10 @@ use runelink_types::{
     server::ServerId,
 };
 
-use crate::{error::CliError, util::parse_optional_host_input};
+use crate::{
+    error::CliError,
+    util::{list_label, parse_optional_host_input},
+};
 
 use super::{
     context::CliContext,
@@ -37,6 +40,12 @@ pub enum MessageCommands {
 
 #[derive(clap::Args, Debug)]
 pub struct MessageListArgs {
+    /// Show the full message ID
+    #[clap(long, conflicts_with = "hide_ids")]
+    pub show_ids: bool,
+    /// Hide IDs (the default)
+    #[clap(long)]
+    pub hide_ids: bool,
     /// Optional: Filter messages by Server ID
     #[clap(long)]
     pub server_id: Option<ServerId>,
@@ -93,6 +102,7 @@ pub async fn handle_message_commands(
 ) -> Result<(), CliError> {
     match &message_args.command {
         MessageCommands::List(list_args) => {
+            let show_ids = list_args.show_ids && !list_args.hide_ids;
             ctx.account.ok_or(CliError::MissingAccount)?;
             let account = ctx.account.ok_or(CliError::MissingAccount)?;
             let target_host = parse_optional_host_input(
@@ -140,11 +150,12 @@ pub async fn handle_message_commands(
                         "{}",
                         reply_preview(
                             messages_by_id.get(&reply_to).copied(),
-                            width
+                            width,
+                            show_ids,
                         )
                     );
                 }
-                println!("{}: {body}", author_name(message));
+                println!("{}: {body}", author_label(message, show_ids));
             }
         }
 
@@ -239,15 +250,20 @@ fn text_channel_id(
     })
 }
 
-fn author_name(message: &Message) -> &str {
-    message
+fn author_label(message: &Message, show_ids: bool) -> String {
+    let name = message
         .author
         .as_ref()
         .map(|author| author.name.as_str())
-        .unwrap_or("anon")
+        .unwrap_or("anon");
+    list_label(name, message.id, show_ids)
 }
 
-fn reply_preview(target: Option<&Message>, columns: usize) -> String {
+fn reply_preview(
+    target: Option<&Message>,
+    columns: usize,
+    show_ids: bool,
+) -> String {
     let preview = match target {
         Some(message) => match message.content.body() {
             Some(body) => {
@@ -259,7 +275,7 @@ fn reply_preview(target: Option<&Message>, columns: usize) -> String {
                 let first_line = first_line.replace(char::is_control, " ");
                 format!(
                     "  ┌─ {}: {first_line}{}",
-                    author_name(message),
+                    author_label(message, show_ids),
                     if more_lines { " ..." } else { "" }
                 )
             }
@@ -339,7 +355,11 @@ mod tests {
     #[test]
     fn preview_includes_author_and_only_the_first_line() {
         assert_eq!(
-            reply_preview(Some(&original("Does 5 PM work for you?")), 80),
+            reply_preview(
+                Some(&original("Does 5 PM work for you?")),
+                80,
+                false
+            ),
             "  ┌─ mandar: Does 5 PM work for you?"
         );
         for body in [
@@ -348,7 +368,7 @@ mod tests {
             "First line\n",
         ] {
             assert_eq!(
-                reply_preview(Some(&original(body)), 80),
+                reply_preview(Some(&original(body)), 80, false),
                 "  ┌─ mandar: First line ..."
             );
         }
@@ -357,12 +377,28 @@ mod tests {
     #[test]
     fn width_limit_includes_indent_author_and_multiline_marker() {
         assert_eq!(
-            reply_preview(Some(&original("abcdefghijklmnop")), 22),
+            reply_preview(Some(&original("abcdefghijklmnop")), 22, false),
             "  ┌─ mandar: abcdef..."
         );
         assert_eq!(
-            reply_preview(Some(&original("First line\nSecond")), 26),
+            reply_preview(Some(&original("First line\nSecond")), 26, false),
             "  ┌─ mandar: First line..."
+        );
+    }
+
+    #[test]
+    fn full_ids_are_shared_by_message_labels_and_preview_widths() {
+        let mut message = original("abcdefghijklmnop");
+        let id = "7f3b0d26-0000-4000-8000-000000000001";
+        message.id = id.parse().unwrap();
+        assert_eq!(author_label(&message, true), format!("mandar [{id}]"));
+        assert_eq!(
+            reply_preview(Some(&message), 80, true),
+            format!("  ┌─ mandar [{id}]: abcdefghijklmnop")
+        );
+        assert_eq!(
+            reply_preview(Some(&message), 61, true),
+            format!("  ┌─ mandar [{id}]: abcdef...")
         );
     }
 
@@ -379,7 +415,7 @@ mod tests {
         }
         for columns in 0..3 {
             assert_eq!(
-                reply_preview(Some(&original("hello")), columns),
+                reply_preview(Some(&original("hello")), columns, false),
                 ".".repeat(columns)
             );
         }
@@ -388,6 +424,7 @@ mod tests {
                 "5. Unicode width: 界界界 cafe\u{301} 👨‍👩‍👧‍👦. Wide characters and combined emoji should stay intact when truncated.",
             )),
             80,
+            false,
         );
         let separate_columns: usize =
             preview.chars().map(|c| c.width().unwrap_or(0)).sum();
@@ -403,11 +440,11 @@ mod tests {
             deleted_at: OffsetDateTime::UNIX_EPOCH,
         };
         assert_eq!(
-            reply_preview(Some(&message), 80),
+            reply_preview(Some(&message), 80, false),
             "  ┌─ Original message was deleted"
         );
         assert_eq!(
-            reply_preview(None, 80),
+            reply_preview(None, 80, false),
             "  ┌─ Original message unavailable"
         );
     }

@@ -14,7 +14,7 @@ use crate::{
         tree_order,
     },
     error::CliError,
-    util::parse_optional_host_input,
+    util::{list_label, parse_optional_host_input},
 };
 
 use super::{
@@ -99,6 +99,12 @@ pub enum ChannelCommands {
 
 #[derive(clap::Args, Debug)]
 pub struct ChannelListArgs {
+    /// Show the full channel or category ID
+    #[clap(long, conflicts_with = "hide_ids")]
+    pub show_ids: bool,
+    /// Hide IDs (the default)
+    #[clap(long)]
+    pub hide_ids: bool,
     /// Optional: Filter channels and categories by Server ID
     #[clap(long)]
     pub server_id: Option<ServerId>,
@@ -195,6 +201,7 @@ pub async fn handle_channel_commands(
 ) -> Result<(), CliError> {
     match &channel_args.command {
         ChannelCommands::List(list_args) => {
+            let show_ids = list_args.show_ids && !list_args.hide_ids;
             ctx.account.ok_or(CliError::MissingAccount)?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
@@ -250,7 +257,10 @@ pub async fn handle_channel_commands(
                 )
             }
             for (depth, channel) in tree_order(&channels) {
-                println!("{}  ({})", indented(depth, channel), channel.id);
+                println!(
+                    "{}",
+                    list_label(indented(depth, channel), channel.id, show_ids)
+                );
             }
         }
 
