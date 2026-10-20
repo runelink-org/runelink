@@ -12,7 +12,10 @@ use crate::{
 };
 
 use super::{
-    config::{DefaultAccountArgs, handle_default_account_commands},
+    config::{
+        self, DefaultAccountArgs, DefaultAccountCommands,
+        handle_default_account_commands,
+    },
     context::CliContext,
     select::select_inline,
 };
@@ -39,6 +42,8 @@ pub enum AccountCommands {
     Delete(DeleteAccountArgs),
     /// Manage default account
     Default(DefaultAccountArgs),
+    /// Switch the default account (alias for `account default set`)
+    Switch(config::NameAndHostArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -337,6 +342,13 @@ pub async fn handle_account_commands(
 
         AccountCommands::Default(default_args) => {
             handle_default_account_commands(ctx, default_args).await?;
+        }
+
+        AccountCommands::Switch(switch_args) => {
+            let default_args = DefaultAccountArgs {
+                command: DefaultAccountCommands::Set(switch_args.clone()),
+            };
+            handle_default_account_commands(ctx, &default_args).await?;
         }
     }
     Ok(())

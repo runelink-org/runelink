@@ -44,7 +44,7 @@ pub enum DefaultAccountCommands {
     Set(NameAndHostArgs),
 }
 
-#[derive(clap::Args, Debug)]
+#[derive(clap::Args, Clone, Debug)]
 pub struct NameAndHostArgs {
     /// The account's username
     #[clap(long, requires = "host")]
