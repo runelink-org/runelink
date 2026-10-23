@@ -8,7 +8,10 @@ use runelink_types::{
 use sqlx::{PgConnection, PgExecutor};
 use uuid::Uuid;
 
-use crate::{db::DbPool, error::ApiResult};
+use crate::{
+    db::DbPool,
+    error::{ApiError, ApiResult},
+};
 
 /// Lock a server's channel tree until the transaction ends, serializing
 /// changes to it. Fails with `NotFound` if the server does not exist.
@@ -95,6 +98,20 @@ pub async fn get_by_id(
     .fetch_one(executor)
     .await?;
     Ok(channel)
+}
+
+/// Get the server that owns a server channel.
+pub async fn get_server_id(
+    executor: impl PgExecutor<'_>,
+    channel_id: ServerChannelId,
+) -> ApiResult<ServerId> {
+    let server_id = sqlx::query_scalar!(
+        "SELECT server_id FROM server_channels WHERE id = $1;",
+        channel_id.as_uuid(),
+    )
+    .fetch_one(executor)
+    .await?;
+    Ok(server_id.into())
 }
 
 /// Get the server whose channel owns a text channel.
@@ -215,11 +232,14 @@ pub async fn delete(
     executor: impl PgExecutor<'_>,
     channel_id: ServerChannelId,
 ) -> ApiResult<()> {
-    sqlx::query!(
+    let result = sqlx::query!(
         "DELETE FROM server_channels WHERE id = $1;",
         channel_id.as_uuid()
     )
     .execute(executor)
     .await?;
+    if result.rows_affected() == 0 {
+        return Err(ApiError::NotFound);
+    }
     Ok(())
 }

@@ -394,68 +394,57 @@ pub(super) async fn handle_client_request(
         }
 
         ClientWsRequest::ChannelsGetById {
-            server_id,
             channel_id,
             target_host,
         } => {
-            let session = authorize_client(
-                state,
-                conn_id,
-                ops::channels::auth::get_by_id(server_id),
-            )
-            .await?;
+            let target_host = target_host.as_deref();
+            let requirement =
+                ops::channels::auth::get_by_id(state, channel_id, target_host)
+                    .await?;
+            let session = authorize_client(state, conn_id, requirement).await?;
             let channel = ops::channels::get_by_id(
                 state,
                 &session,
-                server_id,
                 channel_id,
-                target_host.as_deref(),
+                target_host,
             )
             .await?;
             Ok(ClientWsReply::ChannelsGetById(channel))
         }
 
         ClientWsRequest::ChannelsDelete {
-            server_id,
             channel_id,
             target_host,
         } => {
-            let session = authorize_client(
-                state,
-                conn_id,
-                ops::channels::auth::delete(server_id),
-            )
-            .await?;
-            ops::channels::delete(
-                state,
-                &session,
-                server_id,
-                channel_id,
-                target_host.as_deref(),
-            )
-            .await?;
+            let target_host = target_host.as_deref();
+            let requirement =
+                ops::channels::auth::delete(state, channel_id, target_host)
+                    .await?;
+            let session = authorize_client(state, conn_id, requirement).await?;
+            ops::channels::delete(state, &session, channel_id, target_host)
+                .await?;
             Ok(ClientWsReply::ChannelsDelete)
         }
 
         ClientWsRequest::ChannelsMove {
-            server_id,
             channel_id,
             channel_move,
             target_host,
         } => {
-            let session = authorize_client(
+            let target_host = target_host.as_deref();
+            let requirement = ops::channels::auth::move_channel(
                 state,
-                conn_id,
-                ops::channels::auth::move_channel(server_id),
+                channel_id,
+                target_host,
             )
             .await?;
+            let session = authorize_client(state, conn_id, requirement).await?;
             let channels = ops::channels::move_channel(
                 state,
                 &session,
-                server_id,
                 channel_id,
                 &channel_move,
-                target_host.as_deref(),
+                target_host,
             )
             .await?;
             Ok(ClientWsReply::ChannelsMove(channels))

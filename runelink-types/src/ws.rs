@@ -131,17 +131,14 @@ pub enum ClientWsRequest {
         target_host: Option<String>,
     },
     ChannelsGetById {
-        server_id: ServerId,
         channel_id: ServerChannelId,
         target_host: Option<String>,
     },
     ChannelsDelete {
-        server_id: ServerId,
         channel_id: ServerChannelId,
         target_host: Option<String>,
     },
     ChannelsMove {
-        server_id: ServerId,
         channel_id: ServerChannelId,
         channel_move: ServerChannelMove,
         target_host: Option<String>,
@@ -311,15 +308,12 @@ pub enum FederationWsRequest {
         server_id: ServerId,
     },
     ChannelsGetById {
-        server_id: ServerId,
         channel_id: ServerChannelId,
     },
     ChannelsDelete {
-        server_id: ServerId,
         channel_id: ServerChannelId,
     },
     ChannelsMove {
-        server_id: ServerId,
         channel_id: ServerChannelId,
         channel_move: ServerChannelMove,
     },

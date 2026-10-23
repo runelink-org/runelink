@@ -15,9 +15,8 @@ use crate::{
 };
 
 use super::{
-    context::CliContext,
-    input::unwrap_or_prompt,
-    select::{ChannelSelection, get_channel_selection_with_inputs},
+    context::CliContext, input::unwrap_or_prompt,
+    select::get_channel_selection_with_inputs,
 };
 
 #[derive(clap::Args, Debug)]
@@ -46,15 +45,8 @@ pub struct MessageListArgs {
     /// Hide IDs (the default)
     #[clap(long)]
     pub hide_ids: bool,
-    /// Optional: Filter messages by Server ID
-    #[clap(long)]
-    pub server_id: Option<ServerId>,
-    /// Optional: Filter messages by Channel ID
-    #[clap(long)]
-    pub channel_id: Option<ServerChannelId>,
-    /// The host of the server
-    #[clap(long)]
-    pub host: Option<String>,
+    #[clap(flatten)]
+    pub channel: TextChannelArgs,
 }
 
 #[derive(clap::Args, Debug)]
@@ -75,12 +67,23 @@ pub struct MessageSendArgs {
     /// The body of the message
     #[clap(long)]
     pub body: Option<String>,
-    /// The server ID
-    #[clap(long)]
+    #[clap(flatten)]
+    pub channel: TextChannelArgs,
+}
+
+/// The text channel to list or send messages in. Prompts for a channel when
+/// no ID is given.
+#[derive(clap::Args, Debug)]
+pub struct TextChannelArgs {
+    /// The server to select a channel from
+    #[clap(long, conflicts_with_all = ["channel_id", "text_channel_id"])]
     pub server_id: Option<ServerId>,
-    /// The channel ID
-    #[clap(long)]
+    /// The ID of the channel
+    #[clap(long, conflicts_with = "text_channel_id")]
     pub channel_id: Option<ServerChannelId>,
+    /// The ID of the underlying text channel
+    #[clap(long)]
+    pub text_channel_id: Option<TextChannelId>,
     /// The host of the server
     #[clap(long)]
     pub host: Option<String>,
@@ -104,32 +107,16 @@ pub async fn handle_message_commands(
         MessageCommands::List(list_args) => {
             let show_ids = list_args.show_ids && !list_args.hide_ids;
             ctx.account.ok_or(CliError::MissingAccount)?;
-            let account = ctx.account.ok_or(CliError::MissingAccount)?;
-            let target_host = parse_optional_host_input(
-                list_args.host.as_deref(),
-                ctx.strict_input,
-            )?;
-            let selection = get_channel_selection_with_inputs(
-                ctx,
-                list_args.channel_id,
-                list_args.server_id,
-                target_host.as_deref(),
-                true,
-            )
-            .await?;
+            let (text_channel_id, target_host) =
+                resolve_text_channel(ctx, &list_args.channel).await?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
-            let target_host = if selection.host != account.user_ref.host {
-                Some(selection.host.as_str())
-            } else {
-                None
-            };
             let messages = requests::messages::fetch_by_text_channel(
                 ctx.client,
                 &api_url,
                 &access_token,
-                text_channel_id(&selection)?,
-                target_host,
+                text_channel_id,
+                target_host.as_deref(),
             )
             .await?;
             let messages_by_id: HashMap<_, _> = messages
@@ -180,18 +167,8 @@ pub async fn handle_message_commands(
 
         MessageCommands::Send(send_args) => {
             let account = ctx.account.ok_or(CliError::MissingAccount)?;
-            let target_host = parse_optional_host_input(
-                send_args.host.as_deref(),
-                ctx.strict_input,
-            )?;
-            let selection = get_channel_selection_with_inputs(
-                ctx,
-                send_args.channel_id,
-                send_args.server_id,
-                target_host.as_deref(),
-                true,
-            )
-            .await?;
+            let (text_channel_id, target_host) =
+                resolve_text_channel(ctx, &send_args.channel).await?;
             let body = unwrap_or_prompt(send_args.body.clone(), "Message")?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
@@ -200,18 +177,13 @@ pub async fn handle_message_commands(
                 body,
                 reply_to: send_args.reply_to,
             };
-            let target_host = if selection.host != account.user_ref.host {
-                Some(selection.host.as_str())
-            } else {
-                None
-            };
             let message = requests::messages::create(
                 ctx.client,
                 &api_url,
                 &access_token,
-                text_channel_id(&selection)?,
+                text_channel_id,
                 &new_message,
-                target_host,
+                target_host.as_deref(),
             )
             .await?;
             println!("Sent message: {message}");
@@ -239,15 +211,35 @@ pub async fn handle_message_commands(
     Ok(())
 }
 
-fn text_channel_id(
-    selection: &ChannelSelection,
-) -> Result<TextChannelId, CliError> {
-    selection.channel.text_channel_id.ok_or_else(|| {
-        CliError::InvalidArgument(format!(
-            "{} is not a text channel.",
-            selection.channel.verbose()
-        ))
-    })
+// Resolve the text channel and its target host, which is `None` for the home
+// host, prompting for whatever is missing
+async fn resolve_text_channel(
+    ctx: &mut CliContext<'_>,
+    args: &TextChannelArgs,
+) -> Result<(TextChannelId, Option<String>), CliError> {
+    let home_host = ctx.home_host()?.to_string();
+    let target_host = |host: String| (host != home_host).then_some(host);
+    let host =
+        parse_optional_host_input(args.host.as_deref(), ctx.strict_input)?;
+    if let Some(text_channel_id) = args.text_channel_id {
+        return Ok((text_channel_id, host.and_then(target_host)));
+    }
+    let selection = get_channel_selection_with_inputs(
+        ctx,
+        args.channel_id,
+        args.server_id,
+        host.as_deref(),
+        true,
+    )
+    .await?;
+    let text_channel_id =
+        selection.channel.text_channel_id.ok_or_else(|| {
+            CliError::InvalidArgument(format!(
+                "{} is not a text channel.",
+                selection.channel.verbose()
+            ))
+        })?;
+    Ok((text_channel_id, target_host(selection.host)))
 }
 
 fn author_label(message: &Message, show_ids: bool) -> String {

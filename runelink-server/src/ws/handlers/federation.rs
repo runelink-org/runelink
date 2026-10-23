@@ -380,56 +380,55 @@ pub(super) async fn handle_federation_request(
             Ok(FederationWsReply::ChannelsGetByServer(channels))
         }
 
-        FederationWsRequest::ChannelsGetById {
-            server_id,
-            channel_id,
-        } => {
+        FederationWsRequest::ChannelsGetById { channel_id } => {
+            let requirement =
+                ops::channels::auth::federated::get_by_id(state, channel_id)
+                    .await?;
             let session = authorize_federation(
                 state,
                 conn_id,
                 delegated_user_ref,
-                ops::channels::auth::federated::get_by_id(server_id),
+                requirement,
             )
             .await?;
-            let channel = ops::channels::get_by_id(
-                state, &session, server_id, channel_id, None,
-            )
-            .await?;
+            let channel =
+                ops::channels::get_by_id(state, &session, channel_id, None)
+                    .await?;
             Ok(FederationWsReply::ChannelsGetById(channel))
         }
 
-        FederationWsRequest::ChannelsDelete {
-            server_id,
-            channel_id,
-        } => {
+        FederationWsRequest::ChannelsDelete { channel_id } => {
+            let requirement =
+                ops::channels::auth::federated::delete(state, channel_id)
+                    .await?;
             let session = authorize_federation(
                 state,
                 conn_id,
                 delegated_user_ref,
-                ops::channels::auth::federated::delete(server_id),
+                requirement,
             )
             .await?;
-            ops::channels::delete(state, &session, server_id, channel_id, None)
-                .await?;
+            ops::channels::delete(state, &session, channel_id, None).await?;
             Ok(FederationWsReply::ChannelsDelete)
         }
 
         FederationWsRequest::ChannelsMove {
-            server_id,
             channel_id,
             channel_move,
         } => {
+            let requirement =
+                ops::channels::auth::federated::move_channel(state, channel_id)
+                    .await?;
             let session = authorize_federation(
                 state,
                 conn_id,
                 delegated_user_ref,
-                ops::channels::auth::federated::move_channel(server_id),
+                requirement,
             )
             .await?;
             let channels = ops::channels::move_channel(
                 state,
                 &session,
-                server_id,
                 channel_id,
                 &channel_move,
                 None,
