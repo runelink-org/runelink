@@ -80,12 +80,10 @@ pub async fn fetch_by_id(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: ServerId,
     channel_id: ServerChannelId,
     target_host: Option<&str>,
 ) -> Result<ServerChannel> {
-    let mut url =
-        format!("{api_url}/servers/{server_id}/channels/{channel_id}");
+    let mut url = format!("{api_url}/channels/{channel_id}");
     if let Some(host) = target_host {
         url = format!("{url}?target_host={host}");
     }
@@ -103,12 +101,10 @@ pub async fn delete(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: ServerId,
     channel_id: ServerChannelId,
     target_host: Option<&str>,
 ) -> Result<()> {
-    let mut url =
-        format!("{api_url}/servers/{server_id}/channels/{channel_id}");
+    let mut url = format!("{api_url}/channels/{channel_id}");
     if let Some(host) = target_host {
         url = format!("{url}?target_host={host}");
     }
@@ -120,13 +116,11 @@ pub async fn move_channel(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: ServerId,
     channel_id: ServerChannelId,
     channel_move: &ServerChannelMove,
     target_host: Option<&str>,
 ) -> Result<Vec<ServerChannel>> {
-    let mut url =
-        format!("{api_url}/servers/{server_id}/channels/{channel_id}/move");
+    let mut url = format!("{api_url}/channels/{channel_id}/move");
     if let Some(host) = target_host {
         url = format!("{url}?target_host={host}");
     }

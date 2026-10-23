@@ -102,6 +102,10 @@ pub struct ChannelListArgs {
     /// Show the full channel or category ID
     #[clap(long, conflicts_with = "hide_ids")]
     pub show_ids: bool,
+    /// Show the ID of the underlying channel, such as the text channel ID
+    /// of a text channel. Categories have none.
+    #[clap(long, conflicts_with = "hide_ids")]
+    pub show_raw_ids: bool,
     /// Hide IDs (the default)
     #[clap(long)]
     pub hide_ids: bool,
@@ -118,9 +122,6 @@ pub struct ChannelListArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct ChannelGetArgs {
-    /// The ID of the server
-    #[clap(long)]
-    pub server_id: ServerId,
     /// The host of the server
     #[clap(long)]
     pub host: Option<String>,
@@ -162,8 +163,8 @@ pub struct ChannelCreateArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct ChannelDeleteArgs {
-    /// The ID of the server
-    #[clap(long)]
+    /// The server to select a channel or category from
+    #[clap(long, conflicts_with = "channel_id")]
     pub server_id: Option<ServerId>,
     /// The ID of the channel or category to delete
     #[clap(long)]
@@ -175,8 +176,8 @@ pub struct ChannelDeleteArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct ChannelMoveArgs {
-    /// The ID of the server
-    #[clap(long)]
+    /// The server to select a channel or category from
+    #[clap(long, conflicts_with = "channel_id")]
     pub server_id: Option<ServerId>,
     /// The ID of the channel or category to move
     #[clap(long)]
@@ -257,10 +258,14 @@ pub async fn handle_channel_commands(
                 )
             }
             for (depth, channel) in tree_order(&channels) {
-                println!(
-                    "{}",
-                    list_label(indented(depth, channel), channel.id, show_ids)
-                );
+                let mut label =
+                    list_label(indented(depth, channel), channel.id, show_ids);
+                if list_args.show_raw_ids
+                    && let Some(raw_id) = channel.raw_id()
+                {
+                    label = format!("{label} [raw: {raw_id}]");
+                }
+                println!("{label}");
             }
         }
 
@@ -276,7 +281,6 @@ pub async fn handle_channel_commands(
                 ctx.client,
                 &api_url,
                 &access_token,
-                get_args.server_id,
                 get_args.channel_id,
                 target_host.as_deref(),
             )
@@ -407,7 +411,6 @@ pub async fn handle_channel_commands(
                 ctx.client,
                 &api_url,
                 &access_token,
-                channel.server_id,
                 channel.id,
                 Some(&selection.host),
             )
@@ -464,7 +467,6 @@ pub async fn handle_channel_commands(
                 ctx.client,
                 &api_url,
                 &access_token,
-                channel.server_id,
                 channel.id,
                 &ServerChannelMove {
                     parent_channel_id,

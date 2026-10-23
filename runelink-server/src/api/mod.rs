@@ -58,13 +58,10 @@ pub fn router() -> Router<AppState> {
         )
         .route("/channels", get(channels::get_all))
         .route(
-            "/servers/{server_id}/channels/{channel_id}",
+            "/channels/{channel_id}",
             get(channels::get_by_id).delete(channels::delete),
         )
-        .route(
-            "/servers/{server_id}/channels/{channel_id}/move",
-            post(channels::move_channel),
-        )
+        .route("/channels/{channel_id}/move", post(channels::move_channel))
         .route("/servers", get(servers::get_all).post(servers::create))
         .route(
             "/servers/{server_id}",

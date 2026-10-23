@@ -97,87 +97,78 @@ pub async fn get_by_server(
     Ok((StatusCode::OK, Json(channels)))
 }
 
-/// GET /servers/{server_id}/channels/{channel_id}
+/// GET /channels/{channel_id}
 pub async fn get_by_id(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((server_id, channel_id)): Path<(ServerId, ServerChannelId)>,
+    Path(channel_id): Path<ServerChannelId>,
     Query(params): Query<ChannelQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
-        "GET /servers/{server_id}/channels/{channel_id}?target_host={:?}",
+        "GET /channels/{channel_id}?target_host={:?}",
         params.target_host
     );
+    let target_host = params.target_host.as_deref();
     let session = authorize(
         &state,
         Principal::from_client_headers(&headers, &state)?,
-        ops::channels::auth::get_by_id(server_id),
+        ops::channels::auth::get_by_id(&state, channel_id, target_host).await?,
     )
     .await?;
-    let channel = ops::channels::get_by_id(
-        &state,
-        &session,
-        server_id,
-        channel_id,
-        params.target_host.as_deref(),
-    )
-    .await?;
+    let channel =
+        ops::channels::get_by_id(&state, &session, channel_id, target_host)
+            .await?;
     Ok((StatusCode::OK, Json(channel)))
 }
 
-/// DELETE /servers/{server_id}/channels/{channel_id}
+/// DELETE /channels/{channel_id}
 pub async fn delete(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((server_id, channel_id)): Path<(ServerId, ServerChannelId)>,
+    Path(channel_id): Path<ServerChannelId>,
     Query(params): Query<ChannelQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
-        "DELETE /servers/{server_id}/channels/{channel_id}?target_host={:?}",
+        "DELETE /channels/{channel_id}?target_host={:?}",
         params.target_host
     );
+    let target_host = params.target_host.as_deref();
     let session = authorize(
         &state,
         Principal::from_client_headers(&headers, &state)?,
-        ops::channels::auth::delete(server_id),
+        ops::channels::auth::delete(&state, channel_id, target_host).await?,
     )
     .await?;
-    ops::channels::delete(
-        &state,
-        &session,
-        server_id,
-        channel_id,
-        params.target_host.as_deref(),
-    )
-    .await?;
+    ops::channels::delete(&state, &session, channel_id, target_host).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// POST /servers/{server_id}/channels/{channel_id}/move
+/// POST /channels/{channel_id}/move
 pub async fn move_channel(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((server_id, channel_id)): Path<(ServerId, ServerChannelId)>,
+    Path(channel_id): Path<ServerChannelId>,
     Query(params): Query<ChannelQueryParams>,
     Json(channel_move): Json<ServerChannelMove>,
 ) -> ApiResult<impl IntoResponse> {
     info!(
-        "POST /servers/{server_id}/channels/{channel_id}/move?target_host={:?}\nchannel_move = {:#?}",
+        "POST /channels/{channel_id}/move?target_host={:?}\nchannel_move = {:#?}",
         params.target_host, channel_move,
     );
+    let target_host = params.target_host.as_deref();
     let session = authorize(
         &state,
         Principal::from_client_headers(&headers, &state)?,
-        ops::channels::auth::move_channel(server_id),
+        ops::channels::auth::move_channel(&state, channel_id, target_host)
+            .await?,
     )
     .await?;
     let channels = ops::channels::move_channel(
         &state,
         &session,
-        server_id,
         channel_id,
         &channel_move,
-        params.target_host.as_deref(),
+        target_host,
     )
     .await?;
     Ok((StatusCode::OK, Json(channels)))
