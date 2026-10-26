@@ -7,7 +7,7 @@ use crossterm::{
 };
 use runelink_client::requests;
 use runelink_types::{
-    channel::{ServerChannel, ServerChannelId, ServerChannelKind},
+    channel::{ServerChannel, ServerChannelId},
     server::{Server, ServerId},
 };
 use std::collections::HashSet;
@@ -286,8 +286,7 @@ pub async fn get_channel_selection(
     .await?;
     // Categories stay visible for context when only text channels can be
     // chosen
-    let selectable =
-        |c: &ServerChannel| !text_only || c.kind() == ServerChannelKind::Text;
+    let selectable = |c: &ServerChannel| !text_only || c.is_text();
     let choices = tree_order(&channels);
     if !choices.iter().any(|(_, c)| selectable(c)) {
         return Err(CliError::NoActionPossible(

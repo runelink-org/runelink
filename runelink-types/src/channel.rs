@@ -71,6 +71,14 @@ impl ServerChannel {
         }
     }
 
+    pub fn is_text(&self) -> bool {
+        self.kind() == ServerChannelKind::Text
+    }
+
+    pub fn is_category(&self) -> bool {
+        self.kind() == ServerChannelKind::Category
+    }
+
     pub fn verbose(&self) -> String {
         format!("{} ({})", self.title, self.id)
     }
@@ -138,7 +146,7 @@ mod tests {
                 serde_json::from_value::<ServerChannel>(wire.clone()).unwrap(),
                 channel
             );
-            if channel.kind() == ServerChannelKind::Text {
+            if channel.is_text() {
                 wire.as_object_mut().unwrap().remove("text_channel_id");
                 assert!(
                     serde_json::from_value::<ServerChannel>(wire.clone())

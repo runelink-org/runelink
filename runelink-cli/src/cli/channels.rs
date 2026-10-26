@@ -55,7 +55,7 @@ fn select_parent(
             continue;
         }
         subtree_depth = (Some(c.id) == excluded).then_some(depth);
-        if subtree_depth.is_none() && c.kind() == ServerChannelKind::Category {
+        if subtree_depth.is_none() && c.is_category() {
             parents.push((depth + 1, Some(c)));
         }
     }
