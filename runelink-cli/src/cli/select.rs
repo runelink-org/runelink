@@ -286,8 +286,9 @@ pub async fn get_channel_selection(
     .await?;
     // Categories stay visible for context when only text channels can be
     // chosen
-    let selectable =
-        |c: &ServerChannel| !text_only || c.kind == ServerChannelKind::Text;
+    let selectable = |c: &ServerChannel| {
+        !text_only || c.content.kind() == ServerChannelKind::Text
+    };
     let choices = tree_order(&channels);
     if !choices.iter().any(|(_, c)| selectable(c)) {
         return Err(CliError::NoActionPossible(

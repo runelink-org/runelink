@@ -55,7 +55,9 @@ fn select_parent(
             continue;
         }
         subtree_depth = (Some(c.id) == excluded).then_some(depth);
-        if subtree_depth.is_none() && c.kind == ServerChannelKind::Category {
+        if subtree_depth.is_none()
+            && c.content.kind() == ServerChannelKind::Category
+        {
             parents.push((depth + 1, Some(c)));
         }
     }
@@ -385,7 +387,7 @@ pub async fn handle_channel_commands(
             .await?;
             println!(
                 "Created {}: {}",
-                label(channel.kind).to_lowercase(),
+                label(channel.content.kind()).to_lowercase(),
                 channel.verbose()
             );
         }
@@ -417,7 +419,7 @@ pub async fn handle_channel_commands(
             .await?;
             println!(
                 "Deleted {}: {}",
-                label(channel.kind).to_lowercase(),
+                label(channel.content.kind()).to_lowercase(),
                 channel.verbose()
             );
         }
@@ -478,13 +480,13 @@ pub async fn handle_channel_commands(
             if changed.is_empty() {
                 println!(
                     "{} already in place: {}",
-                    label(channel.kind),
+                    label(channel.content.kind()),
                     channel.verbose()
                 );
             } else {
                 println!(
                     "Moved {}: {}",
-                    label(channel.kind).to_lowercase(),
+                    label(channel.content.kind()).to_lowercase(),
                     channel.verbose()
                 );
             }

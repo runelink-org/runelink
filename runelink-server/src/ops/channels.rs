@@ -89,7 +89,7 @@ pub async fn get_all(
 ) -> ApiResult<Vec<ServerChannel>> {
     if !state.config.is_remote_host(target_host) {
         // Handle local case
-        let channels = queries::channels::get_all(&state.db_pool).await?;
+        let channels = queries::channels::list(&*state.db_pool, None).await?;
         Ok(channels)
     } else {
         // Fetch from remote host using federation
@@ -125,7 +125,7 @@ pub async fn get_by_server(
 ) -> ApiResult<Vec<ServerChannel>> {
     if !state.config.is_remote_host(target_host) {
         // Handle local case
-        queries::channels::get_by_server(&*state.db_pool, server_id).await
+        queries::channels::list(&*state.db_pool, Some(server_id)).await
     } else {
         // Fetch from remote host using federation
         let host = target_host.unwrap();
@@ -264,7 +264,7 @@ pub async fn move_channel(
             queries::channels::get_server_id(&mut *tx, channel_id).await?;
         queries::channels::lock_tree(&mut tx, server_id).await?;
         let channels =
-            queries::channels::get_by_server(&mut *tx, server_id).await?;
+            queries::channels::list(&mut *tx, Some(server_id)).await?;
         let planned =
             channel_tree::plan_move(&channels, channel_id, channel_move)?;
         let changed =

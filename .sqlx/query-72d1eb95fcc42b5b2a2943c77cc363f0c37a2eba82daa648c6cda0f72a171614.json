@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE server_channels sc\n        SET parent_channel_id = p.parent_channel_id, position = p.position\n        FROM UNNEST($1::UUID[], $2::UUID[], $3::INTEGER[])\n            AS p (id, parent_channel_id, position)\n        WHERE sc.id = p.id\n        RETURNING sc.*;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "server_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "text_channel_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "parent_channel_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "position",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "UuidArray",
+        "Int4Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "72d1eb95fcc42b5b2a2943c77cc363f0c37a2eba82daa648c6cda0f72a171614"
+}

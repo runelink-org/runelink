@@ -4,7 +4,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use runelink_client::requests;
 use runelink_types::{
-    channel::{ServerChannelId, TextChannelId},
+    channel::{ServerChannelContent, ServerChannelId, TextChannelId},
     message::{Message, MessageId, NewMessage},
     server::ServerId,
 };
@@ -232,13 +232,14 @@ async fn resolve_text_channel(
         true,
     )
     .await?;
-    let text_channel_id =
-        selection.channel.text_channel_id.ok_or_else(|| {
-            CliError::InvalidArgument(format!(
-                "{} is not a text channel.",
-                selection.channel.verbose()
-            ))
-        })?;
+    let ServerChannelContent::Text { text_channel_id } =
+        selection.channel.content
+    else {
+        return Err(CliError::InvalidArgument(format!(
+            "{} is not a text channel.",
+            selection.channel.verbose()
+        )));
+    };
     Ok((text_channel_id, target_host(selection.host)))
 }
 
