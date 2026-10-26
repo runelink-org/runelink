@@ -46,15 +46,6 @@ pub enum ServerChannelContent {
     Category,
 }
 
-impl ServerChannelContent {
-    pub fn kind(self) -> ServerChannelKind {
-        match self {
-            Self::Text { .. } => ServerChannelKind::Text,
-            Self::Category => ServerChannelKind::Category,
-        }
-    }
-}
-
 /// A new server channel, placed after its future siblings.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NewServerChannel {
@@ -73,6 +64,13 @@ pub struct ServerChannelMove {
 }
 
 impl ServerChannel {
+    pub fn kind(&self) -> ServerChannelKind {
+        match self.content {
+            ServerChannelContent::Text { .. } => ServerChannelKind::Text,
+            ServerChannelContent::Category => ServerChannelKind::Category,
+        }
+    }
+
     pub fn verbose(&self) -> String {
         format!("{} ({})", self.title, self.id)
     }
@@ -140,7 +138,7 @@ mod tests {
                 serde_json::from_value::<ServerChannel>(wire.clone()).unwrap(),
                 channel
             );
-            if content.kind() == ServerChannelKind::Text {
+            if channel.kind() == ServerChannelKind::Text {
                 wire.as_object_mut().unwrap().remove("text_channel_id");
                 assert!(
                     serde_json::from_value::<ServerChannel>(wire.clone())

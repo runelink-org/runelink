@@ -21,7 +21,7 @@ pub fn check_parent(
             "Parent channel not found in specified server".into(),
         ));
     }
-    if parent.content.kind() != ServerChannelKind::Category {
+    if parent.kind() != ServerChannelKind::Category {
         return Err(ApiError::BadRequest(
             "Parent channel must be a category".into(),
         ));
