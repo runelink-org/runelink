@@ -1,14 +1,61 @@
 use runelink_types::{
     channel::{
-        NewServerChannel, ServerChannel, ServerChannelId, ServerChannelKind,
-        TextChannelId,
+        NewServerChannel, ServerChannel, ServerChannelContent, ServerChannelId,
+        ServerChannelKind, TextChannelId,
     },
     server::ServerId,
 };
 use sqlx::{PgConnection, PgExecutor};
 use uuid::Uuid;
 
-use crate::{db::DbPool, error::ApiResult};
+use crate::{
+    db::DbPool,
+    error::{ApiError, ApiResult},
+};
+
+// Nullable database columns are confined to this boundary.
+struct ServerChannelRow {
+    id: Uuid,
+    server_id: Uuid,
+    kind: String,
+    title: String,
+    description: Option<String>,
+    text_channel_id: Option<Uuid>,
+    parent_channel_id: Option<Uuid>,
+    position: i32,
+    created_at: time::OffsetDateTime,
+    updated_at: time::OffsetDateTime,
+}
+
+impl TryFrom<ServerChannelRow> for ServerChannel {
+    type Error = ApiError;
+
+    fn try_from(row: ServerChannelRow) -> ApiResult<Self> {
+        let content = match (row.kind.as_str(), row.text_channel_id) {
+            ("text", Some(id)) => ServerChannelContent::Text {
+                text_channel_id: id.into(),
+            },
+            ("category", None) => ServerChannelContent::Category,
+            _ => {
+                return Err(ApiError::Internal(format!(
+                    "Invalid channel content for {}",
+                    row.id
+                )));
+            }
+        };
+        Ok(Self {
+            id: row.id.into(),
+            server_id: row.server_id.into(),
+            content,
+            title: row.title,
+            description: row.description,
+            parent_channel_id: row.parent_channel_id.map(Into::into),
+            position: row.position,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
+    }
+}
 
 /// Lock a server's channel tree until the transaction ends, serializing
 /// changes to it. Fails with `NotFound` if the server does not exist.
@@ -43,7 +90,7 @@ pub async fn insert(
         ServerChannelKind::Category => None,
     };
     let channel = sqlx::query_as!(
-        ServerChannel,
+        ServerChannelRow,
         r#"
         INSERT INTO server_channels (
             server_id, kind, title, description, text_channel_id,
@@ -55,12 +102,7 @@ pub async fn insert(
             WHERE server_id = $1
                 AND parent_channel_id IS NOT DISTINCT FROM $6
         ))
-        RETURNING
-            id, server_id, kind AS "kind: ServerChannelKind", title,
-            description,
-            text_channel_id AS "text_channel_id: TextChannelId",
-            parent_channel_id AS "parent_channel_id: ServerChannelId",
-            position, created_at, updated_at;
+        RETURNING *;
         "#,
         server_id.as_uuid(),
         new_channel.kind as ServerChannelKind,
@@ -71,7 +113,7 @@ pub async fn insert(
     )
     .fetch_one(conn)
     .await?;
-    Ok(channel)
+    channel.try_into()
 }
 
 pub async fn get_by_id(
@@ -79,22 +121,30 @@ pub async fn get_by_id(
     channel_id: ServerChannelId,
 ) -> ApiResult<ServerChannel> {
     let channel = sqlx::query_as!(
-        ServerChannel,
+        ServerChannelRow,
         r#"
-        SELECT
-            id, server_id, kind AS "kind: ServerChannelKind", title,
-            description,
-            text_channel_id AS "text_channel_id: TextChannelId",
-            parent_channel_id AS "parent_channel_id: ServerChannelId",
-            position, created_at, updated_at
-        FROM server_channels
+        SELECT * FROM server_channels
         WHERE id = $1;
         "#,
         channel_id.as_uuid(),
     )
     .fetch_one(executor)
     .await?;
-    Ok(channel)
+    channel.try_into()
+}
+
+/// Get the server that owns a server channel.
+pub async fn get_server_id(
+    executor: impl PgExecutor<'_>,
+    channel_id: ServerChannelId,
+) -> ApiResult<ServerId> {
+    let server_id = sqlx::query_scalar!(
+        "SELECT server_id FROM server_channels WHERE id = $1;",
+        channel_id.as_uuid(),
+    )
+    .fetch_one(executor)
+    .await?;
+    Ok(server_id.into())
 }
 
 /// Get the server whose channel owns a text channel.
@@ -111,47 +161,23 @@ pub async fn get_server_id_by_text_channel(
     Ok(server_id.into())
 }
 
-pub async fn get_all(pool: &DbPool) -> ApiResult<Vec<ServerChannel>> {
-    let channels = sqlx::query_as!(
-        ServerChannel,
-        r#"
-        SELECT
-            id, server_id, kind AS "kind: ServerChannelKind", title,
-            description,
-            text_channel_id AS "text_channel_id: TextChannelId",
-            parent_channel_id AS "parent_channel_id: ServerChannelId",
-            position, created_at, updated_at
-        FROM server_channels
-        ORDER BY server_id, position, id;
-        "#
-    )
-    .fetch_all(pool)
-    .await?;
-    Ok(channels)
-}
-
-pub async fn get_by_server(
+/// List all channels, optionally restricted to one server.
+pub async fn list(
     executor: impl PgExecutor<'_>,
-    server_id: ServerId,
+    server_id: Option<ServerId>,
 ) -> ApiResult<Vec<ServerChannel>> {
     let channels = sqlx::query_as!(
-        ServerChannel,
+        ServerChannelRow,
         r#"
-        SELECT
-            id, server_id, kind AS "kind: ServerChannelKind", title,
-            description,
-            text_channel_id AS "text_channel_id: TextChannelId",
-            parent_channel_id AS "parent_channel_id: ServerChannelId",
-            position, created_at, updated_at
-        FROM server_channels
-        WHERE server_id = $1
-        ORDER BY position, id;
+        SELECT * FROM server_channels
+        WHERE $1::UUID IS NULL OR server_id = $1
+        ORDER BY server_id, position, id;
         "#,
-        server_id.as_uuid(),
+        server_id.map(|id| id.as_uuid()),
     )
     .fetch_all(executor)
     .await?;
-    Ok(channels)
+    channels.into_iter().map(TryInto::try_into).collect()
 }
 
 /// Store the parent and position of each channel.
@@ -166,19 +192,14 @@ pub async fn update_placements(
         .collect();
     let positions: Vec<i32> = channels.iter().map(|c| c.position).collect();
     let channels = sqlx::query_as!(
-        ServerChannel,
+        ServerChannelRow,
         r#"
         UPDATE server_channels sc
         SET parent_channel_id = p.parent_channel_id, position = p.position
         FROM UNNEST($1::UUID[], $2::UUID[], $3::INTEGER[])
             AS p (id, parent_channel_id, position)
         WHERE sc.id = p.id
-        RETURNING
-            sc.id, sc.server_id, sc.kind AS "kind: ServerChannelKind",
-            sc.title, sc.description,
-            sc.text_channel_id AS "text_channel_id: TextChannelId",
-            sc.parent_channel_id AS "parent_channel_id: ServerChannelId",
-            sc.position, sc.created_at, sc.updated_at;
+        RETURNING sc.*;
         "#,
         &ids,
         &parent_ids as &[Option<Uuid>],
@@ -186,7 +207,7 @@ pub async fn update_placements(
     )
     .fetch_all(conn)
     .await?;
-    Ok(channels)
+    channels.into_iter().map(TryInto::try_into).collect()
 }
 
 pub async fn has_children(
@@ -215,11 +236,14 @@ pub async fn delete(
     executor: impl PgExecutor<'_>,
     channel_id: ServerChannelId,
 ) -> ApiResult<()> {
-    sqlx::query!(
+    let result = sqlx::query!(
         "DELETE FROM server_channels WHERE id = $1;",
         channel_id.as_uuid()
     )
     .execute(executor)
     .await?;
+    if result.rows_affected() == 0 {
+        return Err(ApiError::NotFound);
+    }
     Ok(())
 }

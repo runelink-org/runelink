@@ -89,7 +89,7 @@ pub async fn get_all(
 ) -> ApiResult<Vec<ServerChannel>> {
     if !state.config.is_remote_host(target_host) {
         // Handle local case
-        let channels = queries::channels::get_all(&state.db_pool).await?;
+        let channels = queries::channels::list(&*state.db_pool, None).await?;
         Ok(channels)
     } else {
         // Fetch from remote host using federation
@@ -125,7 +125,7 @@ pub async fn get_by_server(
 ) -> ApiResult<Vec<ServerChannel>> {
     if !state.config.is_remote_host(target_host) {
         // Handle local case
-        queries::channels::get_by_server(&*state.db_pool, server_id).await
+        queries::channels::list(&*state.db_pool, Some(server_id)).await
     } else {
         // Fetch from remote host using federation
         let host = target_host.unwrap();
@@ -155,18 +155,12 @@ pub async fn get_by_server(
 pub async fn get_by_id(
     state: &AppState,
     session: &Session,
-    server_id: ServerId,
     channel_id: ServerChannelId,
     target_host: Option<&str>,
 ) -> ApiResult<ServerChannel> {
     if !state.config.is_remote_host(target_host) {
         // Handle local case
-        let channel =
-            queries::channels::get_by_id(&*state.db_pool, channel_id).await?;
-        if channel.server_id != server_id {
-            return Err(ApiError::NotFound);
-        }
-        Ok(channel)
+        queries::channels::get_by_id(&*state.db_pool, channel_id).await
     } else {
         // Fetch from remote host using federation
         let host = target_host.unwrap();
@@ -180,10 +174,7 @@ pub async fn get_by_id(
             state,
             host,
             Some(user_ref),
-            FederationWsRequest::ChannelsGetById {
-                server_id,
-                channel_id,
-            },
+            FederationWsRequest::ChannelsGetById { channel_id },
         )
         .await?;
         let FederationWsReply::ChannelsGetById(channel) = reply else {
@@ -199,22 +190,15 @@ pub async fn get_by_id(
 pub async fn delete(
     state: &AppState,
     session: &Session,
-    server_id: ServerId,
     channel_id: ServerChannelId,
     target_host: Option<&str>,
 ) -> ApiResult<()> {
     // Handle local case
     if !state.config.is_remote_host(target_host) {
         let mut tx = state.db_pool.begin().await?;
+        let server_id =
+            queries::channels::get_server_id(&mut *tx, channel_id).await?;
         queries::channels::lock_tree(&mut tx, server_id).await?;
-        // Verify the channel belongs to the server
-        let channel =
-            queries::channels::get_by_id(&mut *tx, channel_id).await?;
-        if channel.server_id != server_id {
-            return Err(ApiError::AuthError(
-                "Channel not found in specified server".into(),
-            ));
-        }
         if queries::channels::has_children(&mut *tx, server_id, channel_id)
             .await?
         {
@@ -251,10 +235,7 @@ pub async fn delete(
             state,
             host,
             Some(user_ref),
-            FederationWsRequest::ChannelsDelete {
-                server_id,
-                channel_id,
-            },
+            FederationWsRequest::ChannelsDelete { channel_id },
         )
         .await?;
         let FederationWsReply::ChannelsDelete = reply else {
@@ -272,7 +253,6 @@ pub async fn delete(
 pub async fn move_channel(
     state: &AppState,
     session: &Session,
-    server_id: ServerId,
     channel_id: ServerChannelId,
     channel_move: &ServerChannelMove,
     target_host: Option<&str>,
@@ -280,9 +260,11 @@ pub async fn move_channel(
     // Handle local case
     if !state.config.is_remote_host(target_host) {
         let mut tx = state.db_pool.begin().await?;
+        let server_id =
+            queries::channels::get_server_id(&mut *tx, channel_id).await?;
         queries::channels::lock_tree(&mut tx, server_id).await?;
         let channels =
-            queries::channels::get_by_server(&mut *tx, server_id).await?;
+            queries::channels::list(&mut *tx, Some(server_id)).await?;
         let planned =
             channel_tree::plan_move(&channels, channel_id, channel_move)?;
         let changed =
@@ -313,7 +295,6 @@ pub async fn move_channel(
             host,
             Some(user_ref),
             FederationWsRequest::ChannelsMove {
-                server_id,
                 channel_id,
                 channel_move: channel_move.clone(),
             },
@@ -345,16 +326,40 @@ pub mod auth {
         Req::ServerMember(server_id).or_admin().client_only()
     }
 
-    pub fn get_by_id(server_id: ServerId) -> Req {
-        Req::ServerMember(server_id).or_admin().client_only()
+    pub async fn get_by_id(
+        state: &AppState,
+        channel_id: ServerChannelId,
+        target_host: Option<&str>,
+    ) -> ApiResult<Req> {
+        if state.config.is_remote_host(target_host) {
+            return Ok(Req::Client);
+        }
+        let server_id =
+            queries::channels::get_server_id(&*state.db_pool, channel_id)
+                .await?;
+        Ok(Req::ServerMember(server_id).or_admin().client_only())
     }
 
-    pub fn delete(server_id: ServerId) -> Req {
-        Req::ServerAdmin(server_id).or_admin().client_only()
+    pub async fn delete(
+        state: &AppState,
+        channel_id: ServerChannelId,
+        target_host: Option<&str>,
+    ) -> ApiResult<Req> {
+        if state.config.is_remote_host(target_host) {
+            return Ok(Req::Client);
+        }
+        let server_id =
+            queries::channels::get_server_id(&*state.db_pool, channel_id)
+                .await?;
+        Ok(Req::ServerAdmin(server_id).or_admin().client_only())
     }
 
-    pub fn move_channel(server_id: ServerId) -> Req {
-        Req::ServerAdmin(server_id).or_admin().client_only()
+    pub async fn move_channel(
+        state: &AppState,
+        channel_id: ServerChannelId,
+        target_host: Option<&str>,
+    ) -> ApiResult<Req> {
+        delete(state, channel_id, target_host).await
     }
 
     pub mod federated {
@@ -372,16 +377,31 @@ pub mod auth {
             Req::ServerMember(server_id).federated_only()
         }
 
-        pub fn get_by_id(server_id: ServerId) -> Req {
-            Req::ServerMember(server_id).federated_only()
+        pub async fn get_by_id(
+            state: &AppState,
+            channel_id: ServerChannelId,
+        ) -> ApiResult<Req> {
+            let server_id =
+                queries::channels::get_server_id(&*state.db_pool, channel_id)
+                    .await?;
+            Ok(Req::ServerMember(server_id).federated_only())
         }
 
-        pub fn delete(server_id: ServerId) -> Req {
-            Req::ServerAdmin(server_id).federated_only()
+        pub async fn delete(
+            state: &AppState,
+            channel_id: ServerChannelId,
+        ) -> ApiResult<Req> {
+            let server_id =
+                queries::channels::get_server_id(&*state.db_pool, channel_id)
+                    .await?;
+            Ok(Req::ServerAdmin(server_id).federated_only())
         }
 
-        pub fn move_channel(server_id: ServerId) -> Req {
-            Req::ServerAdmin(server_id).federated_only()
+        pub async fn move_channel(
+            state: &AppState,
+            channel_id: ServerChannelId,
+        ) -> ApiResult<Req> {
+            delete(state, channel_id).await
         }
     }
 }

@@ -3,9 +3,7 @@
 use std::collections::HashMap;
 
 use runelink_types::{
-    channel::{
-        ServerChannel, ServerChannelId, ServerChannelKind, ServerChannelMove,
-    },
+    channel::{ServerChannel, ServerChannelId, ServerChannelMove},
     server::ServerId,
 };
 
@@ -21,7 +19,7 @@ pub fn check_parent(
             "Parent channel not found in specified server".into(),
         ));
     }
-    if parent.kind != ServerChannelKind::Category {
+    if !parent.is_category() {
         return Err(ApiError::BadRequest(
             "Parent channel must be a category".into(),
         ));
@@ -108,6 +106,7 @@ fn is_self_or_descendant(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runelink_types::channel::{ServerChannelContent, ServerChannelKind};
     use time::OffsetDateTime;
     use uuid::Uuid;
 
@@ -128,11 +127,14 @@ mod tests {
         ServerChannel {
             id: id(n),
             server_id: server_id(),
-            kind,
+            content: match kind {
+                ServerChannelKind::Text => ServerChannelContent::Text {
+                    text_channel_id: Uuid::from_u128(1000 + n).into(),
+                },
+                ServerChannelKind::Category => ServerChannelContent::Category,
+            },
             title: format!("channel-{n}"),
             description: None,
-            text_channel_id: (kind == ServerChannelKind::Text)
-                .then(|| Uuid::from_u128(1000 + n).into()),
             parent_channel_id: parent.map(id),
             position,
             created_at: OffsetDateTime::UNIX_EPOCH,

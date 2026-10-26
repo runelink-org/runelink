@@ -7,7 +7,7 @@ use crossterm::{
 };
 use runelink_client::requests;
 use runelink_types::{
-    channel::{ServerChannel, ServerChannelId, ServerChannelKind},
+    channel::{ServerChannel, ServerChannelId},
     server::{Server, ServerId},
 };
 use std::collections::HashSet;
@@ -286,8 +286,7 @@ pub async fn get_channel_selection(
     .await?;
     // Categories stay visible for context when only text channels can be
     // chosen
-    let selectable =
-        |c: &ServerChannel| !text_only || c.kind == ServerChannelKind::Text;
+    let selectable = |c: &ServerChannel| !text_only || c.is_text();
     let choices = tree_order(&channels);
     if !choices.iter().any(|(_, c)| selectable(c)) {
         return Err(CliError::NoActionPossible(
@@ -316,8 +315,9 @@ pub async fn get_channel_selection(
     })
 }
 
-/// Resolve a channel from IDs, prompting for whatever is missing. Prompts
-/// offer only text channels when `text_only` is set.
+/// Resolve a channel by ID, or prompt for one in the given server, or in a
+/// server chosen at a prompt. Prompts offer only text channels when
+/// `text_only` is set.
 pub async fn get_channel_selection_with_inputs(
     ctx: &mut CliContext<'_>,
     channel_id: Option<ServerChannelId>,
@@ -330,23 +330,19 @@ pub async fn get_channel_selection_with_inputs(
         None => ctx.home_host()?.to_string(),
     };
     match (channel_id, server_id) {
-        (Some(channel_id), Some(server_id)) => {
+        (Some(channel_id), _) => {
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
             let channel = requests::channels::fetch_by_id(
                 ctx.client,
                 &api_url,
                 &access_token,
-                server_id,
                 channel_id,
                 Some(host.as_str()),
             )
             .await?;
             Ok(ChannelSelection { host, channel })
         }
-        (Some(_channel_id), None) => Err(CliError::MissingContext(
-            "Server ID must be passed with channel ID.".into(),
-        )),
         (None, Some(server_id)) => {
             get_channel_selection(ctx, server_id, host.as_str(), text_only)
                 .await
