@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use time::OffsetDateTime;
-use uuid::Uuid;
 
 use crate::ids::ServerId;
 
@@ -64,12 +63,26 @@ impl ServerChannel {
     }
 
     /// The ID of the underlying channel this channel owns, if any.
-    pub fn raw_id(&self) -> Option<Uuid> {
+    pub fn raw_id(&self) -> Option<RawChannelId> {
         match self.kind {
             ServerChannelKind::Text => {
-                self.text_channel_id.map(|id| id.as_uuid())
+                self.text_channel_id.map(RawChannelId::Text)
             }
             ServerChannelKind::Category => None,
+        }
+    }
+}
+
+/// The ID of an underlying channel, displayed with its kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RawChannelId {
+    Text(TextChannelId),
+}
+
+impl fmt::Display for RawChannelId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Text(id) => write!(f, "text: {id}"),
         }
     }
 }
@@ -108,7 +121,12 @@ mod tests {
     #[test]
     fn raw_id_is_the_underlying_channel_id() {
         let text = channel(ServerChannelKind::Text);
-        assert_eq!(text.raw_id(), text.text_channel_id.map(|id| id.as_uuid()));
+        assert_eq!(text.raw_id(), text.text_channel_id.map(RawChannelId::Text));
+        let text_channel_id = text.text_channel_id.unwrap();
+        assert_eq!(
+            RawChannelId::Text(text_channel_id).to_string(),
+            format!("text: {text_channel_id}")
+        );
         assert_eq!(channel(ServerChannelKind::Category).raw_id(), None);
     }
 }

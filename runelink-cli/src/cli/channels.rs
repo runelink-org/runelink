@@ -263,7 +263,7 @@ pub async fn handle_channel_commands(
                 if list_args.show_raw_ids
                     && let Some(raw_id) = channel.raw_id()
                 {
-                    label = format!("{label} [raw: {raw_id}]");
+                    label = format!("{label} [{raw_id}]");
                 }
                 println!("{label}");
             }
