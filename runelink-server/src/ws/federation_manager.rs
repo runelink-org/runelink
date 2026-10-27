@@ -177,7 +177,7 @@ impl FederationWsManager {
             Ok(Ok(Err(remote_error))) => Err(FederationRequestError::Remote {
                 code: remote_error.code.clone(),
                 message: remote_error.message.clone(),
-                error: remote_error,
+                error: Box::new(remote_error),
             }),
             Ok(Err(_)) => {
                 Err(FederationRequestError::ChannelClosed { request_id })
