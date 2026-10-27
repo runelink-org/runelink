@@ -1,5 +1,8 @@
 use reqwest::StatusCode;
-use runelink_client::requests;
+use runelink_client::{
+    requests,
+    util::{pad_host, strip_default_port},
+};
 use runelink_types::SignupRequest;
 
 use crate::{
@@ -315,6 +318,22 @@ pub async fn handle_account_commands(
                 println!();
                 account.user_ref.clone()
             };
+
+            let host = strip_default_port(&user_ref.host);
+            let confirmation = format!("delete {}@{host}", user_ref.name);
+            let confirmation_with_port =
+                format!("delete {}@{}", user_ref.name, pad_host(&host));
+            println!(
+                "This permanently deletes the account {user_ref} on its home host."
+            );
+            let input = read_input_preserving_whitespace(&format!(
+                "Type \"{confirmation}\" to confirm: "
+            ))?;
+            if input.as_deref() != Some(confirmation.as_str())
+                && input.as_deref() != Some(confirmation_with_port.as_str())
+            {
+                return Err(CliError::Cancellation);
+            }
 
             let api_url =
                 resolve_api_url(ctx.client, ctx.config, &user_ref.host).await?;
