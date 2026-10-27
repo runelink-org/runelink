@@ -19,7 +19,7 @@ pub enum FederationRequestError {
     Remote {
         code: String,
         message: String,
-        error: WsError,
+        error: Box<WsError>,
     },
 }
 

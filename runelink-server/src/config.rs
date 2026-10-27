@@ -90,7 +90,7 @@ impl ServerConfig {
 
     /// Always includes port for machine-to-machine communication
     pub fn public_host_with_explicit_port(&self) -> String {
-        format!("{}:{}", &self.public_host_raw, self.public_port)
+        format!("{}:{}", self.public_host_raw, self.public_port)
     }
 
     pub fn api_url(&self) -> String {

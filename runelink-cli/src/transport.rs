@@ -41,7 +41,8 @@ mod tests {
         let peer = thread::spawn(move || {
             let (mut socket, _) = listener.accept().unwrap();
             let mut request = [0; 4096];
-            socket.read(&mut request).unwrap();
+            let bytes_read = socket.read(&mut request).unwrap();
+            assert!(bytes_read > 0);
             socket.write_all(b"HTTP/1.1 307 Temporary Redirect\r\nLocation: http://127.0.0.1:1/auth/token\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
         });
         let error = build_client()
