@@ -12,6 +12,7 @@ mod cli;
 mod error;
 mod storage;
 mod storage_auth;
+mod transport;
 mod util;
 
 #[allow(dead_code)]
@@ -32,7 +33,7 @@ async fn main() -> ExitCode {
         let mut config = AppConfig::load()?;
         let mut auth_cache = AuthCache::load()?;
         let cli = Cli::parse();
-        let client = Client::new();
+        let client = transport::build_client()?;
         handle_cli(&client, &cli, &mut config, &mut auth_cache).await?;
         config.save()?;
         auth_cache.save()?;
