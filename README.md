@@ -102,6 +102,8 @@ rune message send
 
 Most commands will prompt you for any missing values (host, IDs, message body, etc.) so you can get started quickly. For scripting and non-interactive use, most prompts also have `--...` flags (run `rune --help` and `rune <command> --help`).
 
+The CLI tries HTTPS first. If only HTTP is reachable, it asks before sending credentials and remembers your approval for that host and port in `config.json`. This includes local development hosts. Existing automatically saved HTTP preferences require confirmation once. Non-interactive commands fail until HTTP has been approved in a terminal. Redirects cannot change the host, port, or protocol.
+
 ### Run the server
 
 If you want to host your own RuneLink server, run `runelink-server` (Axum + Postgres).

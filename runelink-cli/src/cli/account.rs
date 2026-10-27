@@ -131,11 +131,11 @@ pub async fn handle_account_commands(
             };
             let host = parse_host_input(&raw_host, ctx.strict_input)?;
             let name = parse_username_input(&raw_name, ctx.strict_input)?;
+            let api_url =
+                resolve_api_url(ctx.client, ctx.config, &host).await?;
             let password = read_password("Password: ")?.ok_or_else(|| {
                 CliError::InvalidArgument("Password is required.".into())
             })?;
-            let api_url =
-                resolve_api_url(ctx.client, ctx.config, &host).await?;
             let user_display = format!("{name}@{host}");
             let signup_req = SignupRequest { name, password };
             let user =
