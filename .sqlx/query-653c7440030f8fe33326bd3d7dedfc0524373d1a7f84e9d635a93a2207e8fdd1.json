@@ -6,7 +6,8 @@
       {
         "ordinal": 0,
         "name": "user: Json<User>",
-        "type_info": "Jsonb"
+        "type_info": "Jsonb",
+        "origin": "Expression"
       },
       {
         "ordinal": 1,
@@ -21,17 +22,35 @@
               ]
             }
           }
+        },
+        "origin": {
+          "Table": {
+            "table": "server_users",
+            "name": "role"
+          }
         }
       },
       {
         "ordinal": 2,
         "name": "created_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "server_users",
+            "name": "created_at"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "updated_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "server_users",
+            "name": "updated_at"
+          }
+        }
       }
     ],
     "parameters": {

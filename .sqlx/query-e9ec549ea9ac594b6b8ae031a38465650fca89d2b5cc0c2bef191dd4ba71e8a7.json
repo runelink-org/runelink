@@ -6,32 +6,68 @@
       {
         "ordinal": 0,
         "name": "id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "cached_remote_servers",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "host",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cached_remote_servers",
+            "name": "host"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "title",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cached_remote_servers",
+            "name": "title"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "description",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cached_remote_servers",
+            "name": "description"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "server_created_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "cached_remote_servers",
+            "name": "remote_created_at"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "server_updated_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "cached_remote_servers",
+            "name": "remote_updated_at"
+          }
+        }
       },
       {
         "ordinal": 6,
@@ -46,22 +82,46 @@
               ]
             }
           }
+        },
+        "origin": {
+          "Table": {
+            "table": "user_remote_server_memberships",
+            "name": "role"
+          }
         }
       },
       {
         "ordinal": 7,
         "name": "membership_created_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "user_remote_server_memberships",
+            "name": "remote_created_at"
+          }
+        }
       },
       {
         "ordinal": 8,
         "name": "membership_updated_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "user_remote_server_memberships",
+            "name": "remote_updated_at"
+          }
+        }
       },
       {
         "ordinal": 9,
         "name": "synced_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "user_remote_server_memberships",
+            "name": "synced_at"
+          }
+        }
       }
     ],
     "parameters": {

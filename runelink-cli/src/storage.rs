@@ -209,10 +209,10 @@ fn confirm_insecure_host(host: &str) -> Result<(), CliError> {
 
 fn transport_host(host: &str) -> String {
     let padded = pad_host(host);
-    if let Some((name, port)) = padded.rsplit_once(':') {
-        if let Ok(port) = port.parse::<u16>() {
-            return format!("{name}:{port}");
-        }
+    if let Some((name, port)) = padded.rsplit_once(':')
+        && let Ok(port) = port.parse::<u16>()
+    {
+        return format!("{name}:{port}");
     }
     padded
 }

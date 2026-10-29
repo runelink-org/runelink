@@ -97,10 +97,10 @@ async fn get_cached_jwks(state: &AppState, iss: &str) -> ApiResult<CachedJwks> {
     let ttl = Duration::minutes(10);
     {
         let cache = state.jwks_cache.read().await;
-        if let Some(entry) = cache.get(iss_key) {
-            if entry.fetched_at + ttl > OffsetDateTime::now_utc() {
-                return Ok(entry.clone());
-            }
+        if let Some(entry) = cache.get(iss_key)
+            && entry.fetched_at + ttl > OffsetDateTime::now_utc()
+        {
+            return Ok(entry.clone());
         }
     }
 

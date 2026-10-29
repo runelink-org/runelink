@@ -128,12 +128,11 @@ fn validate_host_internal(
         return Err(ValidationError::HostInvalidCharacters);
     }
 
-    if let Some(port_part) = port_part {
-        if port_part.is_empty()
-            || !port_part.chars().all(|ch| ch.is_ascii_digit())
-        {
-            return Err(ValidationError::HostInvalidPort);
-        }
+    if let Some(port_part) = port_part
+        && (port_part.is_empty()
+            || !port_part.chars().all(|ch| ch.is_ascii_digit()))
+    {
+        return Err(ValidationError::HostInvalidPort);
     }
 
     Ok(normalized)

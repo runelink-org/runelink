@@ -1,5 +1,5 @@
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use rand::{RngCore, rngs::OsRng};
+use rand::{TryRng, rngs::SysRng};
 use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
 
@@ -99,7 +99,9 @@ impl RefreshToken {
         lifetime: Duration,
     ) -> Self {
         let mut bytes = [0u8; 32]; // 256 bits
-        OsRng.fill_bytes(&mut bytes);
+        SysRng
+            .try_fill_bytes(&mut bytes)
+            .expect("failed to obtain refresh token entropy from the OS");
         let token_str = URL_SAFE_NO_PAD.encode(bytes);
         let now = OffsetDateTime::now_utc();
         Self {

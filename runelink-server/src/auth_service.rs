@@ -1,6 +1,5 @@
 use argon2::{
-    Argon2, PasswordHasher, PasswordVerifier,
-    password_hash::{PasswordHash, SaltString, rand_core::OsRng},
+    Argon2, PasswordHasher, PasswordVerifier, password_hash::phc::PasswordHash,
 };
 use jsonwebtoken::{Algorithm, Header, Validation};
 use runelink_client::validation::validate_username;
@@ -57,9 +56,8 @@ pub async fn signup(
     };
     let user = queries::users::insert(&state.db_pool, &new_user).await?;
 
-    let salt = SaltString::generate(&mut OsRng);
     let password_hash = Argon2::default()
-        .hash_password(request.password.as_bytes(), &salt)
+        .hash_password(request.password.as_bytes())
         .map_err(|error| ApiError::Internal(format!("hashing error: {error}")))?
         .to_string();
 
@@ -179,4 +177,49 @@ async fn issue_client_token_response(
             scope: claims.scope,
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verifies_existing_argon2_password_hashes() {
+        // Argon2 0.5.3 PHC test vector for the password "password".
+        let hash = PasswordHash::new("$argon2id$v=19$m=65536,t=2,p=1$c29tZXNhbHQ$CTFhFdXPJO1aFaMaO6Mm5c8y7cJHAph8ArZWb2GRPPc").unwrap();
+        assert!(
+            Argon2::default()
+                .verify_password(b"password", &hash)
+                .is_ok()
+        );
+        assert!(
+            Argon2::default()
+                .verify_password(b"wrong password", &hash)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn new_password_hashes_use_random_salts_and_verify() {
+        let first = Argon2::default()
+            .hash_password(b"password")
+            .unwrap()
+            .to_string();
+        let second = Argon2::default()
+            .hash_password(b"password")
+            .unwrap()
+            .to_string();
+        assert_ne!(first, second);
+        let hash = PasswordHash::new(&first).unwrap();
+        assert!(
+            Argon2::default()
+                .verify_password(b"password", &hash)
+                .is_ok()
+        );
+        assert!(
+            Argon2::default()
+                .verify_password(b"wrong password", &hash)
+                .is_err()
+        );
+    }
 }

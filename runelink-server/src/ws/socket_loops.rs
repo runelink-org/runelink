@@ -46,8 +46,8 @@ pub(super) const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 const CLOSE_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub enum FederationSocket {
-    Inbound(WebSocket),
-    Outbound(WebSocketStream<MaybeTlsStream<TcpStream>>),
+    Inbound(Box<WebSocket>),
+    Outbound(Box<WebSocketStream<MaybeTlsStream<TcpStream>>>),
 }
 
 pub(super) enum FederationIncomingEvent {
@@ -172,13 +172,12 @@ async fn client_ws_loop(
 
     if let Ok(Principal::Client(auth)) =
         Principal::from_client_headers(&headers, &state)
+        && let Some(user_ref) = UserRef::parse_subject(&auth.claims.sub)
     {
-        if let Some(user_ref) = UserRef::parse_subject(&auth.claims.sub) {
-            let _ = state
-                .client_ws_manager
-                .authenticate_connection(conn_id, user_ref)
-                .await;
-        }
+        let _ = state
+            .client_ws_manager
+            .authenticate_connection(conn_id, user_ref)
+            .await;
     }
 
     loop {
@@ -243,7 +242,7 @@ async fn federation_ws_upgrade_loop(
         }
     };
     let host = host_from_issuer(&auth.claims.iss);
-    let mut socket = FederationSocket::Inbound(socket);
+    let mut socket = FederationSocket::Inbound(Box::new(socket));
     let Some(capabilities) =
         negotiate_federation_socket(&host, &mut socket).await
     else {

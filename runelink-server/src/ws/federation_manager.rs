@@ -395,7 +395,7 @@ impl FederationWsManager {
             let Ok(payload) = serde_json::to_string(&hello) else {
                 return false;
             };
-            let mut socket = FederationSocket::Outbound(stream);
+            let mut socket = FederationSocket::Outbound(Box::new(stream));
             if !matches!(
                 tokio::time::timeout(
                     StdDuration::from_secs(5),

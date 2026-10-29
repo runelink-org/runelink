@@ -6,11 +6,11 @@ repository.workspace = true
 
 [dependencies]
 runelink-types = { path = "../runelink-types" }
-reqwest = { version = "0.12.15", default-features = false, features = ["json", "rustls-tls"] }
-serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.140"
-thiserror = "2.0.12"
-time = { version = "0.3.41", features = ["serde", "formatting", "parsing"] }
-tokio = { version = "1.44.2", features = ["rt-multi-thread", "macros"] }
-uuid = { version = "1.16.0", features = ["v4", "serde"] }
-log = "0.4.28"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "form", "rustls", "system-proxy"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+time = { version = "0.3.55", features = ["serde", "formatting", "parsing"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros"] }
+uuid = { version = "1.29.0", features = ["v4", "serde"] }
+log = "0.4.34"
