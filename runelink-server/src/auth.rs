@@ -20,10 +20,10 @@ use crate::{
 #[macro_export]
 macro_rules! and {
     () => {
-        crate::auth::Requirement::And(vec![])
+        $crate::auth::Requirement::And(vec![])
     };
     ( $( $req:expr ),+ $(,)? ) => {
-        crate::auth::Requirement::And(vec![ $( $req ),+ ])
+        $crate::auth::Requirement::And(vec![ $( $req ),+ ])
     };
 }
 
@@ -32,10 +32,10 @@ macro_rules! and {
 #[macro_export]
 macro_rules! or {
     () => {
-        crate::auth::Requirement::Or(vec![])
+        $crate::auth::Requirement::Or(vec![])
     };
     ( $( $req:expr ),+ $(,)? ) => {
-        crate::auth::Requirement::Or(vec![ $( $req ),+ ])
+        $crate::auth::Requirement::Or(vec![ $( $req ),+ ])
     };
 }
 
@@ -359,12 +359,7 @@ pub async fn authorize(
         return Err(ApiError::AuthError(error));
     }
     let cached_user = if ctx.user_ref.is_some() {
-        if let Some(user) = ctx.user {
-            Some(Some(user))
-        } else {
-            // Not looked up yet
-            None
-        }
+        ctx.user.map(Some)
     } else {
         // Not delegated
         Some(None)

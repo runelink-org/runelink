@@ -95,6 +95,42 @@ impl EventId {
     }
 }
 
+impl Default for ServerId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for ServerChannelId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for TextChannelId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for MessageId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for RequestId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for EventId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl From<Uuid> for ServerId {
     fn from(value: Uuid) -> Self {
         Self(value)

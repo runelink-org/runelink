@@ -5,7 +5,7 @@ use ed25519_dalek::{
     },
 };
 use jsonwebtoken::{DecodingKey, EncodingKey};
-use rand::rngs::OsRng;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 use runelink_types::auth::PublicJwk;
 use std::fs;
 use std::path::PathBuf;
@@ -90,7 +90,7 @@ impl KeyManager {
             })
         } else {
             // Generate new keypair
-            let signing_key = SigningKey::generate(&mut OsRng);
+            let signing_key = SigningKey::generate(&mut UnwrapErr(SysRng));
             let verify_key = signing_key.verifying_key();
             let priv_pkcs8 = signing_key.to_pkcs8_der().map_err(|e| {
                 ApiError::Internal(format!(
@@ -124,5 +124,75 @@ impl KeyManager {
                 path,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use jsonwebtoken::{Algorithm, Header, Validation};
+    use runelink_types::{ClientAccessClaims, UserRef};
+    use time::Duration;
+    use uuid::Uuid;
+
+    #[test]
+    fn loads_existing_der_keys_and_signs_jwts() {
+        let path = std::env::temp_dir()
+            .join(format!("runelink-existing-keys-{}", Uuid::new_v4()));
+        fs::create_dir_all(&path).unwrap();
+        // RFC 8032 test key, encoded as PKCS#8 and SPKI DER.
+        fs::write(path.join("private_ed25519.der"), STANDARD.decode("MC4CAQAwBQYDK2VwBCIEIJ1hsZ3v/VpguoRK9JLsLMREScVpezJpGXA7rAMcrn9g").unwrap()).unwrap();
+        fs::write(path.join("public_ed25519.der"), STANDARD.decode("MCowBQYDK2VwAyEA11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=").unwrap()).unwrap();
+        let keys = KeyManager::load_or_generate(path.clone()).unwrap();
+        let claims = ClientAccessClaims::new(
+            &UserRef::new("test".into(), "localhost".into()),
+            "test".into(),
+            "http://localhost:7000".into(),
+            "openid".into(),
+            Duration::minutes(5),
+        );
+        let token = jsonwebtoken::encode(
+            &Header::new(Algorithm::EdDSA),
+            &claims,
+            &keys.private_key,
+        )
+        .unwrap();
+        let mut validation = Validation::new(Algorithm::EdDSA);
+        validation.set_audience(&["http://localhost:7000"]);
+        validation.set_issuer(&["http://localhost:7000"]);
+        let decoded = jsonwebtoken::decode::<ClientAccessClaims>(
+            &token,
+            &keys.decoding_key,
+            &validation,
+        )
+        .unwrap();
+        assert_eq!(decoded.claims, claims);
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn generated_keys_survive_reload() {
+        let path = std::env::temp_dir()
+            .join(format!("runelink-generated-keys-{}", Uuid::new_v4()));
+        let generated = KeyManager::load_or_generate(path.clone()).unwrap();
+        let reloaded = KeyManager::load_or_generate(path.clone()).unwrap();
+        assert_eq!(generated.public_jwk, reloaded.public_jwk);
+        let claims = serde_json::json!({"exp": i64::MAX});
+        let token = jsonwebtoken::encode(
+            &Header::new(Algorithm::EdDSA),
+            &claims,
+            &generated.private_key,
+        )
+        .unwrap();
+        assert!(
+            jsonwebtoken::decode::<serde_json::Value>(
+                &token,
+                &reloaded.decoding_key,
+                &Validation::new(Algorithm::EdDSA)
+            )
+            .is_ok()
+        );
+        fs::remove_dir_all(path).unwrap();
     }
 }

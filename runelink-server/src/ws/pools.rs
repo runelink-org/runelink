@@ -53,14 +53,14 @@ impl ClientWsPool {
         capabilities: NegotiatedCapabilities,
     ) {
         let mut state = self.inner.write().await;
-        if let Some(previous) = state.connections.remove(&conn_id) {
-            if let Some(previous_user) = previous.user_ref {
-                Self::remove_conn_from_user_index(
-                    &mut state.by_user,
-                    &previous_user,
-                    conn_id,
-                );
-            }
+        if let Some(previous) = state.connections.remove(&conn_id)
+            && let Some(previous_user) = previous.user_ref
+        {
+            Self::remove_conn_from_user_index(
+                &mut state.by_user,
+                &previous_user,
+                conn_id,
+            );
         }
         state.connections.insert(
             conn_id,
@@ -319,14 +319,14 @@ impl FederationWsPool {
         capabilities: NegotiatedCapabilities,
     ) {
         let mut state = self.inner.write().await;
-        if let Some(previous) = state.connections.remove(&conn_id) {
-            if let Some(previous_host) = previous.host {
-                Self::remove_conn_from_host_index(
-                    &mut state.by_host,
-                    &previous_host,
-                    conn_id,
-                );
-            }
+        if let Some(previous) = state.connections.remove(&conn_id)
+            && let Some(previous_host) = previous.host
+        {
+            Self::remove_conn_from_host_index(
+                &mut state.by_host,
+                &previous_host,
+                conn_id,
+            );
         }
 
         state.connections.insert(
@@ -362,13 +362,13 @@ impl FederationWsPool {
             );
         }
 
-        if let Some(existing_conn_id) = state.by_host.get(&host).copied() {
-            if existing_conn_id != conn_id {
-                let _ = Self::remove_federation_connection(
-                    &mut state,
-                    existing_conn_id,
-                );
-            }
+        if let Some(existing_conn_id) = state.by_host.get(&host).copied()
+            && existing_conn_id != conn_id
+        {
+            let _ = Self::remove_federation_connection(
+                &mut state,
+                existing_conn_id,
+            );
         }
 
         state.by_host.insert(host.clone(), conn_id);

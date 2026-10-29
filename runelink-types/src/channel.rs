@@ -103,6 +103,9 @@ impl fmt::Display for ServerChannel {
     }
 }
 
+/// Editable presentation fields with optimistic concurrency.
+pub type ServerChannelUpdate = crate::edit::DetailsUpdate;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,6 +171,3 @@ mod tests {
         assert_eq!(channel(Category).raw_id(), None);
     }
 }
-
-/// Editable presentation fields with optimistic concurrency.
-pub type ServerChannelUpdate = crate::edit::DetailsUpdate;

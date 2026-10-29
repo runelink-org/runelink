@@ -7,32 +7,33 @@ repository.workspace = true
 [dependencies]
 runelink-client = { path = "../runelink-client" }
 runelink-types = { path = "../runelink-types", features = [ "sqlx" ] }
-axum = { version = "0.8.4", features = ["ws"] }
-clap = { version = "4.5.38", features = ["derive"] }
-toml = "1.0.3"
-reqwest = { version = "0.12.15", default-features = false, features = ["json", "rustls-tls"] }
-serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.140"
-sqlx = { version = "0.8.5", features = [
-    "runtime-tokio-rustls",
+axum = { version = "0.8.9", features = ["ws"] }
+clap = { version = "4.6.7", features = ["derive"] }
+toml = "1.1.8"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls", "system-proxy"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sqlx = { version = "0.9.0", features = [
+    "runtime-tokio",
+    "tls-rustls-aws-lc-rs",
     "postgres",
     "macros",
     "migrate",
     "uuid",
     "time"
 ] }
-thiserror = "2.0.12"
-time = { version = "0.3.41", features = ["serde", "formatting", "parsing"] }
-tokio = { version = "1.44.2", features = ["rt-multi-thread", "macros"] }
-uuid = { version = "1.16.0", features = ["v4", "serde"] }
-argon2 = "0.5.3"
-rand = "0.8"
-jsonwebtoken = "9.3.1"
-base64 = "0.22.1"
-ed25519-dalek = { version = "2.2.0", features = ["rand_core", "pkcs8"] }
+thiserror = "2.0.21"
+time = { version = "0.3.55", features = ["serde", "formatting", "parsing"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros"] }
+uuid = { version = "1.29.0", features = ["v4", "serde"] }
+argon2 = "0.6.0"
+rand = "0.10.3"
+jsonwebtoken = { version = "11.1.0", features = ["rust_crypto"] }
+base64 = "0.23.1"
+ed25519-dalek = { version = "3.0.0", features = ["alloc", "rand_core", "pkcs8"] }
 dirs-next = "2.0.0"
-log = "0.4.28"
-env_logger = "0.11.8"
-futures-util = "0.3.32"
-tokio-tungstenite = { version = "0.28.0", features = ["rustls-tls-webpki-roots"] }
-tower-http = { version = "0.6.6", features = ["cors"] }
+log = "0.4.34"
+env_logger = "0.11.11"
+futures-util = "0.3.34"
+tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
+tower-http = { version = "0.7.1", features = ["cors"] }
