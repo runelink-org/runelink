@@ -52,7 +52,7 @@ impl FederationRequestError {
                     "auth_error" => ApiError::AuthError(message),
                     "bad_request" => ApiError::BadRequest(message),
                     "not_found" => ApiError::NotFound,
-                    "conflict" => ApiError::UniqueViolation,
+                    "conflict" => ApiError::Conflict(message),
                     _ => ApiError::Internal(format!(
                         "Remote federation websocket error from {host} [{code}]: {message}"
                     )),

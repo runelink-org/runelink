@@ -168,3 +168,6 @@ mod tests {
         assert_eq!(channel(Category).raw_id(), None);
     }
 }
+
+/// Editable presentation fields with optimistic concurrency.
+pub type ServerChannelUpdate = crate::edit::DetailsUpdate;

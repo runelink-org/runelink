@@ -259,6 +259,16 @@ pub mod auth {
     use super::*;
     use crate::auth::Requirement as Req;
 
+    pub async fn update(
+        state: &AppState,
+        server_id: ServerId,
+        target_host: Option<&str>,
+    ) -> ApiResult<Req> {
+        if state.config.is_remote_host(target_host) {
+            return Ok(Req::Client);
+        }
+        Ok(Req::ServerAdmin(server_id).or_admin().client_only())
+    }
     pub fn create() -> Req {
         // TODO: add rate limiting or something
         Req::Always.or_admin().client_only()
@@ -275,6 +285,12 @@ pub mod auth {
     pub mod federated {
         use super::*;
 
+        pub async fn update(
+            _state: &AppState,
+            server_id: ServerId,
+        ) -> ApiResult<Req> {
+            Ok(Req::ServerAdmin(server_id).federated_only())
+        }
         pub fn create() -> Req {
             // TODO: see above
             Req::Always.federated_only()
@@ -288,4 +304,44 @@ pub mod auth {
             Req::ServerAdmin(server_id).federated_only()
         }
     }
+}
+
+pub async fn update(
+    state: &AppState,
+    session: &Session,
+    server_id: ServerId,
+    server_update: &runelink_types::server::ServerUpdate,
+    target_host: Option<&str>,
+) -> ApiResult<Server> {
+    if state.config.is_remote_host(target_host) {
+        let user_ref = session.user_ref.clone().ok_or_else(|| {
+            ApiError::AuthError("User identity required".into())
+        })?;
+        let reply = federation::request(
+            state,
+            target_host.unwrap(),
+            Some(user_ref),
+            FederationWsRequest::ServersUpdate {
+                server_id,
+                server_update: server_update.clone(),
+            },
+        )
+        .await?;
+        let FederationWsReply::ServersUpdate(resource) = reply else {
+            return Err(ApiError::Internal("Unexpected edit reply".into()));
+        };
+        queries::servers::upsert_remote(&state.db_pool, &resource).await?;
+        return Ok(resource);
+    }
+    let resource =
+        queries::servers::update(state, server_id, server_update).await?;
+    let server_id = resource.id;
+    fanout::fanout_update(
+        state,
+        fanout::resolve_server_targets(state, server_id).await?,
+        ClientWsUpdate::ServerUpserted(resource.clone()),
+        FederationWsUpdate::ServerUpserted(resource.clone()),
+    )
+    .await;
+    Ok(resource)
 }

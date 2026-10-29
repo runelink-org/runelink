@@ -138,6 +138,9 @@ fn required_capability(
         (&Method::POST, "/servers") => {
             required(Capability::ServersCreate, servers::CREATE_VERSIONS)
         }
+        (&Method::PATCH, "/servers/{server_id}") => {
+            required(Capability::ServersUpdate, servers::UPDATE_VERSIONS)
+        }
         (&Method::DELETE, "/servers/{server_id}") => {
             required(Capability::ServersDelete, servers::DELETE_VERSIONS)
         }
@@ -148,6 +151,9 @@ fn required_capability(
         }
         (&Method::POST, "/servers/{server_id}/channels") => {
             required(Capability::ChannelsCreate, channels::CREATE_VERSIONS)
+        }
+        (&Method::PATCH, "/channels/{channel_id}") => {
+            required(Capability::ChannelsUpdate, channels::UPDATE_VERSIONS)
         }
         (&Method::DELETE, "/channels/{channel_id}") => {
             required(Capability::ChannelsDelete, channels::DELETE_VERSIONS)
@@ -163,6 +169,9 @@ fn required_capability(
         }
         (&Method::POST, "/text_channels/{text_channel_id}/messages") => {
             required(Capability::MessagesCreate, messages::CREATE_VERSIONS)
+        }
+        (&Method::PATCH, "/messages/{message_id}") => {
+            required(Capability::MessagesUpdate, messages::UPDATE_VERSIONS)
         }
         (&Method::DELETE, "/messages/{message_id}") => {
             required(Capability::MessagesDelete, messages::DELETE_VERSIONS)

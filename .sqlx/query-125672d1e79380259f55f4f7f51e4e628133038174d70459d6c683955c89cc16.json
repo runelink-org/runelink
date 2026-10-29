@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            m.id,\n            m.text_channel_id,\n            m.body,\n            m.reply_to AS \"reply_to: MessageId\",\n            m.deleted_at,\n            m.created_at,\n            m.updated_at,\n            to_jsonb(a) AS \"author: Json<User>\"\n        FROM messages m\n        LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host\n        JOIN server_channels c ON c.text_channel_id = m.text_channel_id\n        WHERE c.server_id = $1\n        ORDER BY m.created_at DESC;\n        ",
+  "query": "\n        SELECT\n            m.id,\n            m.text_channel_id,\n            m.body,\n            m.reply_to AS \"reply_to: MessageId\",\n            m.deleted_at,\n            m.created_at,\n            m.updated_at,\n            m.edited_at,\n            to_jsonb(a) AS \"author: Json<User>\"\n        FROM messages m\n        LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host\n        WHERE m.id = $1;\n        ",
   "describe": {
     "columns": [
       {
@@ -40,6 +40,11 @@
       },
       {
         "ordinal": 7,
+        "name": "edited_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
         "name": "author: Json<User>",
         "type_info": "Jsonb"
       }
@@ -57,8 +62,9 @@
       true,
       false,
       false,
+      true,
       null
     ]
   },
-  "hash": "2738e796e935f18398c2bc4582ab31825d3a815b014dc84804c75a9c2dabe5a9"
+  "hash": "125672d1e79380259f55f4f7f51e4e628133038174d70459d6c683955c89cc16"
 }

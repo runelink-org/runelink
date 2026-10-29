@@ -14,6 +14,7 @@ use crate::{
 };
 
 // Nullable database columns are confined to this boundary.
+#[derive(sqlx::FromRow)]
 struct ServerChannelRow {
     id: Uuid,
     server_id: Uuid,
@@ -246,4 +247,39 @@ pub async fn delete(
         return Err(ApiError::NotFound);
     }
     Ok(())
+}
+
+pub async fn update(
+    pool: &DbPool,
+    channel_id: ServerChannelId,
+    update: &runelink_types::edit::DetailsUpdate,
+) -> ApiResult<ServerChannel> {
+    use crate::error::ApiError;
+    if update
+        .title
+        .as_ref()
+        .is_some_and(|title| title.trim().is_empty())
+    {
+        return Err(ApiError::BadRequest("Title cannot be empty".into()));
+    }
+    let mut tx = pool.begin().await?;
+    let mut row = sqlx::query_as::<_, ServerChannelRow>(
+        "SELECT * FROM server_channels WHERE id = $1 FOR UPDATE",
+    )
+    .bind(channel_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if row.updated_at != update.expected_updated_at {
+        return Err(ApiError::Conflict(
+            "Resource changed. Reload it before saving.".into(),
+        ));
+    }
+    let title = update.title.as_ref().unwrap_or(&row.title);
+    let description = update.description.as_ref().unwrap_or(&row.description);
+    if title != &row.title || description != &row.description {
+        row = sqlx::query_as::<_, ServerChannelRow>("UPDATE server_channels SET title = $2, description = $3 WHERE id = $1 RETURNING *")
+            .bind(channel_id).bind(title).bind(description).fetch_one(&mut *tx).await?;
+    }
+    tx.commit().await?;
+    row.try_into()
 }

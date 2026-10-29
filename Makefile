@@ -1,4 +1,4 @@
-.PHONY: help fmt sqlx-prepare check build test verify
+.PHONY: migrate help fmt sqlx-prepare check build test verify
 
 # Ensure commands work even when rustup has no default toolchain set.
 # Users can override, e.g. `make check-server TOOLCHAIN=nightly`.
@@ -30,3 +30,7 @@ test:
 	$(CARGO) +$(TOOLCHAIN) test $(TEST_ARGS)
 
 verify: fmt sqlx-prepare build test
+
+# Apply schema changes before SQLx checks against a development database.
+migrate:
+	$(CARGO) +$(TOOLCHAIN) sqlx migrate run --source runelink-server/migrations

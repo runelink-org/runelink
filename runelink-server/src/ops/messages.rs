@@ -347,6 +347,28 @@ pub mod auth {
         }
     }
 
+    async fn update_base(
+        state: &AppState,
+        message_id: MessageId,
+    ) -> ApiResult<Req> {
+        let message =
+            queries::messages::get_by_id(&state.db_pool, message_id).await?;
+        let Some(author) = message.author else {
+            return Ok(Req::Never);
+        };
+        let membership = message_member(state, message_id).await?;
+        Ok(crate::and!(Req::User(author.into()), membership))
+    }
+    pub async fn update(
+        state: &AppState,
+        message_id: MessageId,
+        target_host: Option<&str>,
+    ) -> ApiResult<Req> {
+        if state.config.is_remote_host(target_host) {
+            return Ok(Req::Client);
+        }
+        Ok(update_base(state, message_id).await?.client_only())
+    }
     pub async fn create(
         state: &AppState,
         text_channel_id: TextChannelId,
@@ -402,6 +424,12 @@ pub mod auth {
     pub mod federated {
         use super::*;
 
+        pub async fn update(
+            state: &AppState,
+            message_id: MessageId,
+        ) -> ApiResult<Req> {
+            Ok(update_base(state, message_id).await?.federated_only())
+        }
         pub async fn create(
             state: &AppState,
             text_channel_id: TextChannelId,
@@ -442,4 +470,51 @@ pub mod auth {
             Ok(base.federated_only())
         }
     }
+}
+
+pub async fn update(
+    state: &AppState,
+    session: &Session,
+    message_id: MessageId,
+    message_update: &runelink_types::message::MessageUpdate,
+    target_host: Option<&str>,
+) -> ApiResult<Message> {
+    if state.config.is_remote_host(target_host) {
+        let user_ref = session.user_ref.clone().ok_or_else(|| {
+            ApiError::AuthError("User identity required".into())
+        })?;
+        let reply = federation::request(
+            state,
+            target_host.unwrap(),
+            Some(user_ref),
+            FederationWsRequest::MessagesUpdate {
+                message_id,
+                message_update: message_update.clone(),
+            },
+        )
+        .await?;
+        let FederationWsReply::MessagesUpdate(resource) = reply else {
+            return Err(ApiError::Internal("Unexpected edit reply".into()));
+        };
+        return Ok(resource);
+    }
+    let resource =
+        queries::messages::update(&state.db_pool, message_id, message_update)
+            .await?;
+    let server_id = queries::channels::get_server_id_by_text_channel(
+        &state.db_pool,
+        resource.text_channel_id,
+    )
+    .await?;
+    fanout::fanout_update(
+        state,
+        fanout::resolve_server_targets(state, server_id).await?,
+        ClientWsUpdate::MessageUpserted(resource.clone()),
+        FederationWsUpdate::MessageUpserted {
+            server_id,
+            message: resource.clone(),
+        },
+    )
+    .await;
+    Ok(resource)
 }

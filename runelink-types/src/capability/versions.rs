@@ -34,6 +34,9 @@ pub mod auth {
 
 pub mod channels {
     use crate::capability::CapabilityVersion;
+    pub const UPDATE_VERSION: CapabilityVersion =
+        CapabilityVersion::new(2026, 10, 28);
+    pub const UPDATE_VERSIONS: &[CapabilityVersion] = &[UPDATE_VERSION];
 
     pub const CREATE_VERSION: CapabilityVersion =
         CapabilityVersion::new(2026, 10, 22);
@@ -70,6 +73,9 @@ pub mod memberships {
 
 pub mod messages {
     use crate::capability::CapabilityVersion;
+    pub const UPDATE_VERSION: CapabilityVersion =
+        CapabilityVersion::new(2026, 10, 28);
+    pub const UPDATE_VERSIONS: &[CapabilityVersion] = &[UPDATE_VERSION];
 
     pub const CREATE_VERSION: CapabilityVersion =
         CapabilityVersion::new(2026, 10, 19);
@@ -88,6 +94,9 @@ pub mod messages {
 
 pub mod servers {
     use crate::capability::CapabilityVersion;
+    pub const UPDATE_VERSION: CapabilityVersion =
+        CapabilityVersion::new(2026, 10, 28);
+    pub const UPDATE_VERSIONS: &[CapabilityVersion] = &[UPDATE_VERSION];
 
     pub const CREATE_VERSION: CapabilityVersion =
         CapabilityVersion::new(2026, 10, 16);

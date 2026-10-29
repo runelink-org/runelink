@@ -173,3 +173,29 @@ pub async fn move_channel(
     .await?;
     Ok((StatusCode::OK, Json(channels)))
 }
+
+/// PATCH /channels/{channel_id}
+pub async fn update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(channel_id): Path<ServerChannelId>,
+    Query(params): Query<ChannelQueryParams>,
+    Json(update): Json<runelink_types::channel::ServerChannelUpdate>,
+) -> ApiResult<impl IntoResponse> {
+    let target_host = params.target_host.as_deref();
+    let session = authorize(
+        &state,
+        Principal::from_client_headers(&headers, &state)?,
+        ops::channels::auth::update(&state, channel_id, target_host).await?,
+    )
+    .await?;
+    let resource = ops::channels::update(
+        &state,
+        &session,
+        channel_id,
+        &update,
+        target_host,
+    )
+    .await?;
+    Ok((StatusCode::OK, Json(resource)))
+}

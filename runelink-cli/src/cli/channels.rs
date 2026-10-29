@@ -85,6 +85,8 @@ pub struct ChannelArgs {
 
 #[derive(clap::Subcommand, Debug)]
 pub enum ChannelCommands {
+    /// Edit an existing channel
+    Edit(ChannelEditArgs),
     /// List all channels and categories
     List(ChannelListArgs),
     /// Get a channel or category by ID
@@ -201,6 +203,42 @@ pub async fn handle_channel_commands(
     channel_args: &ChannelArgs,
 ) -> Result<(), CliError> {
     match &channel_args.command {
+        ChannelCommands::Edit(edit_args) => {
+            let api_url = ctx.home_api_url().await?;
+            let access_token = ctx.get_access_token().await?;
+            let target_host = parse_optional_host_input(
+                edit_args.host.as_deref(),
+                ctx.strict_input,
+            )?;
+            let original = requests::channels::fetch_by_id(
+                ctx.client,
+                &api_url,
+                &access_token,
+                edit_args.channel_id,
+                target_host.as_deref(),
+            )
+            .await?;
+            let update = runelink_types::edit::DetailsUpdate {
+                title: edit_args.title.clone(),
+                description: if edit_args.clear_description {
+                    Some(None)
+                } else {
+                    edit_args.description.clone().map(Some)
+                },
+                expected_updated_at: original.updated_at,
+            };
+            let resource = requests::channels::update(
+                ctx.client,
+                &api_url,
+                &access_token,
+                edit_args.channel_id,
+                &update,
+                target_host.as_deref(),
+            )
+            .await?;
+            println!("Updated channel: {resource}");
+        }
+
         ChannelCommands::List(list_args) => {
             let show_ids = list_args.show_ids && !list_args.hide_ids;
             ctx.account.ok_or(CliError::MissingAccount)?;
@@ -491,4 +529,21 @@ pub async fn handle_channel_commands(
         }
     };
     Ok(())
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ChannelEditArgs {
+    #[clap(long)]
+    pub channel_id: ServerChannelId,
+    #[clap(long)]
+    pub host: Option<String>,
+    /// New title
+    #[clap(long)]
+    pub title: Option<String>,
+    /// New description
+    #[clap(long, conflicts_with = "clear_description")]
+    pub description: Option<String>,
+    /// Remove the description
+    #[clap(long)]
+    pub clear_description: bool,
 }

@@ -186,3 +186,36 @@ pub async fn delete_authed(
     }
     Ok(())
 }
+
+pub async fn patch_json_authed<I, O>(
+    client: &Client,
+    url: &str,
+    access_token: &str,
+    request_body: &I,
+    capability: Capability,
+) -> Result<O>
+where
+    I: Serialize,
+    O: DeserializeOwned,
+{
+    debug!(
+        "patching json (authenticated): {url}\n{}",
+        serde_json::to_string_pretty(request_body).unwrap()
+    );
+    let response = client
+        .patch(url)
+        .header("Authorization", format!("Bearer {access_token}"))
+        .header(HTTP_CAPABILITY_HEADER, http_header_value(&capability)?)
+        .json(request_body)
+        .send()
+        .await?;
+    let status = response.status();
+    if !status.is_success() {
+        let message = response.text().await.unwrap_or_else(|e| {
+            format!("Failed to get error message body: {e}")
+        });
+        return Err(Error::Status(status, message));
+    }
+    let data = response.json::<O>().await?;
+    Ok(data)
+}

@@ -133,3 +133,25 @@ pub async fn delete(
     info!("deleting message: {url}");
     delete_authed(client, &url, access_token, Capability::MessagesDelete).await
 }
+
+pub async fn update(
+    client: &Client,
+    api_url: &str,
+    access_token: &str,
+    message_id: MessageId,
+    update: &runelink_types::message::MessageUpdate,
+    target_host: Option<&str>,
+) -> Result<Message> {
+    let mut url = format!("{api_url}/messages/{message_id}");
+    if let Some(host) = target_host {
+        url = format!("{url}?target_host={host}");
+    }
+    super::patch_json_authed(
+        client,
+        &url,
+        access_token,
+        update,
+        Capability::MessagesUpdate,
+    )
+    .await
+}

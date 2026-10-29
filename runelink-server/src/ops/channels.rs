@@ -314,6 +314,13 @@ pub mod auth {
     use super::*;
     use crate::auth::Requirement as Req;
 
+    pub async fn update(
+        state: &AppState,
+        channel_id: ServerChannelId,
+        target_host: Option<&str>,
+    ) -> ApiResult<Req> {
+        delete(state, channel_id, target_host).await
+    }
     pub fn create(server_id: ServerId) -> Req {
         Req::ServerAdmin(server_id).or_admin().client_only()
     }
@@ -365,6 +372,12 @@ pub mod auth {
     pub mod federated {
         use super::*;
 
+        pub async fn update(
+            state: &AppState,
+            channel_id: ServerChannelId,
+        ) -> ApiResult<Req> {
+            delete(state, channel_id).await
+        }
         pub fn create(server_id: ServerId) -> Req {
             Req::ServerAdmin(server_id).federated_only()
         }
@@ -404,4 +417,44 @@ pub mod auth {
             delete(state, channel_id).await
         }
     }
+}
+
+pub async fn update(
+    state: &AppState,
+    session: &Session,
+    channel_id: ServerChannelId,
+    channel_update: &runelink_types::channel::ServerChannelUpdate,
+    target_host: Option<&str>,
+) -> ApiResult<ServerChannel> {
+    if state.config.is_remote_host(target_host) {
+        let user_ref = session.user_ref.clone().ok_or_else(|| {
+            ApiError::AuthError("User identity required".into())
+        })?;
+        let reply = federation::request(
+            state,
+            target_host.unwrap(),
+            Some(user_ref),
+            FederationWsRequest::ChannelsUpdate {
+                channel_id,
+                channel_update: channel_update.clone(),
+            },
+        )
+        .await?;
+        let FederationWsReply::ChannelsUpdate(resource) = reply else {
+            return Err(ApiError::Internal("Unexpected edit reply".into()));
+        };
+        return Ok(resource);
+    }
+    let resource =
+        queries::channels::update(&state.db_pool, channel_id, channel_update)
+            .await?;
+    let server_id = resource.server_id;
+    fanout::fanout_update(
+        state,
+        fanout::resolve_server_targets(state, server_id).await?,
+        ClientWsUpdate::ChannelUpserted(resource.clone()),
+        FederationWsUpdate::ChannelUpserted(resource.clone()),
+    )
+    .await;
+    Ok(resource)
 }

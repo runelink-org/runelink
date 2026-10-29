@@ -109,3 +109,25 @@ pub async fn delete(
     info!("deleting server: {url}");
     delete_authed(client, &url, access_token, Capability::ServersDelete).await
 }
+
+pub async fn update(
+    client: &Client,
+    api_url: &str,
+    access_token: &str,
+    server_id: ServerId,
+    update: &runelink_types::server::ServerUpdate,
+    target_host: Option<&str>,
+) -> Result<Server> {
+    let mut url = format!("{api_url}/servers/{server_id}");
+    if let Some(host) = target_host {
+        url = format!("{url}?target_host={host}");
+    }
+    super::patch_json_authed(
+        client,
+        &url,
+        access_token,
+        update,
+        Capability::ServersUpdate,
+    )
+    .await
+}

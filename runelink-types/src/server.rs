@@ -168,3 +168,6 @@ impl NewServerMembership {
         }
     }
 }
+
+/// Editable presentation fields with optimistic concurrency.
+pub type ServerUpdate = crate::edit::DetailsUpdate;

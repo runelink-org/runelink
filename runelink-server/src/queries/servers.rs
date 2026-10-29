@@ -62,6 +62,7 @@ pub async fn upsert_remote(pool: &DbPool, server: &Server) -> ApiResult<()> {
                 remote_created_at = EXCLUDED.remote_created_at,
                 remote_updated_at = EXCLUDED.remote_updated_at,
                 synced_at = NOW()
+        WHERE cached_remote_servers.remote_updated_at <= EXCLUDED.remote_updated_at
         "#,
         server.id.as_uuid(),
         server.host,
@@ -104,4 +105,39 @@ pub async fn delete(state: &AppState, server_id: ServerId) -> ApiResult<()> {
         .execute(state.db_pool.as_ref())
         .await?;
     Ok(())
+}
+
+pub async fn update(
+    state: &AppState,
+    server_id: ServerId,
+    update: &runelink_types::edit::DetailsUpdate,
+) -> ApiResult<Server> {
+    use crate::error::ApiError;
+    if update
+        .title
+        .as_ref()
+        .is_some_and(|title| title.trim().is_empty())
+    {
+        return Err(ApiError::BadRequest("Title cannot be empty".into()));
+    }
+    let mut tx = state.db_pool.begin().await?;
+    let mut row = sqlx::query_as::<_, LocalServerRow>(
+        "SELECT * FROM servers WHERE id = $1 FOR UPDATE",
+    )
+    .bind(server_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if row.updated_at != update.expected_updated_at {
+        return Err(ApiError::Conflict(
+            "Resource changed. Reload it before saving.".into(),
+        ));
+    }
+    let title = update.title.as_ref().unwrap_or(&row.title);
+    let description = update.description.as_ref().unwrap_or(&row.description);
+    if title != &row.title || description != &row.description {
+        row = sqlx::query_as::<_, LocalServerRow>("UPDATE servers SET title = $2, description = $3 WHERE id = $1 RETURNING *")
+            .bind(server_id).bind(title).bind(description).fetch_one(&mut *tx).await?;
+    }
+    tx.commit().await?;
+    Ok(row.into_server(&state.config))
 }

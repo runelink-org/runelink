@@ -21,6 +21,8 @@ pub struct Message {
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub edited_at: Option<OffsetDateTime>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -87,6 +89,7 @@ mod tests {
             "body": body,
             "deleted_at": deleted_at,
             "created_at": "2026-10-19T12:00:00Z",
+            "edited_at": null,
             "updated_at": "2026-10-19T12:00:00Z"
         })
     }
@@ -112,4 +115,13 @@ mod tests {
             assert!(serde_json::from_value::<Message>(wire).is_err());
         }
     }
+}
+
+/// An edit never changes identity, authorship, channel, or reply target.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MessageUpdate {
+    pub body: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub expected_updated_at: OffsetDateTime,
 }

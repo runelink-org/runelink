@@ -24,6 +24,8 @@ pub struct ServerArgs {
 
 #[derive(clap::Subcommand, Debug)]
 pub enum ServerCommands {
+    /// Edit an existing server
+    Edit(ServerEditArgs),
     /// List all servers
     List(ServerListArgs),
     /// Get a server by ID
@@ -112,6 +114,41 @@ pub async fn handle_server_commands(
     server_args: &ServerArgs,
 ) -> Result<(), CliError> {
     match &server_args.command {
+        ServerCommands::Edit(edit_args) => {
+            let api_url = ctx.home_api_url().await?;
+            let access_token = ctx.get_access_token().await?;
+            let target_host = parse_optional_host_input(
+                edit_args.host.as_deref(),
+                ctx.strict_input,
+            )?;
+            let original = requests::servers::fetch_by_id(
+                ctx.client,
+                &api_url,
+                edit_args.server_id,
+                target_host.as_deref(),
+            )
+            .await?;
+            let update = runelink_types::edit::DetailsUpdate {
+                title: edit_args.title.clone(),
+                description: if edit_args.clear_description {
+                    Some(None)
+                } else {
+                    edit_args.description.clone().map(Some)
+                },
+                expected_updated_at: original.updated_at,
+            };
+            let resource = requests::servers::update(
+                ctx.client,
+                &api_url,
+                &access_token,
+                edit_args.server_id,
+                &update,
+                target_host.as_deref(),
+            )
+            .await?;
+            println!("Updated server: {resource}");
+        }
+
         ServerCommands::List(list_args) => {
             let show_ids = list_args.show_ids && !list_args.hide_ids;
             let api_url = ctx.home_api_url().await?;
@@ -336,4 +373,21 @@ pub async fn handle_server_commands(
         }
     }
     Ok(())
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ServerEditArgs {
+    #[clap(long)]
+    pub server_id: ServerId,
+    #[clap(long)]
+    pub host: Option<String>,
+    /// New title
+    #[clap(long)]
+    pub title: Option<String>,
+    /// New description
+    #[clap(long, conflicts_with = "clear_description")]
+    pub description: Option<String>,
+    /// Remove the description
+    #[clap(long)]
+    pub clear_description: bool,
 }
