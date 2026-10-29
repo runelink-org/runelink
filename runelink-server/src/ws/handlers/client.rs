@@ -318,6 +318,32 @@ pub(super) async fn handle_client_request(
             Ok(ClientWsReply::ServersGetWithChannels(server_with_channels))
         }
 
+        ClientWsRequest::ServersUpdate {
+            server_id,
+            server_update,
+            target_host,
+        } => {
+            let session = authorize_client(
+                state,
+                conn_id,
+                ops::servers::auth::update(
+                    state,
+                    server_id,
+                    target_host.as_deref(),
+                )
+                .await?,
+            )
+            .await?;
+            let resource = ops::servers::update(
+                state,
+                &session,
+                server_id,
+                &server_update,
+                target_host.as_deref(),
+            )
+            .await?;
+            Ok(ClientWsReply::ServersUpdate(resource))
+        }
         ClientWsRequest::ServersDelete {
             server_id,
             target_host,
@@ -412,6 +438,32 @@ pub(super) async fn handle_client_request(
             Ok(ClientWsReply::ChannelsGetById(channel))
         }
 
+        ClientWsRequest::ChannelsUpdate {
+            channel_id,
+            channel_update,
+            target_host,
+        } => {
+            let session = authorize_client(
+                state,
+                conn_id,
+                ops::channels::auth::update(
+                    state,
+                    channel_id,
+                    target_host.as_deref(),
+                )
+                .await?,
+            )
+            .await?;
+            let resource = ops::channels::update(
+                state,
+                &session,
+                channel_id,
+                &channel_update,
+                target_host.as_deref(),
+            )
+            .await?;
+            Ok(ClientWsReply::ChannelsUpdate(resource))
+        }
         ClientWsRequest::ChannelsDelete {
             channel_id,
             target_host,
@@ -548,6 +600,32 @@ pub(super) async fn handle_client_request(
             Ok(ClientWsReply::MessagesGetById(message))
         }
 
+        ClientWsRequest::MessagesUpdate {
+            message_id,
+            message_update,
+            target_host,
+        } => {
+            let session = authorize_client(
+                state,
+                conn_id,
+                ops::messages::auth::update(
+                    state,
+                    message_id,
+                    target_host.as_deref(),
+                )
+                .await?,
+            )
+            .await?;
+            let resource = ops::messages::update(
+                state,
+                &session,
+                message_id,
+                &message_update,
+                target_host.as_deref(),
+            )
+            .await?;
+            Ok(ClientWsReply::MessagesUpdate(resource))
+        }
         ClientWsRequest::MessagesDelete {
             message_id,
             target_host,

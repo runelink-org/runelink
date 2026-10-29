@@ -674,6 +674,7 @@ mod tests {
                     },
                     created_at: time::OffsetDateTime::now_utc(),
                     updated_at: time::OffsetDateTime::now_utc(),
+                    edited_at: None,
                 },
             ),
         };

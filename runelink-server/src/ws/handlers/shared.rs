@@ -39,7 +39,7 @@ pub(super) async fn authorize_federation(
     state: &AppState,
     conn_id: ConnId,
     delegated_user_ref: Option<UserRef>,
-    requirement: Requirement,
+    mut requirement: Requirement,
 ) -> ApiResult<Session> {
     let issuer = state
         .federation_ws_manager
@@ -52,12 +52,19 @@ pub(super) async fn authorize_federation(
         })?;
 
     let claims = match delegated_user_ref {
-        Some(user_ref) => FederationClaims::new_delegated(
-            issuer,
-            state.config.api_url(),
-            user_ref,
-            Duration::hours(1),
-        ),
+        Some(user_ref) => {
+            // A peer may only act for users whose accounts live on that peer.
+            requirement = crate::and!(
+                Requirement::FederatedUser(user_ref.clone()),
+                requirement
+            );
+            FederationClaims::new_delegated(
+                issuer,
+                state.config.api_url(),
+                user_ref,
+                Duration::hours(1),
+            )
+        }
         None => FederationClaims::new_server_only(
             issuer,
             state.config.api_url(),

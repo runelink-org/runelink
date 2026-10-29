@@ -134,3 +134,25 @@ pub async fn move_channel(
     )
     .await
 }
+
+pub async fn update(
+    client: &Client,
+    api_url: &str,
+    access_token: &str,
+    channel_id: ServerChannelId,
+    update: &runelink_types::channel::ServerChannelUpdate,
+    target_host: Option<&str>,
+) -> Result<ServerChannel> {
+    let mut url = format!("{api_url}/channels/{channel_id}");
+    if let Some(host) = target_host {
+        url = format!("{url}?target_host={host}");
+    }
+    super::patch_json_authed(
+        client,
+        &url,
+        access_token,
+        update,
+        Capability::ChannelsUpdate,
+    )
+    .await
+}

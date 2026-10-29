@@ -88,6 +88,7 @@ pub(super) async fn handle_federation_update(
         }
 
         FederationWsUpdate::ServerUpserted(server) => {
+            queries::servers::upsert_remote(&state.db_pool, &server).await?;
             fanout_remote_server_update(
                 state,
                 server.id,
@@ -291,6 +292,27 @@ pub(super) async fn handle_federation_request(
             Ok(FederationWsReply::ServersCreate(server))
         }
 
+        FederationWsRequest::ServersUpdate {
+            server_id,
+            server_update,
+        } => {
+            let session = authorize_federation(
+                state,
+                conn_id,
+                delegated_user_ref,
+                ops::servers::auth::federated::update(state, server_id).await?,
+            )
+            .await?;
+            let resource = ops::servers::update(
+                state,
+                &session,
+                server_id,
+                &server_update,
+                None,
+            )
+            .await?;
+            Ok(FederationWsReply::ServersUpdate(resource))
+        }
         FederationWsRequest::ServersDelete { server_id } => {
             let session = authorize_federation(
                 state,
@@ -397,6 +419,28 @@ pub(super) async fn handle_federation_request(
             Ok(FederationWsReply::ChannelsGetById(channel))
         }
 
+        FederationWsRequest::ChannelsUpdate {
+            channel_id,
+            channel_update,
+        } => {
+            let session = authorize_federation(
+                state,
+                conn_id,
+                delegated_user_ref,
+                ops::channels::auth::federated::update(state, channel_id)
+                    .await?,
+            )
+            .await?;
+            let resource = ops::channels::update(
+                state,
+                &session,
+                channel_id,
+                &channel_update,
+                None,
+            )
+            .await?;
+            Ok(FederationWsReply::ChannelsUpdate(resource))
+        }
         FederationWsRequest::ChannelsDelete { channel_id } => {
             let requirement =
                 ops::channels::auth::federated::delete(state, channel_id)
@@ -530,6 +574,28 @@ pub(super) async fn handle_federation_request(
             Ok(FederationWsReply::MessagesGetById(message))
         }
 
+        FederationWsRequest::MessagesUpdate {
+            message_id,
+            message_update,
+        } => {
+            let session = authorize_federation(
+                state,
+                conn_id,
+                delegated_user_ref,
+                ops::messages::auth::federated::update(state, message_id)
+                    .await?,
+            )
+            .await?;
+            let resource = ops::messages::update(
+                state,
+                &session,
+                message_id,
+                &message_update,
+                None,
+            )
+            .await?;
+            Ok(FederationWsReply::MessagesUpdate(resource))
+        }
         FederationWsRequest::MessagesDelete { message_id } => {
             let requirement =
                 ops::messages::auth::federated::delete(state, message_id)

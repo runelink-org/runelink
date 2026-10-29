@@ -50,7 +50,9 @@ pub fn router() -> Router<AppState> {
         .route("/messages", get(messages::get_all))
         .route(
             "/messages/{message_id}",
-            get(messages::get_by_id).delete(messages::delete),
+            get(messages::get_by_id)
+                .delete(messages::delete)
+                .patch(messages::update),
         )
         .route(
             "/text_channels/{text_channel_id}/messages",
@@ -59,13 +61,17 @@ pub fn router() -> Router<AppState> {
         .route("/channels", get(channels::get_all))
         .route(
             "/channels/{channel_id}",
-            get(channels::get_by_id).delete(channels::delete),
+            get(channels::get_by_id)
+                .delete(channels::delete)
+                .patch(channels::update),
         )
         .route("/channels/{channel_id}/move", post(channels::move_channel))
         .route("/servers", get(servers::get_all).post(servers::create))
         .route(
             "/servers/{server_id}",
-            get(servers::get_by_id).delete(servers::delete),
+            get(servers::get_by_id)
+                .delete(servers::delete)
+                .patch(servers::update),
         )
         .route(
             "/servers/{server_id}/channels",

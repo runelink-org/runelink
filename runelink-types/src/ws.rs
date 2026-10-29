@@ -1,3 +1,6 @@
+use crate::{
+    channel::ServerChannelUpdate, message::MessageUpdate, server::ServerUpdate,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -53,6 +56,21 @@ pub enum FederationWsConnectionState {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ClientWsRequest {
+    ServersUpdate {
+        server_id: ServerId,
+        server_update: ServerUpdate,
+        target_host: Option<String>,
+    },
+    ChannelsUpdate {
+        channel_id: ServerChannelId,
+        channel_update: ServerChannelUpdate,
+        target_host: Option<String>,
+    },
+    MessagesUpdate {
+        message_id: MessageId,
+        message_update: MessageUpdate,
+        target_host: Option<String>,
+    },
     Ping,
     OidcDiscovery,
     OidcJwks,
@@ -195,17 +213,20 @@ impl ClientWsRequest {
             Self::MembershipsUpsert { .. } | Self::MembershipsDelete { .. } => {
                 Capability::MembershipsWrite
             }
+            Self::ServersUpdate { .. } => Capability::ServersUpdate,
             Self::ServersCreate { .. } => Capability::ServersCreate,
             Self::ServersGetAll { .. }
             | Self::ServersGetById { .. }
             | Self::ServersGetWithChannels { .. } => Capability::ServersRead,
             Self::ServersDelete { .. } => Capability::ServersDelete,
+            Self::ChannelsUpdate { .. } => Capability::ChannelsUpdate,
             Self::ChannelsCreate { .. } => Capability::ChannelsCreate,
             Self::ChannelsGetAll { .. }
             | Self::ChannelsGetByServer { .. }
             | Self::ChannelsGetById { .. } => Capability::ChannelsRead,
             Self::ChannelsDelete { .. } => Capability::ChannelsDelete,
             Self::ChannelsMove { .. } => Capability::ChannelsMove,
+            Self::MessagesUpdate { .. } => Capability::MessagesUpdate,
             Self::MessagesCreate { .. } => Capability::MessagesCreate,
             Self::MessagesGetAll { .. }
             | Self::MessagesGetByServer { .. }
@@ -220,6 +241,9 @@ impl ClientWsRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ClientWsReply {
+    ServersUpdate(Server),
+    ChannelsUpdate(ServerChannel),
+    MessagesUpdate(Message),
     Pong,
     OidcDiscovery(OidcDiscoveryDocument),
     OidcJwks(JwksResponse),
@@ -260,6 +284,18 @@ pub enum ClientWsReply {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum FederationWsRequest {
+    ServersUpdate {
+        server_id: ServerId,
+        server_update: ServerUpdate,
+    },
+    ChannelsUpdate {
+        channel_id: ServerChannelId,
+        channel_update: ServerChannelUpdate,
+    },
+    MessagesUpdate {
+        message_id: MessageId,
+        message_update: MessageUpdate,
+    },
     ConnectionState,
     UsersGetAll,
     UsersGetByRef {
@@ -352,17 +388,20 @@ impl FederationWsRequest {
             Self::MembershipsUpsert { .. } | Self::MembershipsDelete { .. } => {
                 Capability::MembershipsWrite
             }
+            Self::ServersUpdate { .. } => Capability::ServersUpdate,
             Self::ServersCreate(_) => Capability::ServersCreate,
             Self::ServersGetAll
             | Self::ServersGetById { .. }
             | Self::ServersGetWithChannels { .. } => Capability::ServersRead,
             Self::ServersDelete { .. } => Capability::ServersDelete,
+            Self::ChannelsUpdate { .. } => Capability::ChannelsUpdate,
             Self::ChannelsCreate { .. } => Capability::ChannelsCreate,
             Self::ChannelsGetAll
             | Self::ChannelsGetByServer { .. }
             | Self::ChannelsGetById { .. } => Capability::ChannelsRead,
             Self::ChannelsDelete { .. } => Capability::ChannelsDelete,
             Self::ChannelsMove { .. } => Capability::ChannelsMove,
+            Self::MessagesUpdate { .. } => Capability::MessagesUpdate,
             Self::MessagesCreate { .. } => Capability::MessagesCreate,
             Self::MessagesGetAll
             | Self::MessagesGetByServer { .. }
@@ -377,6 +416,9 @@ impl FederationWsRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum FederationWsReply {
+    ServersUpdate(Server),
+    ChannelsUpdate(ServerChannel),
+    MessagesUpdate(Message),
     ConnectionState(FederationWsConnectionState),
     UsersGetAll(Vec<User>),
     UsersGetByRef(User),

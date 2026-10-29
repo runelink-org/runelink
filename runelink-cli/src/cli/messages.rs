@@ -27,6 +27,8 @@ pub struct MessageArgs {
 
 #[derive(clap::Subcommand, Debug)]
 pub enum MessageCommands {
+    /// Edit an existing message
+    Edit(MessageEditArgs),
     /// List all messages
     List(MessageListArgs),
     /// Get a message by ID
@@ -104,6 +106,37 @@ pub async fn handle_message_commands(
     message_args: &MessageArgs,
 ) -> Result<(), CliError> {
     match &message_args.command {
+        MessageCommands::Edit(edit_args) => {
+            let api_url = ctx.home_api_url().await?;
+            let access_token = ctx.get_access_token().await?;
+            let target_host = parse_optional_host_input(
+                edit_args.host.as_deref(),
+                ctx.strict_input,
+            )?;
+            let original = requests::messages::fetch_by_id(
+                ctx.client,
+                &api_url,
+                &access_token,
+                edit_args.message_id,
+                target_host.as_deref(),
+            )
+            .await?;
+            let update = runelink_types::message::MessageUpdate {
+                body: edit_args.body.clone(),
+                expected_updated_at: original.updated_at,
+            };
+            let resource = requests::messages::update(
+                ctx.client,
+                &api_url,
+                &access_token,
+                edit_args.message_id,
+                &update,
+                target_host.as_deref(),
+            )
+            .await?;
+            println!("Updated message: {resource}");
+        }
+
         MessageCommands::List(list_args) => {
             let show_ids = list_args.show_ids && !list_args.hide_ids;
             ctx.account.ok_or(CliError::MissingAccount)?;
@@ -346,6 +379,7 @@ mod tests {
             },
             created_at: OffsetDateTime::UNIX_EPOCH,
             updated_at: OffsetDateTime::UNIX_EPOCH,
+            edited_at: None,
         }
     }
 
@@ -452,4 +486,15 @@ mod tests {
             "  ┌─ Original message unavailable"
         );
     }
+}
+
+#[derive(clap::Args, Debug)]
+pub struct MessageEditArgs {
+    #[clap(long)]
+    pub message_id: MessageId,
+    #[clap(long)]
+    pub host: Option<String>,
+    /// Replacement message text
+    #[clap(long)]
+    pub body: String,
 }

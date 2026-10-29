@@ -14,7 +14,7 @@ use crate::{
     error::{ApiError, ApiResult},
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct DbMessage {
     pub id: MessageId,
     pub text_channel_id: TextChannelId,
@@ -26,6 +26,7 @@ pub struct DbMessage {
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
+    pub edited_at: Option<OffsetDateTime>,
 }
 
 impl TryFrom<DbMessage> for Message {
@@ -55,6 +56,7 @@ impl TryFrom<DbMessage> for Message {
             content,
             created_at: msg.created_at,
             updated_at: msg.updated_at,
+            edited_at: msg.edited_at,
         })
     }
 }
@@ -94,6 +96,7 @@ pub async fn get_all(pool: &DbPool) -> ApiResult<Vec<Message>> {
             m.deleted_at,
             m.created_at,
             m.updated_at,
+            m.edited_at,
             to_jsonb(a) AS "author: Json<User>"
         FROM messages m
         LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host
@@ -120,6 +123,7 @@ pub async fn get_by_server(
             m.deleted_at,
             m.created_at,
             m.updated_at,
+            m.edited_at,
             to_jsonb(a) AS "author: Json<User>"
         FROM messages m
         LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host
@@ -149,6 +153,7 @@ pub async fn get_by_text_channel(
             m.deleted_at,
             m.created_at,
             m.updated_at,
+            m.edited_at,
             to_jsonb(a) AS "author: Json<User>"
         FROM messages m
         LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host
@@ -174,6 +179,7 @@ pub async fn get_by_id(pool: &DbPool, msg_id: MessageId) -> ApiResult<Message> {
             m.deleted_at,
             m.created_at,
             m.updated_at,
+            m.edited_at,
             to_jsonb(a) AS "author: Json<User>"
         FROM messages m
         LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host
@@ -300,4 +306,56 @@ mod tests {
         }
         sqlx::query("ROLLBACK").execute(&pool).await.unwrap();
     }
+}
+
+pub async fn update(
+    pool: &DbPool,
+    message_id: MessageId,
+    update: &runelink_types::message::MessageUpdate,
+) -> ApiResult<Message> {
+    if update.body.trim().is_empty() {
+        return Err(ApiError::BadRequest("Message cannot be empty".into()));
+    }
+    let mut tx = pool.begin().await?;
+    let mut row = sqlx::query_as::<_, DbMessage>(
+        r#"
+        SELECT m.id, m.text_channel_id, m.body, m.reply_to, m.deleted_at,
+            m.created_at, m.updated_at, m.edited_at, to_jsonb(a) AS author
+        FROM messages m
+        LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host
+        WHERE m.id = $1
+        FOR UPDATE OF m
+    "#,
+    )
+    .bind(message_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if row.deleted_at.is_some() {
+        return Err(ApiError::Conflict("Message was deleted".into()));
+    }
+    if row.updated_at != update.expected_updated_at {
+        return Err(ApiError::Conflict(
+            "Message changed. Reload it before saving.".into(),
+        ));
+    }
+    if row.body.as_deref() != Some(&update.body) {
+        let (updated_at, edited_at): (OffsetDateTime, OffsetDateTime) =
+            sqlx::query_as(
+                r#"
+            UPDATE messages SET body = $2, edited_at = clock_timestamp()
+            WHERE id = $1
+            RETURNING updated_at, edited_at
+        "#,
+            )
+            .bind(message_id)
+            .bind(&update.body)
+            .fetch_one(&mut *tx)
+            .await?;
+        row.body = Some(update.body.clone());
+        row.updated_at = updated_at;
+        row.edited_at = Some(edited_at);
+    }
+    let message = row.try_into()?;
+    tx.commit().await?;
+    Ok(message)
 }

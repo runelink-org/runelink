@@ -180,3 +180,29 @@ pub async fn delete(
             .await?;
     Ok((StatusCode::OK, Json(message)))
 }
+
+/// PATCH /messages/{message_id}
+pub async fn update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(message_id): Path<MessageId>,
+    Query(params): Query<MessageQueryParams>,
+    Json(update): Json<runelink_types::message::MessageUpdate>,
+) -> ApiResult<impl IntoResponse> {
+    let target_host = params.target_host.as_deref();
+    let session = authorize(
+        &state,
+        Principal::from_client_headers(&headers, &state)?,
+        ops::messages::auth::update(&state, message_id, target_host).await?,
+    )
+    .await?;
+    let resource = ops::messages::update(
+        &state,
+        &session,
+        message_id,
+        &update,
+        target_host,
+    )
+    .await?;
+    Ok((StatusCode::OK, Json(resource)))
+}

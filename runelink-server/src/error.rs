@@ -22,6 +22,9 @@ pub enum ApiError {
     #[error("A referenced resource no longer exists")]
     ForeignKeyViolation,
 
+    #[error("Conflict: {0}")]
+    Conflict(String),
+
     #[error("Resource not found")]
     NotFound,
 
@@ -86,9 +89,9 @@ impl IntoResponse for ApiError {
             | ApiError::DatabaseError(_)
             | ApiError::Internal(_)
             | ApiError::Unknown(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            ApiError::UniqueViolation | ApiError::ForeignKeyViolation => {
-                StatusCode::CONFLICT
-            }
+            ApiError::Conflict(_)
+            | ApiError::UniqueViolation
+            | ApiError::ForeignKeyViolation => StatusCode::CONFLICT,
             ApiError::NotFound => StatusCode::NOT_FOUND,
             ApiError::AuthError(_) => StatusCode::UNAUTHORIZED,
             ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
@@ -110,9 +113,9 @@ impl From<ApiError> for WsError {
             ApiError::AuthError(_) => "auth_error",
             ApiError::BadRequest(_) => "bad_request",
             ApiError::NotFound => "not_found",
-            ApiError::UniqueViolation | ApiError::ForeignKeyViolation => {
-                "conflict"
-            }
+            ApiError::Conflict(_)
+            | ApiError::UniqueViolation
+            | ApiError::ForeignKeyViolation => "conflict",
             ApiError::DbConnectionError(_)
             | ApiError::DatabaseError(_)
             | ApiError::Internal(_)
