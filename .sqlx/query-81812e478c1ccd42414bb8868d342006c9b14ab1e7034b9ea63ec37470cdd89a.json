@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            m.id,\n            m.text_channel_id,\n            m.body,\n            m.reply_to AS \"reply_to: MessageId\",\n            m.deleted_at,\n            m.created_at,\n            m.updated_at,\n            m.edited_at,\n            to_jsonb(a) AS \"author: Json<User>\"\n        FROM messages m\n        LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host\n        JOIN server_channels c ON c.text_channel_id = m.text_channel_id\n        WHERE c.server_id = $1\n        ORDER BY m.created_at DESC;\n        ",
+  "query": "\n        SELECT\n            m.id AS \"id!\",\n            m.text_channel_id AS \"text_channel_id!\",\n            m.body,\n            m.reply_to AS \"reply_to: MessageId\",\n            m.deleted_at,\n            m.created_at AS \"created_at!\",\n            m.updated_at AS \"updated_at!\",\n            m.edited_at,\n            to_jsonb(a) AS \"author: Json<User>\"\n        FROM messages m\n        LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host\n        WHERE m.id = $1;\n        ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id",
+        "name": "id!",
         "type_info": "Uuid",
         "origin": {
           "Table": {
@@ -16,7 +16,7 @@
       },
       {
         "ordinal": 1,
-        "name": "text_channel_id",
+        "name": "text_channel_id!",
         "type_info": "Uuid",
         "origin": {
           "Table": {
@@ -60,7 +60,7 @@
       },
       {
         "ordinal": 5,
-        "name": "created_at",
+        "name": "created_at!",
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
@@ -71,7 +71,7 @@
       },
       {
         "ordinal": 6,
-        "name": "updated_at",
+        "name": "updated_at!",
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
@@ -104,16 +104,16 @@
       ]
     },
     "nullable": [
-      false,
-      false,
       true,
       true,
       true,
-      false,
-      false,
+      true,
+      true,
+      true,
+      true,
       true,
       null
     ]
   },
-  "hash": "c27a6fedc499f682b77c7f215b72fd214e7805bbfe1f3ce31195e36cb339f059"
+  "hash": "81812e478c1ccd42414bb8868d342006c9b14ab1e7034b9ea63ec37470cdd89a"
 }
