@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            m.id,\n            m.text_channel_id,\n            m.body,\n            m.reply_to AS \"reply_to: MessageId\",\n            m.deleted_at,\n            m.created_at,\n            m.updated_at,\n            m.edited_at,\n            to_jsonb(a) AS \"author: Json<User>\"\n        FROM messages m\n        LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host\n        WHERE m.text_channel_id = $1\n        ORDER BY m.created_at DESC;\n        ",
+  "query": "\n        SELECT\n            m.id AS \"id!\",\n            m.text_channel_id AS \"text_channel_id!\",\n            m.body,\n            m.reply_to AS \"reply_to: MessageId\",\n            m.deleted_at,\n            m.created_at AS \"created_at!\",\n            m.updated_at AS \"updated_at!\",\n            m.edited_at,\n            to_jsonb(a) AS \"author: Json<User>\"\n        FROM messages m\n        LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host\n        ORDER BY m.created_at DESC;\n        ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id",
+        "name": "id!",
         "type_info": "Uuid",
         "origin": {
           "Table": {
@@ -16,7 +16,7 @@
       },
       {
         "ordinal": 1,
-        "name": "text_channel_id",
+        "name": "text_channel_id!",
         "type_info": "Uuid",
         "origin": {
           "Table": {
@@ -60,7 +60,7 @@
       },
       {
         "ordinal": 5,
-        "name": "created_at",
+        "name": "created_at!",
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
@@ -71,7 +71,7 @@
       },
       {
         "ordinal": 6,
-        "name": "updated_at",
+        "name": "updated_at!",
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
@@ -99,9 +99,7 @@
       }
     ],
     "parameters": {
-      "Left": [
-        "Uuid"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -115,5 +113,5 @@
       null
     ]
   },
-  "hash": "0586e512ecdf55847cf253a1e974a19b3415948544b6022f139d9e52bafede16"
+  "hash": "a2e09a08cf4e5ee53f0a06bb27cbc3b2ad8f8992dbd038eae666f769ebd5c64c"
 }

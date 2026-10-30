@@ -89,13 +89,13 @@ pub async fn get_all(pool: &DbPool) -> ApiResult<Vec<Message>> {
         DbMessage,
         r#"
         SELECT
-            m.id,
-            m.text_channel_id,
+            m.id AS "id!",
+            m.text_channel_id AS "text_channel_id!",
             m.body,
             m.reply_to AS "reply_to: MessageId",
             m.deleted_at,
-            m.created_at,
-            m.updated_at,
+            m.created_at AS "created_at!",
+            m.updated_at AS "updated_at!",
             m.edited_at,
             to_jsonb(a) AS "author: Json<User>"
         FROM messages m
@@ -116,13 +116,13 @@ pub async fn get_by_server(
         DbMessage,
         r#"
         SELECT
-            m.id,
-            m.text_channel_id,
+            m.id AS "id!",
+            m.text_channel_id AS "text_channel_id!",
             m.body,
             m.reply_to AS "reply_to: MessageId",
             m.deleted_at,
-            m.created_at,
-            m.updated_at,
+            m.created_at AS "created_at!",
+            m.updated_at AS "updated_at!",
             m.edited_at,
             to_jsonb(a) AS "author: Json<User>"
         FROM messages m
@@ -146,13 +146,13 @@ pub async fn get_by_text_channel(
         DbMessage,
         r#"
         SELECT
-            m.id,
-            m.text_channel_id,
+            m.id AS "id!",
+            m.text_channel_id AS "text_channel_id!",
             m.body,
             m.reply_to AS "reply_to: MessageId",
             m.deleted_at,
-            m.created_at,
-            m.updated_at,
+            m.created_at AS "created_at!",
+            m.updated_at AS "updated_at!",
             m.edited_at,
             to_jsonb(a) AS "author: Json<User>"
         FROM messages m
@@ -172,13 +172,13 @@ pub async fn get_by_id(pool: &DbPool, msg_id: MessageId) -> ApiResult<Message> {
         DbMessage,
         r#"
         SELECT
-            m.id,
-            m.text_channel_id,
+            m.id AS "id!",
+            m.text_channel_id AS "text_channel_id!",
             m.body,
             m.reply_to AS "reply_to: MessageId",
             m.deleted_at,
-            m.created_at,
-            m.updated_at,
+            m.created_at AS "created_at!",
+            m.updated_at AS "updated_at!",
             m.edited_at,
             to_jsonb(a) AS "author: Json<User>"
         FROM messages m
