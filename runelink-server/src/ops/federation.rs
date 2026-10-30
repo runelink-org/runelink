@@ -7,7 +7,8 @@ use runelink_types::{
 
 use crate::{error::ApiResult, state::AppState};
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+// Leave room for the peer's database acquisition timeout and query execution.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(super) async fn request(
     state: &AppState,
