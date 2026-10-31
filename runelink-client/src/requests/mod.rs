@@ -29,7 +29,7 @@ pub async fn capabilities(
         let message = response.text().await.unwrap_or_else(|error| {
             format!("Failed to get error message body: {error}")
         });
-        return Err(crate::Error::Status(status, message));
+        return Err(crate::Error::from_status(status, message));
     }
     Ok(response.json().await?)
 }

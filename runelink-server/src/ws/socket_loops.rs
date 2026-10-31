@@ -305,6 +305,13 @@ async fn negotiate_client_socket(
         client_websocket,
     );
     let welcome = ClientWsEnvelope::Welcome(CapabilityWelcome {
+        rejected_capabilities: Some(
+            runelink_types::capability::rejected_capabilities(
+                &hello.capabilities,
+                &capabilities,
+                client_websocket,
+            ),
+        ),
         negotiation_version: NEGOTIATION_VERSION,
         capabilities: capabilities.clone(),
         server_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -393,6 +400,13 @@ async fn negotiate_federation_socket(
         federation_websocket,
     );
     let welcome = FederationWsEnvelope::Welcome(CapabilityWelcome {
+        rejected_capabilities: Some(
+            runelink_types::capability::rejected_capabilities(
+                &hello.capabilities,
+                &capabilities,
+                federation_websocket,
+            ),
+        ),
         negotiation_version: NEGOTIATION_VERSION,
         capabilities: capabilities.clone(),
         server_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -460,6 +474,63 @@ pub async fn federation_socket_loop(
 #[cfg(test)]
 mod tests {
     use super::hello_rejection;
+
+    #[tokio::test]
+    async fn client_and_federation_welcomes_resolve_every_offer() {
+        use futures_util::{SinkExt, StreamExt};
+        for federation in [false, true] {
+            let app = axum::Router::new().route(
+                "/ws",
+                axum::routing::get(
+                    move |upgrade: axum::extract::WebSocketUpgrade| async move {
+                        upgrade.on_upgrade(move |mut socket| async move {
+                            if federation {
+                                super::negotiate_federation_socket(
+                                    "test",
+                                    &mut super::FederationSocket::Inbound(
+                                        Box::new(socket),
+                                    ),
+                                )
+                                .await;
+                            } else {
+                                super::negotiate_client_socket(&mut socket)
+                                    .await;
+                            }
+                        })
+                    },
+                ),
+            );
+            let listener =
+                tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let task = tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap();
+            });
+            let (mut socket, _) =
+                tokio_tungstenite::connect_async(format!("ws://{address}/ws"))
+                    .await
+                    .unwrap();
+            socket.send(tokio_tungstenite::tungstenite::Message::Text(r#"{"type":"hello","data":{"negotiation_version":1,"capabilities":{"messages.read":["2020.01.01"],"channels.read":["2026.10.22"],"vendor.unknown":["2020.01.01"]}}}"#.into())).await.unwrap();
+            let payload =
+                socket.next().await.unwrap().unwrap().into_text().unwrap();
+            let welcome: serde_json::Value =
+                serde_json::from_str(&payload).unwrap();
+            assert_eq!(welcome["type"], "welcome");
+            assert_eq!(
+                welcome["data"]["capabilities"]["channels.read"],
+                "2026.10.22"
+            );
+            assert_eq!(
+                welcome["data"]["rejected_capabilities"]["messages.read"],
+                serde_json::json!(["2026.10.19"])
+            );
+            assert_eq!(
+                welcome["data"]["rejected_capabilities"]["vendor.unknown"],
+                serde_json::json!([])
+            );
+            task.abort();
+        }
+    }
 
     #[test]
     fn hello_rejection_reports_newer_negotiation_versions() {
