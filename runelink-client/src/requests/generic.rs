@@ -16,7 +16,7 @@ pub async fn fetch_text(client: &Client, url: &str) -> Result<String> {
         let message = response.text().await.unwrap_or_else(|e| {
             format!("Failed to get error message body: {e}")
         });
-        return Err(Error::Status(status, message));
+        return Err(Error::from_status(status, message));
     }
     let text_data = response.text().await?;
     Ok(text_data)
@@ -41,7 +41,7 @@ where
         let message = response.text().await.unwrap_or_else(|e| {
             format!("Failed to get error message body: {e}")
         });
-        return Err(Error::Status(status, message));
+        return Err(Error::from_status(status, message));
     }
     let data = response.json::<T>().await?;
     Ok(data)
@@ -72,7 +72,7 @@ where
         let message = response.text().await.unwrap_or_else(|e| {
             format!("Failed to get error message body: {e}")
         });
-        return Err(Error::Status(status, message));
+        return Err(Error::from_status(status, message));
     }
     let data = response.json::<O>().await?;
     Ok(data)
@@ -95,7 +95,7 @@ pub async fn fetch_text_authed(
         let message = response.text().await.unwrap_or_else(|e| {
             format!("Failed to get error message body: {e}")
         });
-        return Err(Error::Status(status, message));
+        return Err(Error::from_status(status, message));
     }
     let text_data = response.text().await?;
     Ok(text_data)
@@ -123,7 +123,7 @@ where
         let message = response.text().await.unwrap_or_else(|e| {
             format!("Failed to get error message body: {e}")
         });
-        return Err(Error::Status(status, message));
+        return Err(Error::from_status(status, message));
     }
     let data = response.json::<T>().await?;
     Ok(data)
@@ -157,7 +157,7 @@ where
         let message = response.text().await.unwrap_or_else(|e| {
             format!("Failed to get error message body: {e}")
         });
-        return Err(Error::Status(status, message));
+        return Err(Error::from_status(status, message));
     }
     let data = response.json::<O>().await?;
     Ok(data)
@@ -182,7 +182,7 @@ pub async fn delete_authed(
         let message = response.text().await.unwrap_or_else(|e| {
             format!("Failed to get error message body: {e}")
         });
-        return Err(Error::Status(status, message));
+        return Err(Error::from_status(status, message));
     }
     Ok(())
 }
@@ -214,7 +214,7 @@ where
         let message = response.text().await.unwrap_or_else(|e| {
             format!("Failed to get error message body: {e}")
         });
-        return Err(Error::Status(status, message));
+        return Err(Error::from_status(status, message));
     }
     let data = response.json::<O>().await?;
     Ok(data)

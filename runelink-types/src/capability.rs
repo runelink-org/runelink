@@ -282,6 +282,9 @@ pub struct CapabilityHello {
 pub struct CapabilityWelcome {
     pub negotiation_version: u16,
     pub capabilities: NegotiatedCapabilities,
+    /// Absent on older hosts. Empty lists mean the capability is missing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rejected_capabilities: Option<SupportedCapabilities>,
     pub server_version: String,
 }
 
@@ -339,6 +342,39 @@ pub fn negotiate_capabilities(
         .collect()
 }
 
+/// Reports every offered capability that could not be negotiated.
+pub fn rejected_capabilities(
+    offered: &SupportedCapabilities,
+    negotiated: &NegotiatedCapabilities,
+    catalog: CapabilityCatalog,
+) -> SupportedCapabilities {
+    offered
+        .keys()
+        .filter(|id| !negotiated.contains_key(*id))
+        .map(|id| (id.clone(), catalog(id).to_vec()))
+        .collect()
+}
+
+/// Explains incompatibility without assuming disjoint version sets imply age.
+pub fn incompatibility_reason(
+    offered: &[CapabilityVersion],
+    supported: &[CapabilityVersion],
+) -> &'static str {
+    if supported.is_empty() {
+        "capability missing"
+    } else if !offered.is_empty()
+        && supported.iter().max() < offered.iter().min()
+    {
+        "host needs updating"
+    } else if !offered.is_empty()
+        && offered.iter().max() < supported.iter().min()
+    {
+        "client needs updating"
+    } else {
+        "incompatible versions"
+    }
+}
+
 pub fn supports(
     capabilities: &NegotiatedCapabilities,
     capability: &VersionedCapability,
@@ -363,6 +399,56 @@ mod tests {
         } else {
             &[]
         }
+    }
+
+    #[test]
+    fn rejections_resolve_all_offers_and_preserve_host_versions() {
+        let offered = SupportedCapabilities::from([
+            (Capability::MessagesRead, vec![V3]),
+            (Capability::Ping, vec![V1]),
+        ]);
+        let agreed = negotiate_capabilities(
+            &offered,
+            &supported_capabilities(messages_read_only),
+        );
+        let rejected =
+            rejected_capabilities(&offered, &agreed, messages_read_only);
+        assert_eq!(rejected[&Capability::MessagesRead], vec![V1, V2]);
+        assert_eq!(rejected[&Capability::Ping], vec![]);
+        let offered =
+            SupportedCapabilities::from([(Capability::MessagesRead, vec![V1])]);
+        let agreed = negotiate_capabilities(
+            &offered,
+            &supported_capabilities(messages_read_only),
+        );
+        assert!(
+            rejected_capabilities(&offered, &agreed, messages_read_only)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn legacy_welcome_does_not_claim_missing_support() {
+        let welcome: CapabilityWelcome = serde_json::from_str(r#"{"negotiation_version":1,"capabilities":{},"server_version":"old"}"#).unwrap();
+        assert_eq!(welcome.rejected_capabilities, None);
+    }
+
+    #[test]
+    fn incompatible_version_advice_handles_mixed_and_empty_sets() {
+        assert_eq!(
+            incompatibility_reason(&[V3], &[V1, V2]),
+            "host needs updating"
+        );
+        assert_eq!(
+            incompatibility_reason(&[V1], &[V3]),
+            "client needs updating"
+        );
+        assert_eq!(
+            incompatibility_reason(&[V2], &[V1, V3]),
+            "incompatible versions"
+        );
+        assert_eq!(incompatibility_reason(&[], &[V1]), "incompatible versions");
+        assert_eq!(incompatibility_reason(&[V1], &[]), "capability missing");
     }
 
     #[test]

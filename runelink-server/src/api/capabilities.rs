@@ -71,11 +71,12 @@ pub async fn require_capability(request: Request, next: Next) -> Response {
     };
     let capability = Capability::from(capability);
     if capability != required.capability {
-        return capability_error(
-            StatusCode::BAD_REQUEST,
-            "unsupported_capability",
-            format!("Expected the {} capability", required.capability),
-        );
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
+            "code": "unsupported_capability",
+            "message": format!("Expected the {} capability", required.capability),
+            "capability": required.capability,
+            "supported_versions": http(&required.capability),
+        }))).into_response();
     }
     let requested = capability.with_version(version);
     if !required.supports(&requested) || !catalog_supports(http, &requested) {
@@ -87,14 +88,14 @@ pub async fn require_capability(request: Request, next: Next) -> Response {
                 path.as_str(),
             );
         }
-        return capability_error(
-            StatusCode::BAD_REQUEST,
-            "unsupported_capability",
-            format!(
-                "{server} does not support the {} capability",
-                requested.capability
-            ),
-        );
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
+            "code": "unsupported_capability",
+            "message": format!("{server}: {} for {} (requested {})",
+                runelink_types::capability::incompatibility_reason(&[version], supported_versions),
+                requested.capability, version),
+            "capability": requested.capability,
+            "supported_versions": supported_versions,
+        }))).into_response();
     }
     next.run(request).await
 }
@@ -206,6 +207,42 @@ impl RequiredCapability {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn http_rejections_report_supported_versions() {
+        let app = axum::Router::new()
+            .route("/users", axum::routing::get(|| async { "ok" }))
+            .route_layer(axum::middleware::from_fn(require_capability));
+        let listener =
+            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let client = reqwest::Client::new();
+        for (header, expected) in [
+            ("users.read@2020.01.01", "client needs updating"),
+            ("users.read@2099.01.01", "host needs updating"),
+            ("ping@2026.10.16", "Expected the users.read capability"),
+        ] {
+            let response = client
+                .get(format!("http://{address}/users"))
+                .header(HTTP_CAPABILITY_HEADER, header)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let body: serde_json::Value = response.json().await.unwrap();
+            assert_eq!(body["code"], "unsupported_capability");
+            assert_eq!(body["capability"], "users.read");
+            assert_eq!(
+                body["supported_versions"],
+                serde_json::json!(http(&Capability::UsersRead))
+            );
+            assert!(body["message"].as_str().unwrap().contains(expected));
+        }
+        task.abort();
+    }
 
     #[test]
     fn maps_http_operations_to_semantic_capabilities() {

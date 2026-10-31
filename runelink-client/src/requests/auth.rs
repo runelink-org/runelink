@@ -71,7 +71,7 @@ pub async fn token_password(
         let message = response.text().await.unwrap_or_else(|e| {
             format!("Failed to get error message body: {e}")
         });
-        return Err(Error::Status(status, message));
+        return Err(Error::from_status(status, message));
     }
     let data = response.json::<TokenResponse>().await?;
     Ok(data)
@@ -115,7 +115,7 @@ pub async fn token_refresh(
         let message = response.text().await.unwrap_or_else(|e| {
             format!("Failed to get error message body: {e}")
         });
-        return Err(Error::Status(status, message));
+        return Err(Error::from_status(status, message));
     }
     let data = response.json::<TokenResponse>().await?;
     Ok(data)
