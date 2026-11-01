@@ -17,3 +17,7 @@ targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-unknown-
 install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = false
+
+# macOS 14 runners retire on November 2, 2026.
+[dist.github-custom-runners]
+aarch64-apple-darwin = "macos-15"
