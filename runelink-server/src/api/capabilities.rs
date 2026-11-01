@@ -71,12 +71,10 @@ pub async fn require_capability(request: Request, next: Next) -> Response {
     };
     let capability = Capability::from(capability);
     if capability != required.capability {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-            "code": "unsupported_capability",
-            "message": format!("Expected the {} capability", required.capability),
-            "capability": required.capability,
-            "supported_versions": http(&required.capability),
-        }))).into_response();
+        return unsupported_capability(
+            &required.capability,
+            format!("Expected the {} capability", required.capability),
+        );
     }
     let requested = capability.with_version(version);
     if !required.supports(&requested) || !catalog_supports(http, &requested) {
@@ -88,14 +86,18 @@ pub async fn require_capability(request: Request, next: Next) -> Response {
                 path.as_str(),
             );
         }
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-            "code": "unsupported_capability",
-            "message": format!("{server}: {} for {} (requested {})",
-                runelink_types::capability::incompatibility_reason(&[version], supported_versions),
-                requested.capability, version),
-            "capability": requested.capability,
-            "supported_versions": supported_versions,
-        }))).into_response();
+        return unsupported_capability(
+            &required.capability,
+            format!(
+                "{server}: {} for {} (requested {})",
+                runelink_types::capability::incompatibility_reason(
+                    &[version],
+                    supported_versions
+                ),
+                requested.capability,
+                version
+            ),
+        );
     }
     next.run(request).await
 }
@@ -311,4 +313,17 @@ fn capability_error(
     message: String,
 ) -> Response {
     (status, Json(CapabilityError { code, message })).into_response()
+}
+
+fn unsupported_capability(
+    capability: &Capability,
+    message: String,
+) -> Response {
+    let body = serde_json::json!({
+        "code": "unsupported_capability",
+        "message": message,
+        "capability": capability,
+        "supported_versions": http(capability),
+    });
+    (StatusCode::BAD_REQUEST, Json(body)).into_response()
 }
