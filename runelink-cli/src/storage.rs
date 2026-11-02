@@ -8,12 +8,10 @@ use runelink_types::UserRef;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::{
-    fmt, fs,
-    io::{self, IsTerminal},
-};
+use std::{fmt, fs};
 use uuid::Uuid;
 
+use crate::cli::input::{can_prompt, read_input};
 use crate::error::CliError;
 
 const CONFIG_FILENAME: &str = "config.json";
@@ -25,6 +23,9 @@ pub struct AppConfig {
     pub accounts: Vec<AccountConfig>,
     #[serde(default)]
     pub hosts: HashMap<String, HostConfig>,
+    /// Hosts approved for HTTP by `--dangerously-allow-http` for this run
+    #[serde(skip)]
+    pub http_approved_hosts: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -149,7 +150,11 @@ pub async fn resolve_api_url(
                         .host_config(host)
                         .is_some_and(|config| config.allow_insecure)
                 {
-                    confirm_insecure_host(host)?;
+                    if !config.http_approved_hosts.iter().any(|approved| {
+                        transport_host(approved) == transport_host(host)
+                    }) {
+                        confirm_insecure_host(host)?;
+                    }
                     config.hosts.insert(
                         transport_host(host),
                         HostConfig {
@@ -188,15 +193,15 @@ pub async fn resolve_api_url(
 }
 
 fn confirm_insecure_host(host: &str) -> Result<(), CliError> {
-    if !io::stdin().is_terminal() {
+    if !can_prompt() {
         return Err(CliError::ConfigError(format!(
-            "HTTP for `{host}` requires approval. Run this command in a terminal to confirm."
+            "HTTP for `{host}` requires approval. Pass `--dangerously-allow-http {host}`, or run in a terminal without `--non-interactive` to confirm."
         )));
     }
     eprintln!(
         "A secure connection to `{host}` failed. HTTP is available, but passwords, tokens, and messages will be sent unencrypted."
     );
-    let answer = crate::cli::input::read_input(&format!(
+    let answer = read_input(&format!(
         "Allow HTTP for `{host}` and remember this choice? [y/N]: "
     ))?;
     if !answer.is_some_and(|answer| {

@@ -5,8 +5,10 @@ use log::LevelFilter;
 use reqwest::Client;
 
 use crate::{
-    error::CliError, storage::AppConfig, storage_auth::AuthCache,
-    util::parse_user_ref_input,
+    error::CliError,
+    storage::AppConfig,
+    storage_auth::AuthCache,
+    util::{parse_host_input, parse_user_ref_input},
 };
 
 pub mod account;
@@ -35,6 +37,12 @@ pub struct Cli {
     /// Disable automatic identity input normalization and fail on non-canonical values
     #[clap(long)]
     pub strict_input: bool,
+    /// Fail instead of prompting when input is missing, for scripts
+    #[clap(long)]
+    pub non_interactive: bool,
+    /// Allow and remember unencrypted HTTP for a host when HTTPS is unavailable, without prompting (repeatable)
+    #[clap(long, value_name = "HOST")]
+    pub dangerously_allow_http: Vec<String>,
     /// Increase logging verbosity (-v, -vv, -vvv)
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
@@ -86,6 +94,12 @@ pub async fn handle_cli(
     auth_cache: &mut AuthCache,
 ) -> Result<(), CliError> {
     init_logging(cli.verbose);
+    input::set_non_interactive(cli.non_interactive);
+    config.http_approved_hosts = cli
+        .dangerously_allow_http
+        .iter()
+        .map(|host| parse_host_input(host, cli.strict_input))
+        .collect::<Result<_, _>>()?;
     let account_owned = match (&cli.name, &cli.host) {
         (Some(name), Some(host)) => {
             let user_ref = parse_user_ref_input(name, host, cli.strict_input)?;

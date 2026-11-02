@@ -100,9 +100,9 @@ rune channel create
 rune message send
 ```
 
-Most commands will prompt you for any missing values (host, IDs, message body, etc.) so you can get started quickly. For scripting and non-interactive use, most prompts also have `--...` flags (run `rune --help` and `rune <command> --help`).
+Most commands will prompt you for any missing values (host, IDs, message body, etc.) so you can get started quickly. For scripting, pass the values as `--...` flags (run `rune --help` and `rune <command> --help`) and use `rune --non-interactive` to fail instead of prompting when one is missing. `rune account create` and `rune login` take `--password-stdin`.
 
-The CLI tries HTTPS first. If only HTTP is reachable, it asks before sending credentials and remembers your approval for that host and port in `config.json`. This includes local development hosts. Existing automatically saved HTTP preferences require confirmation once. Non-interactive commands fail until HTTP has been approved in a terminal. Redirects cannot change the host, port, or protocol.
+The CLI tries HTTPS first. If only HTTP is reachable, it asks before sending credentials and remembers your approval for that host and port in `config.json`. This includes local development hosts. Existing automatically saved HTTP preferences require confirmation once. Non-interactive commands fail until HTTP has been approved in a terminal or with `rune --dangerously-allow-http <HOST>`. Redirects cannot change the host, port, or protocol.
 
 ### Run the server
 

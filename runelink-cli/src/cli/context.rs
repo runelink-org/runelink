@@ -1,12 +1,10 @@
-use std::io::{self, IsTerminal};
-
 use reqwest::{Client, StatusCode};
 use runelink_client::requests;
 use runelink_types::UserRef;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::cli::input::read_password;
+use crate::cli::input::{can_prompt, read_password};
 use crate::error::CliError;
 use crate::storage::{AccountConfig, AppConfig, TryGetHost, resolve_api_url};
 use crate::storage_auth::{AccountAuth, AuthCache};
@@ -44,7 +42,7 @@ impl<'a> CliContext<'a> {
     ) -> Result<String, CliError> {
         let Some(auth) = self.auth_cache.get(user_ref) else {
             eprintln!("Not logged in: {user_ref}");
-            return self.login_with_password(user_ref).await;
+            return self.login_with_password(user_ref, None).await;
         };
 
         let now = OffsetDateTime::now_utc().unix_timestamp();
@@ -75,7 +73,7 @@ impl<'a> CliContext<'a> {
                 _,
             )) => {
                 eprintln!("Session expired: {user_ref}");
-                return self.login_with_password(user_ref).await;
+                return self.login_with_password(user_ref, None).await;
             }
             Err(e) => return Err(e.into()),
         };
@@ -92,16 +90,20 @@ impl<'a> CliContext<'a> {
         Ok(token_response.access_token)
     }
 
-    /// Prompts for the password and stores new tokens, re-prompting on
-    /// empty or rejected passwords like sudo. Returns the access token.
+    /// Logs in with `password`, or prompts for it (re-prompting on empty or
+    /// rejected input like sudo). Stores the new tokens and returns the
+    /// access token.
     pub async fn login_with_password(
         &mut self,
         user_ref: &UserRef,
+        password: Option<String>,
     ) -> Result<String, CliError> {
-        if !io::stdin().is_terminal() {
+        if password.is_none() && !can_prompt() {
             return Err(CliError::AuthenticationFailed(format!(
                 "Cannot prompt for the password of {user_ref} without a \
-                 terminal."
+                 terminal or with --non-interactive. Run `rune login --name \
+                 {} --host {} --password-stdin`.",
+                user_ref.name, user_ref.host
             )));
         }
 
@@ -110,13 +112,22 @@ impl<'a> CliContext<'a> {
         // TODO: Don't generate a random client_id for each session
         let client_id = Uuid::new_v4().to_string();
 
+        let attempts = if password.is_some() {
+            1
+        } else {
+            MAX_PASSWORD_ATTEMPTS
+        };
         let mut token_response = None;
-        for attempt in 0..MAX_PASSWORD_ATTEMPTS {
+        for attempt in 0..attempts {
             if attempt > 0 {
                 eprintln!("Sorry, try again.");
             }
-            let Some(password) = read_password("Password: ")? else {
-                continue;
+            let password = match &password {
+                Some(password) => password.clone(),
+                None => match read_password("Password: ")? {
+                    Some(password) => password,
+                    None => continue,
+                },
             };
             match requests::auth::token_password(
                 self.client,
@@ -148,9 +159,11 @@ impl<'a> CliContext<'a> {
             }
         }
         let token_response = token_response.ok_or_else(|| {
-            CliError::AuthenticationFailed(format!(
-                "{MAX_PASSWORD_ATTEMPTS} incorrect password attempts."
-            ))
+            CliError::AuthenticationFailed(if password.is_some() {
+                "Incorrect password.".into()
+            } else {
+                format!("{MAX_PASSWORD_ATTEMPTS} incorrect password attempts.")
+            })
         })?;
 
         let access_token = token_response.access_token;

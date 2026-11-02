@@ -6,7 +6,10 @@ use runelink_client::{
 use runelink_types::SignupRequest;
 
 use crate::{
-    cli::input::{read_input_preserving_whitespace, read_password},
+    cli::input::{
+        is_non_interactive, read_input_preserving_whitespace, read_password,
+        read_password_stdin,
+    },
     error::CliError,
     storage::{AccountConfig, resolve_api_url},
     util::{
@@ -34,7 +37,7 @@ pub enum AccountCommands {
     /// List accounts
     List,
     /// Create a new account
-    Create(NameAndHostArgs),
+    Create(CreateAccountArgs),
     /// Login to an account (store authentication tokens)
     Login(LoginArgs),
     /// Logout from an account (remove authentication tokens)
@@ -50,13 +53,17 @@ pub enum AccountCommands {
 }
 
 #[derive(clap::Args, Debug)]
-pub struct NameAndHostArgs {
+pub struct CreateAccountArgs {
     /// The account's username
     #[clap(long, requires = "host")]
     pub name: Option<String>,
     /// The host name of the account's host
     #[clap(long, requires = "name")]
     pub host: Option<String>,
+    /// Read the password from the first line of stdin
+    // Name and host prompts would consume stdin
+    #[clap(long, requires = "name")]
+    pub password_stdin: bool,
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -67,6 +74,9 @@ pub struct LoginArgs {
     /// The host name of the account's host
     #[clap(long, requires = "name")]
     pub host: Option<String>,
+    /// Read the password from the first line of stdin
+    #[clap(long)]
+    pub password_stdin: bool,
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -95,6 +105,9 @@ pub struct DeleteAccountArgs {
     pub name: Option<String>,
     #[clap(long, requires = "name")]
     pub host: Option<String>,
+    /// Delete without the confirmation prompt. Must match the account.
+    #[clap(long, value_name = "NAME@HOST")]
+    pub dangerously_confirm_delete: Option<String>,
 }
 
 pub async fn handle_account_commands(
@@ -136,9 +149,17 @@ pub async fn handle_account_commands(
             let name = parse_username_input(&raw_name, ctx.strict_input)?;
             let api_url =
                 resolve_api_url(ctx.client, ctx.config, &host).await?;
-            let password = read_password("Password: ")?.ok_or_else(|| {
-                CliError::InvalidArgument("Password is required.".into())
-            })?;
+            let password = if create_args.password_stdin {
+                read_password_stdin()?
+            } else {
+                read_password("Password: ")?.ok_or_else(|| {
+                    CliError::InvalidArgument(
+                        "Password is required. Pass --password-stdin to read \
+                         it from stdin."
+                            .into(),
+                    )
+                })?
+            };
             let user_display = format!("{name}@{host}");
             let signup_req = SignupRequest { name, password };
             let user =
@@ -205,7 +226,10 @@ pub async fn handle_account_commands(
             let account_user_ref = account.user_ref.clone();
             let account_display = account.to_string();
 
-            if ctx.auth_cache.has_auth(&account_user_ref) {
+            // An explicit password replaces credentials that may be stale
+            if !login_args.password_stdin
+                && ctx.auth_cache.has_auth(&account_user_ref)
+            {
                 println!("Already logged in: {account_display}");
                 return Ok(());
             }
@@ -219,7 +243,12 @@ pub async fn handle_account_commands(
                 );
             }
 
-            ctx.login_with_password(&account_user_ref).await?;
+            let password = if login_args.password_stdin {
+                Some(read_password_stdin()?)
+            } else {
+                None
+            };
+            ctx.login_with_password(&account_user_ref, password).await?;
 
             println!("Logged in successfully: {account_display}");
         }
@@ -320,19 +349,40 @@ pub async fn handle_account_commands(
             };
 
             let host = strip_default_port(&user_ref.host);
-            let confirmation = format!("delete {}@{host}", user_ref.name);
-            let confirmation_with_port =
-                format!("delete {}@{}", user_ref.name, pad_host(&host));
-            println!(
-                "This permanently deletes the account {user_ref} on its home host."
-            );
-            let input = read_input_preserving_whitespace(&format!(
-                "Type \"{confirmation}\" to confirm: "
-            ))?;
-            if input.as_deref() != Some(confirmation.as_str())
-                && input.as_deref() != Some(confirmation_with_port.as_str())
+            let accepted = [
+                format!("{}@{host}", user_ref.name),
+                format!("{}@{}", user_ref.name, pad_host(&host)),
+            ];
+            if let Some(confirmation) = &delete_args.dangerously_confirm_delete
             {
-                return Err(CliError::Cancellation);
+                if !accepted.contains(confirmation) {
+                    return Err(CliError::InvalidArgument(format!(
+                        "--dangerously-confirm-delete does not match the \
+                         account: {}",
+                        accepted[0]
+                    )));
+                }
+            } else if is_non_interactive() {
+                return Err(CliError::InvalidArgument(format!(
+                    "Pass --dangerously-confirm-delete {} to delete without a \
+                     prompt.",
+                    accepted[0]
+                )));
+            } else {
+                println!(
+                    "This permanently deletes the account {user_ref} on its home host."
+                );
+                let input = read_input_preserving_whitespace(&format!(
+                    "Type \"delete {}\" to confirm: ",
+                    accepted[0]
+                ))?;
+                if !input
+                    .as_deref()
+                    .and_then(|input| input.strip_prefix("delete "))
+                    .is_some_and(|input| accepted.iter().any(|a| a == input))
+                {
+                    return Err(CliError::Cancellation);
+                }
             }
 
             let api_url =
