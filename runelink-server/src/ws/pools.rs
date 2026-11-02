@@ -101,6 +101,33 @@ impl ClientWsPool {
         Self::remove_client_connection(&mut state, conn_id)
     }
 
+    /// Removes authentication from a connection.
+    pub async fn deauthenticate_connection(&self, conn_id: ConnId) {
+        let mut state = self.inner.write().await;
+        if let Some(user_ref) = state
+            .connections
+            .get_mut(&conn_id)
+            .and_then(|conn| conn.user_ref.take())
+        {
+            Self::remove_conn_from_user_index(
+                &mut state.by_user,
+                &user_ref,
+                conn_id,
+            );
+        }
+    }
+
+    /// Removes authentication from all connections for a user.
+    pub async fn deauthenticate_user(&self, user_ref: &UserRef) {
+        let mut state = self.inner.write().await;
+        let conn_ids = state.by_user.remove(user_ref).unwrap_or_default();
+        for conn_id in conn_ids {
+            if let Some(conn) = state.connections.get_mut(&conn_id) {
+                conn.user_ref = None;
+            }
+        }
+    }
+
     /// Sends an envelope to the active connection for the given connection ID.
     pub async fn send_to_connection(
         &self,

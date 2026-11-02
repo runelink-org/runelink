@@ -10,6 +10,7 @@ use runelink_types::{
 use super::federation;
 use crate::{
     auth::Session,
+    auth_service,
     error::{ApiError, ApiResult},
     queries,
     state::AppState,
@@ -21,7 +22,12 @@ pub async fn create(
     _session: &Session,
     new_user: &NewUser,
 ) -> ApiResult<User> {
-    let user = queries::users::insert(&state.db_pool, new_user).await?;
+    let user = queries::users::insert(
+        &state.db_pool,
+        new_user,
+        auth_service::NAME_REUSE_DELAY,
+    )
+    .await?;
     let _ = state
         .client_ws_manager
         .broadcast_update(ClientWsUpdate::UserUpserted(user.clone()))
@@ -102,7 +108,13 @@ pub async fn delete_home_user(
     )
     .await?;
 
-    queries::users::delete(&state.db_pool, user_ref.clone()).await?;
+    queries::users::delete_home(
+        &state.db_pool,
+        user_ref.clone(),
+        auth_service::NAME_REUSE_DELAY,
+    )
+    .await?;
+    state.client_ws_manager.deauthenticate_user(user_ref).await;
     let _ = state
         .client_ws_manager
         .broadcast_update(ClientWsUpdate::UserDeleted {

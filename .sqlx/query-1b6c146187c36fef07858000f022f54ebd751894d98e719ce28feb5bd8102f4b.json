@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO users (name, host, role)\n        VALUES ($1, $2, $3)\n        RETURNING\n            name,\n            host,\n            role AS \"role: UserRole\",\n            created_at,\n            updated_at,\n            synced_at;\n        ",
+  "query": "\n        INSERT INTO users (name, host, role)\n        SELECT $1, $2, $3\n        WHERE NOT EXISTS (\n            SELECT 1 FROM deleted_users\n            WHERE name = $1 AND host = $2\n                AND deleted_at > NOW() - make_interval(secs => $4)\n        )\n        RETURNING\n            name,\n            host,\n            role AS \"role: UserRole\",\n            created_at,\n            updated_at,\n            synced_at;\n        ",
   "describe": {
     "columns": [
       {
@@ -94,7 +94,8 @@
               ]
             }
           }
-        }
+        },
+        "Float8"
       ]
     },
     "nullable": [
@@ -106,5 +107,5 @@
       true
     ]
   },
-  "hash": "76c7cf284fc21992c788721d7b0f30e11fc84a9d66ffedbb1c9ab5c368e58a69"
+  "hash": "1b6c146187c36fef07858000f022f54ebd751894d98e719ce28feb5bd8102f4b"
 }

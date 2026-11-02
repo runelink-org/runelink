@@ -13,9 +13,18 @@ use time::{Duration, OffsetDateTime};
 use crate::{
     bearer_auth::ClientAuth,
     error::{ApiError, ApiResult},
+    ids::ConnId,
     queries,
     state::AppState,
 };
+
+/// How long issued client access tokens are valid.
+const ACCESS_TOKEN_LIFETIME: Duration = Duration::hours(1);
+
+/// How long a deleted user's name stays reserved: longer than any token
+/// issued to the deleted user stays valid, plus validator leeway and skew.
+pub const NAME_REUSE_DELAY: Duration =
+    Duration::minutes(ACCESS_TOKEN_LIFETIME.whole_minutes() + 5);
 
 pub struct IssuedClientToken {
     pub user_ref: UserRef,
@@ -43,6 +52,43 @@ pub fn authenticate_access_token(
     })
 }
 
+/// Authenticate a client websocket connection as a user that still exists.
+///
+/// Unlike single requests, a connection can outlive many requests, so it is
+/// checked against the database once. The check runs after registering the
+/// connection: a concurrent deletion either deauthenticates it afterwards or
+/// is seen by the check.
+pub async fn authenticate_connection(
+    state: &AppState,
+    conn_id: ConnId,
+    user_ref: UserRef,
+) -> ApiResult<()> {
+    let authenticated = state
+        .client_ws_manager
+        .authenticate_connection(conn_id, user_ref.clone())
+        .await;
+    if !authenticated {
+        return Err(ApiError::Internal(
+            "Client websocket connection not registered".into(),
+        ));
+    }
+    if let Err(error) =
+        queries::users::get_by_ref(&state.db_pool, user_ref).await
+    {
+        state
+            .client_ws_manager
+            .deauthenticate_connection(conn_id)
+            .await;
+        return Err(match error {
+            ApiError::NotFound => {
+                ApiError::AuthError("User no longer exists".into())
+            }
+            error => error,
+        });
+    }
+    Ok(())
+}
+
 pub async fn signup(
     state: &AppState,
     request: SignupRequest,
@@ -54,7 +100,9 @@ pub async fn signup(
         host: state.config.public_host(),
         role: UserRole::User,
     };
-    let user = queries::users::insert(&state.db_pool, &new_user).await?;
+    let user =
+        queries::users::insert(&state.db_pool, &new_user, NAME_REUSE_DELAY)
+            .await?;
 
     let password_hash = Argon2::default()
         .hash_password(request.password.as_bytes())
@@ -139,7 +187,7 @@ async fn issue_client_token_response(
     scope: String,
     refresh_token: Option<String>,
 ) -> ApiResult<IssuedClientToken> {
-    let lifetime = Duration::hours(1);
+    let lifetime = ACCESS_TOKEN_LIFETIME;
     let claims = ClientAccessClaims::new(
         &user_ref,
         client_id.clone(),

@@ -33,6 +33,7 @@ use tokio_tungstenite::{
 use super::handlers::{handle_client_message, handle_federation_message};
 use crate::{
     auth::Principal,
+    auth_service,
     capabilities::{
         client_websocket, federation_websocket, log_version_mismatches,
     },
@@ -174,10 +175,9 @@ async fn client_ws_loop(
         Principal::from_client_headers(&headers, &state)
         && let Some(user_ref) = UserRef::parse_subject(&auth.claims.sub)
     {
-        let _ = state
-            .client_ws_manager
-            .authenticate_connection(conn_id, user_ref)
-            .await;
+        let _ =
+            auth_service::authenticate_connection(&state, conn_id, user_ref)
+                .await;
     }
 
     loop {

@@ -47,6 +47,16 @@ impl ClientWsManager {
         self.pool.authenticate_connection(conn_id, user_ref).await
     }
 
+    /// Removes authentication from all of a user's connections, keeping the
+    /// connections themselves open.
+    pub async fn deauthenticate_user(&self, user_ref: &UserRef) {
+        self.pool.deauthenticate_user(user_ref).await;
+    }
+
+    pub async fn deauthenticate_connection(&self, conn_id: ConnId) {
+        self.pool.deauthenticate_connection(conn_id).await;
+    }
+
     pub async fn deregister_connection(&self, conn_id: ConnId) -> bool {
         self.pool.deregister_connection(conn_id).await
     }
