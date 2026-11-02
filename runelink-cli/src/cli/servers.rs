@@ -245,8 +245,11 @@ pub async fn handle_server_commands(
                 create_args.host.as_deref(),
                 ctx.strict_input,
             )?;
-            let title =
-                unwrap_or_prompt(create_args.title.clone(), "Server Title")?;
+            let title = unwrap_or_prompt(
+                create_args.title.clone(),
+                "Server Title",
+                "--title",
+            )?;
             let description = if create_args.description.is_some() {
                 create_args.description.clone()
             } else if create_args.no_description {
@@ -289,6 +292,7 @@ pub async fn handle_server_commands(
                 get_server_selection(
                     ctx,
                     ServerSelectionType::NonMemberOnly { host },
+                    "--server-id",
                 )
                 .await?
             };
@@ -328,8 +332,12 @@ pub async fn handle_server_commands(
                 let host = target_host
                     .as_deref()
                     .unwrap_or(account.user_ref.host.as_str());
-                get_server_selection(ctx, ServerSelectionType::MemberOnly)
-                    .await?
+                get_server_selection(
+                    ctx,
+                    ServerSelectionType::MemberOnly,
+                    "--server-id",
+                )
+                .await?
             };
             requests::memberships::delete(
                 ctx.client,
@@ -357,9 +365,13 @@ pub async fn handle_server_commands(
                 let host = target_host
                     .as_deref()
                     .unwrap_or(account.user_ref.host.as_str());
-                get_server_selection(ctx, ServerSelectionType::MemberOnly)
-                    .await?
-                    .id
+                get_server_selection(
+                    ctx,
+                    ServerSelectionType::MemberOnly,
+                    "--server-id",
+                )
+                .await?
+                .id
             };
             requests::servers::delete(
                 ctx.client,

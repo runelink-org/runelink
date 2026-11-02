@@ -87,12 +87,24 @@ fn read_input_internal(prompt: &str, trim: bool) -> io::Result<Option<String>> {
     }
 }
 
+/// The error for input that `flags` would provide, when prompts are disabled.
+pub fn missing_argument(flags: &str) -> CliError {
+    CliError::InvalidArgument(format!(
+        "Missing {flags}. Prompts are disabled by --non-interactive."
+    ))
+}
+
+/// Returns `arg`, or prompts for the value that the `flag` argument would
+/// provide.
 pub fn unwrap_or_prompt<T: FromStr>(
     arg: Option<T>,
     prompt: &str,
+    flag: &str,
 ) -> Result<T, CliError> {
     if let Some(arg) = arg {
         Ok(arg)
+    } else if is_non_interactive() {
+        Err(missing_argument(flag))
     } else {
         read_input(format!("{}: ", prompt).as_str())?
             .ok_or_else(|| {

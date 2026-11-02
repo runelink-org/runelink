@@ -65,6 +65,7 @@ fn select_parent(
     let (_, parent) = select_tree_inline(
         &parents,
         "Select location",
+        "--parent-id or --root",
         |(depth, _)| *depth,
         |_| true,
         |(_, parent)| match parent {
@@ -277,6 +278,7 @@ pub async fn handle_channel_commands(
                     let server = get_server_selection(
                         ctx,
                         ServerSelectionType::MemberOnly,
+                        "--server-id or --all",
                     )
                     .await?;
                     requests::channels::fetch_by_server(
@@ -345,8 +347,12 @@ pub async fn handle_channel_commands(
                     .await?
                 }
                 None => {
-                    get_server_selection(ctx, ServerSelectionType::MemberOnly)
-                        .await?
+                    get_server_selection(
+                        ctx,
+                        ServerSelectionType::MemberOnly,
+                        "--server-id",
+                    )
+                    .await?
                 }
             };
             let target_host = if server.host != account.user_ref.host {
@@ -376,18 +382,16 @@ pub async fn handle_channel_commands(
                 _ => {
                     let kinds =
                         [ServerChannelKind::Text, ServerChannelKind::Category];
-                    let kind =
-                        *select_inline(
-                            &kinds,
-                            "Select type",
-                            |kind| match kind {
-                                ServerChannelKind::Text => "Text".into(),
-                                ServerChannelKind::Category => {
-                                    "Category".into()
-                                }
-                            },
-                        )?
-                        .ok_or(CliError::Cancellation)?;
+                    let kind = *select_inline(
+                        &kinds,
+                        "Select type",
+                        "--text or --category",
+                        |kind| match kind {
+                            ServerChannelKind::Text => "Text".into(),
+                            ServerChannelKind::Category => "Category".into(),
+                        },
+                    )?
+                    .ok_or(CliError::Cancellation)?;
                     println!();
                     kind
                 }
@@ -396,6 +400,7 @@ pub async fn handle_channel_commands(
             let title = unwrap_or_prompt(
                 create_args.title.clone(),
                 &format!("{kind_label} Title"),
+                "--title",
             )?;
             let desc = if create_args.description.is_some() {
                 create_args.description.clone()
@@ -442,6 +447,7 @@ pub async fn handle_channel_commands(
                 delete_args.server_id,
                 target_host.as_deref(),
                 false,
+                "--channel-id",
             )
             .await?;
             let channel = &selection.channel;
@@ -472,6 +478,7 @@ pub async fn handle_channel_commands(
                 move_args.server_id,
                 target_host.as_deref(),
                 false,
+                "--channel-id",
             )
             .await?;
             let channel = &selection.channel;

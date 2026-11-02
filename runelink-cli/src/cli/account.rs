@@ -7,8 +7,8 @@ use runelink_types::SignupRequest;
 
 use crate::{
     cli::input::{
-        is_non_interactive, read_input_preserving_whitespace, read_password,
-        read_password_stdin,
+        is_non_interactive, missing_argument, read_input_preserving_whitespace,
+        read_password, read_password_stdin,
     },
     error::CliError,
     storage::{AccountConfig, resolve_api_url},
@@ -131,6 +131,9 @@ pub async fn handle_account_commands(
         }
 
         AccountCommands::Create(create_args) => {
+            if is_non_interactive() && create_args.host.is_none() {
+                return Err(missing_argument("--name and --host"));
+            }
             let raw_host = match &create_args.host {
                 Some(host) => host.clone(),
                 None => read_input_preserving_whitespace("Host: ")?
@@ -341,6 +344,7 @@ pub async fn handle_account_commands(
                 let account = select_inline(
                     &ctx.config.accounts,
                     "Select account to delete",
+                    "--name and --host",
                     AccountConfig::to_string,
                 )?
                 .ok_or(CliError::Cancellation)?;
@@ -363,9 +367,8 @@ pub async fn handle_account_commands(
                     )));
                 }
             } else if is_non_interactive() {
-                return Err(CliError::InvalidArgument(format!(
-                    "Pass --dangerously-confirm-delete {} to delete without a \
-                     prompt.",
+                return Err(missing_argument(&format!(
+                    "--dangerously-confirm-delete {}",
                     accepted[0]
                 )));
             } else {
