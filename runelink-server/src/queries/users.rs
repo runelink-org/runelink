@@ -1,14 +1,30 @@
 use runelink_types::{NewUser, User, UserRef, UserRole};
-use time::OffsetDateTime;
+use sqlx::{Postgres, Transaction};
+use time::{Duration, OffsetDateTime};
 
-use crate::{db::DbPool, error::ApiResult};
+use crate::{
+    db::DbPool,
+    error::{ApiError, ApiResult},
+};
 
-pub async fn insert(pool: &DbPool, new_user: &NewUser) -> ApiResult<User> {
+/// Insert a new user, unless the name was deleted less than `reuse_delay` ago.
+pub async fn insert(
+    pool: &DbPool,
+    new_user: &NewUser,
+    reuse_delay: Duration,
+) -> ApiResult<User> {
+    let mut tx = pool.begin().await?;
+    lock_user_name(&mut tx, &new_user.name, &new_user.host).await?;
     let user = sqlx::query_as!(
         User,
         r#"
         INSERT INTO users (name, host, role)
-        VALUES ($1, $2, $3)
+        SELECT $1, $2, $3
+        WHERE NOT EXISTS (
+            SELECT 1 FROM deleted_users
+            WHERE name = $1 AND host = $2
+                AND deleted_at > NOW() - make_interval(secs => $4)
+        )
         RETURNING
             name,
             host,
@@ -20,10 +36,31 @@ pub async fn insert(pool: &DbPool, new_user: &NewUser) -> ApiResult<User> {
         new_user.name,
         new_user.host,
         new_user.role as UserRole,
+        reuse_delay.as_seconds_f64(),
     )
-    .fetch_one(pool)
-    .await?;
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| {
+        ApiError::Conflict(
+            "This name was recently deleted; try again later".into(),
+        )
+    })?;
+    tx.commit().await?;
     Ok(user)
+}
+
+/// Serializes creating and deleting a user name until the transaction ends,
+/// so a signup cannot miss a deletion's reservation that commits meanwhile.
+async fn lock_user_name(
+    tx: &mut Transaction<'_, Postgres>,
+    name: &str,
+    host: &str,
+) -> ApiResult<()> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(format!("{name}@{host}"))
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
 }
 
 pub async fn upsert_remote(
@@ -124,6 +161,50 @@ pub async fn get_by_ref(pool: &DbPool, user_ref: UserRef) -> ApiResult<User> {
     .fetch_one(pool)
     .await?;
     Ok(user)
+}
+
+/// Delete a home user and record the deletion to block reusing the name for
+/// `reuse_delay`. Records past that delay are removed along the way.
+pub async fn delete_home(
+    pool: &DbPool,
+    user_ref: UserRef,
+    reuse_delay: Duration,
+) -> ApiResult<()> {
+    // Outside the transaction, so concurrent deletions never lock the same
+    // expired rows while holding different name locks.
+    sqlx::query!(
+        r#"
+        DELETE FROM deleted_users
+        WHERE deleted_at <= NOW() - make_interval(secs => $1);
+        "#,
+        reuse_delay.as_seconds_f64(),
+    )
+    .execute(pool)
+    .await?;
+
+    let mut tx = pool.begin().await?;
+    lock_user_name(&mut tx, &user_ref.name, &user_ref.host).await?;
+    let result = sqlx::query!(
+        r#"
+        WITH deleted AS (
+            DELETE FROM users WHERE name = $1 AND host = $2
+            RETURNING name, host
+        )
+        INSERT INTO deleted_users (name, host)
+        SELECT name, host FROM deleted
+        ON CONFLICT (name, host) DO UPDATE SET deleted_at = EXCLUDED.deleted_at;
+        "#,
+        user_ref.name,
+        user_ref.host
+    )
+    .execute(&mut *tx)
+    .await?;
+    // A concurrent deletion already removed the user.
+    if result.rows_affected() == 0 {
+        return Err(ApiError::NotFound);
+    }
+    tx.commit().await?;
+    Ok(())
 }
 
 pub async fn delete(pool: &DbPool, user_ref: UserRef) -> ApiResult<()> {

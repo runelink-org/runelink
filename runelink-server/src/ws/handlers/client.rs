@@ -75,15 +75,12 @@ pub(super) async fn handle_client_request(
                         "Invalid token subject (expected name@host)".into(),
                     )
                 })?;
-            let authenticated = state
-                .client_ws_manager
-                .authenticate_connection(conn_id, user_ref.clone())
-                .await;
-            if !authenticated {
-                return Err(ApiError::Internal(
-                    "Client websocket connection not registered".into(),
-                ));
-            }
+            auth_service::authenticate_connection(
+                state,
+                conn_id,
+                user_ref.clone(),
+            )
+            .await?;
             Ok(ClientWsReply::AuthTokenAccess(
                 ClientWsConnectionState::Authenticated { user_ref },
             ))
@@ -98,15 +95,12 @@ pub(super) async fn handle_client_request(
             let issued =
                 auth_service::issue_password_token(state, password_request)
                     .await?;
-            let authenticated = state
-                .client_ws_manager
-                .authenticate_connection(conn_id, issued.user_ref)
-                .await;
-            if !authenticated {
-                return Err(ApiError::Internal(
-                    "Client websocket connection not registered".into(),
-                ));
-            }
+            auth_service::authenticate_connection(
+                state,
+                conn_id,
+                issued.user_ref,
+            )
+            .await?;
             Ok(ClientWsReply::AuthToken(issued.response))
         }
 
@@ -114,15 +108,12 @@ pub(super) async fn handle_client_request(
             let issued =
                 auth_service::issue_refresh_token(state, refresh_request)
                     .await?;
-            let authenticated = state
-                .client_ws_manager
-                .authenticate_connection(conn_id, issued.user_ref)
-                .await;
-            if !authenticated {
-                return Err(ApiError::Internal(
-                    "Client websocket connection not registered".into(),
-                ));
-            }
+            auth_service::authenticate_connection(
+                state,
+                conn_id,
+                issued.user_ref,
+            )
+            .await?;
             Ok(ClientWsReply::AuthToken(issued.response))
         }
 

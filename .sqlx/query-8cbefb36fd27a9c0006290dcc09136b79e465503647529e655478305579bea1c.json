@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH deleted AS (\n            DELETE FROM users WHERE name = $1 AND host = $2\n            RETURNING name, host\n        )\n        INSERT INTO deleted_users (name, host)\n        SELECT name, host FROM deleted\n        ON CONFLICT (name, host) DO UPDATE SET deleted_at = EXCLUDED.deleted_at;\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8cbefb36fd27a9c0006290dcc09136b79e465503647529e655478305579bea1c"
+}

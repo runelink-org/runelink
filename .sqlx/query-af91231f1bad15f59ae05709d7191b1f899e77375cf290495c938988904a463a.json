@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM deleted_users\n        WHERE deleted_at <= NOW() - make_interval(secs => $1);\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "af91231f1bad15f59ae05709d7191b1f899e77375cf290495c938988904a463a"
+}

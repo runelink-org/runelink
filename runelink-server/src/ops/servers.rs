@@ -27,7 +27,6 @@ pub async fn create(
 ) -> ApiResult<Server> {
     // Handle local case
     if !state.config.is_remote_host(target_host) {
-        let server = queries::servers::insert(state, new_server).await?;
         // Get the creator's user identity
         // Since this requires HostAdmin (which requires client auth), these fields are always present
         let user_ref = session.user_ref.clone().ok_or_else(|| {
@@ -35,8 +34,16 @@ pub async fn create(
                 "Session missing user identity for server creation".into(),
             )
         })?;
-        // Ensure user exists (creates record for federated users from other hosts)
-        queries::users::ensure_exists(&state.db_pool, user_ref.clone()).await?;
+        if !state.config.is_remote_host(Some(&user_ref.host)) {
+            // Never recreate a home user deleted while this request ran
+            queries::users::get_by_ref(&state.db_pool, user_ref.clone())
+                .await?;
+        } else {
+            // Creates the record for federated users from other hosts
+            queries::users::ensure_exists(&state.db_pool, user_ref.clone())
+                .await?;
+        }
+        let server = queries::servers::insert(state, new_server).await?;
         let new_membership = NewServerMembership {
             user_ref,
             server_id: server.id,
