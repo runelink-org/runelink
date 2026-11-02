@@ -16,13 +16,13 @@ use std::io::Write;
 
 use crate::error::CliError;
 
-use super::context::CliContext;
+use super::{context::CliContext, input::is_non_interactive};
 
 pub fn select_inline<'a, T, F>(
     items: &'a [T],
     prompt: &str,
     display: F,
-) -> std::io::Result<Option<&'a T>>
+) -> Result<Option<&'a T>, CliError>
 where
     F: Fn(&T) -> String,
 {
@@ -31,19 +31,26 @@ where
 
 /// Like `select_inline`, indenting items by their tree depth while choosing.
 /// Unselectable items are shown dimmed and skipped by the cursor. The
-/// confirmed item is shown without its indentation.
+/// confirmed item is shown without its indentation. Fails with
+/// `--non-interactive`.
 pub fn select_tree_inline<'a, T, D, S, F>(
     items: &'a [T],
     prompt: &str,
     depth: D,
     selectable: S,
     display: F,
-) -> std::io::Result<Option<&'a T>>
+) -> Result<Option<&'a T>, CliError>
 where
     D: Fn(&T) -> usize,
     S: Fn(&T) -> bool,
     F: Fn(&T) -> String,
 {
+    if is_non_interactive() {
+        return Err(CliError::InvalidArgument(format!(
+            "{prompt}: not available with --non-interactive. Pass the \
+             matching argument instead (see --help)."
+        )));
+    }
     let (Some(first), Some(last)) = (
         items.iter().position(&selectable),
         items.iter().rposition(&selectable),
