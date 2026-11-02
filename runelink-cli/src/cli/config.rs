@@ -85,6 +85,7 @@ pub async fn handle_default_account_commands(
                 let tmp = select_inline(
                     &ctx.config.accounts,
                     "Select account",
+                    "--name and --host",
                     AccountConfig::to_string,
                 )?
                 .ok_or(CliError::Cancellation)?;

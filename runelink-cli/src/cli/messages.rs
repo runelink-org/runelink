@@ -202,7 +202,8 @@ pub async fn handle_message_commands(
             let account = ctx.account.ok_or(CliError::MissingAccount)?;
             let (text_channel_id, target_host) =
                 resolve_text_channel(ctx, &send_args.channel).await?;
-            let body = unwrap_or_prompt(send_args.body.clone(), "Message")?;
+            let body =
+                unwrap_or_prompt(send_args.body.clone(), "Message", "--body")?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
             let new_message = NewMessage {
@@ -263,6 +264,7 @@ async fn resolve_text_channel(
         args.server_id,
         host.as_deref(),
         true,
+        "--channel-id or --text-channel-id",
     )
     .await?;
     let ServerChannelContent::Text { text_channel_id } =

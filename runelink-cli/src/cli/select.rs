@@ -16,26 +16,32 @@ use std::io::Write;
 
 use crate::error::CliError;
 
-use super::{context::CliContext, input::is_non_interactive};
+use super::{
+    context::CliContext,
+    input::{is_non_interactive, missing_argument},
+};
 
+/// Interactively select an item. With `--non-interactive`, fails naming the
+/// `flags` that would provide the choice instead.
 pub fn select_inline<'a, T, F>(
     items: &'a [T],
     prompt: &str,
+    flags: &str,
     display: F,
 ) -> Result<Option<&'a T>, CliError>
 where
     F: Fn(&T) -> String,
 {
-    select_tree_inline(items, prompt, |_| 0, |_| true, display)
+    select_tree_inline(items, prompt, flags, |_| 0, |_| true, display)
 }
 
 /// Like `select_inline`, indenting items by their tree depth while choosing.
 /// Unselectable items are shown dimmed and skipped by the cursor. The
-/// confirmed item is shown without its indentation. Fails with
-/// `--non-interactive`.
+/// confirmed item is shown without its indentation.
 pub fn select_tree_inline<'a, T, D, S, F>(
     items: &'a [T],
     prompt: &str,
+    flags: &str,
     depth: D,
     selectable: S,
     display: F,
@@ -46,10 +52,7 @@ where
     F: Fn(&T) -> String,
 {
     if is_non_interactive() {
-        return Err(CliError::InvalidArgument(format!(
-            "{prompt}: not available with --non-interactive. Pass the \
-             matching argument instead (see --help)."
-        )));
+        return Err(missing_argument(flags));
     }
     let (Some(first), Some(last)) = (
         items.iter().position(&selectable),
@@ -168,9 +171,12 @@ pub enum ServerSelectionType<'a> {
     NonMemberOnly { host: &'a str },
 }
 
+/// Interactively select a server. `flags` name the arguments that would
+/// provide the choice instead.
 pub async fn get_server_selection(
     ctx: &mut CliContext<'_>,
     selection_type: ServerSelectionType<'_>,
+    flags: &str,
 ) -> Result<Server, CliError> {
     let api_url = ctx.home_api_url().await?;
     let account = ctx.account.ok_or(CliError::MissingAccount)?;
@@ -232,8 +238,9 @@ pub async fn get_server_selection(
             selection_type,
         )));
     }
-    let server = select_inline(&servers, "Select server", Server::to_string)?
-        .ok_or(CliError::Cancellation)?;
+    let server =
+        select_inline(&servers, "Select server", flags, Server::to_string)?
+            .ok_or(CliError::Cancellation)?;
     println!();
     Ok(server.clone())
 }
@@ -274,12 +281,14 @@ pub fn indented(depth: usize, item: impl fmt::Display) -> String {
     format!("{}{item}", "  ".repeat(depth))
 }
 
-/// Interactively select a channel, optionally only text channels.
+/// Interactively select a channel, optionally only text channels. `flags`
+/// name the arguments that would provide the choice instead.
 pub async fn get_channel_selection(
     ctx: &mut CliContext<'_>,
     server_id: ServerId,
     server_host: &str,
     text_only: bool,
+    flags: &str,
 ) -> Result<ChannelSelection, CliError> {
     let api_url = ctx.home_api_url().await?;
     let access_token = ctx.get_access_token().await?;
@@ -310,6 +319,7 @@ pub async fn get_channel_selection(
     let (_, channel) = select_tree_inline(
         &choices,
         prompt,
+        flags,
         |(depth, _)| *depth,
         |(_, c)| selectable(c),
         |(_, c)| c.to_string(),
@@ -324,13 +334,15 @@ pub async fn get_channel_selection(
 
 /// Resolve a channel by ID, or prompt for one in the given server, or in a
 /// server chosen at a prompt. Prompts offer only text channels when
-/// `text_only` is set.
+/// `text_only` is set. `flags` name the arguments that would provide the
+/// channel instead.
 pub async fn get_channel_selection_with_inputs(
     ctx: &mut CliContext<'_>,
     channel_id: Option<ServerChannelId>,
     server_id: Option<ServerId>,
     host: Option<&str>,
     text_only: bool,
+    flags: &str,
 ) -> Result<ChannelSelection, CliError> {
     let host = match host {
         Some(host) => host.to_string(),
@@ -351,18 +363,28 @@ pub async fn get_channel_selection_with_inputs(
             Ok(ChannelSelection { host, channel })
         }
         (None, Some(server_id)) => {
-            get_channel_selection(ctx, server_id, host.as_str(), text_only)
-                .await
+            get_channel_selection(
+                ctx,
+                server_id,
+                host.as_str(),
+                text_only,
+                flags,
+            )
+            .await
         }
         (None, None) => {
-            let server =
-                get_server_selection(ctx, ServerSelectionType::MemberOnly)
-                    .await?;
+            let server = get_server_selection(
+                ctx,
+                ServerSelectionType::MemberOnly,
+                flags,
+            )
+            .await?;
             get_channel_selection(
                 ctx,
                 server.id,
                 server.host.as_str(),
                 text_only,
+                flags,
             )
             .await
         }
