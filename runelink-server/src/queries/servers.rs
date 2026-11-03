@@ -2,7 +2,10 @@ use runelink_types::server::{NewServer, Server, ServerId};
 use time::OffsetDateTime;
 
 use crate::{
-    config::ServerConfig, db::DbPool, error::ApiResult, state::AppState,
+    config::{ServerConfig, canonical_host},
+    db::DbPool,
+    error::{ApiError, ApiResult},
+    state::AppState,
 };
 
 #[derive(sqlx::FromRow, Debug)]
@@ -47,25 +50,42 @@ pub async fn insert(
     Ok(row.into_server(&state.config))
 }
 
-pub async fn upsert_remote(pool: &DbPool, server: &Server) -> ApiResult<()> {
-    sqlx::query!(
+/// Cache a remote server reported by `source_host`.
+///
+/// Only a server's own host may report it, and a cached server's host never
+/// changes, so the first host to claim a server ID keeps it. Local server IDs
+/// are never cached.
+pub async fn upsert_remote(
+    pool: &DbPool,
+    server: &Server,
+    source_host: &str,
+) -> ApiResult<()> {
+    let host = canonical_host(&server.host);
+    if host != canonical_host(source_host) {
+        return Err(ApiError::Conflict(format!(
+            "{source_host} cannot report servers on {}",
+            server.host
+        )));
+    }
+    let result = sqlx::query!(
         r#"
         INSERT INTO cached_remote_servers (
             id, host, title, description, remote_created_at,
             remote_updated_at, synced_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        SELECT $1, $2, $3, $4, $5, $6, NOW()
+        WHERE NOT EXISTS (SELECT 1 FROM servers WHERE id = $1)
         ON CONFLICT(id) DO UPDATE
-            SET host = EXCLUDED.host,
-                title = EXCLUDED.title,
+            SET title = EXCLUDED.title,
                 description = EXCLUDED.description,
                 remote_created_at = EXCLUDED.remote_created_at,
                 remote_updated_at = EXCLUDED.remote_updated_at,
                 synced_at = NOW()
         WHERE cached_remote_servers.remote_updated_at <= EXCLUDED.remote_updated_at
+            AND cached_remote_servers.host = EXCLUDED.host
         "#,
         server.id.as_uuid(),
-        server.host,
+        host,
         server.title,
         server.description,
         server.created_at,
@@ -73,8 +93,24 @@ pub async fn upsert_remote(pool: &DbPool, server: &Server) -> ApiResult<()> {
     )
     .execute(pool)
     .await?;
+    if result.rows_affected() == 0 {
+        // The update is stale, or another host claimed this ID first.
+        let cached_host = sqlx::query_scalar!(
+            "SELECT host FROM cached_remote_servers WHERE id = $1",
+            server.id.as_uuid(),
+        )
+        .fetch_optional(pool)
+        .await?;
+        if cached_host.as_deref() != Some(host.as_str()) {
+            return Err(ApiError::Conflict(format!(
+                "Server {} belongs to another host",
+                server.id
+            )));
+        }
+    }
     Ok(())
 }
+
 pub async fn get_by_id(
     state: &AppState,
     server_id: ServerId,
@@ -112,7 +148,6 @@ pub async fn update(
     server_id: ServerId,
     update: &runelink_types::edit::DetailsUpdate,
 ) -> ApiResult<Server> {
-    use crate::error::ApiError;
     if update
         .title
         .as_ref()

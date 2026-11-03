@@ -225,8 +225,17 @@ pub async fn handle_federation_message(
                 );
                 return;
             }
+            let Some(sender) = state
+                .federation_ws_manager
+                .authenticated_host(conn_id)
+                .await
+            else {
+                log::warn!("Ignoring update from unauthenticated connection");
+                return;
+            };
             if let Err(error) =
-                federation::handle_federation_update(state, update).await
+                federation::handle_federation_update(state, &sender, update)
+                    .await
             {
                 log::warn!(
                     "Failed handling federation websocket update: {error}"

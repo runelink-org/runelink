@@ -1,0 +1,1 @@
+-- Data-only migration; removed and renamed cache rows are not restored.

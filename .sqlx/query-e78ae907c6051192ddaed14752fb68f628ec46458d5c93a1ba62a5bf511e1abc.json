@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            s.host,\n            m.user_name AS \"user_name?\",\n            m.user_host AS \"user_host?\"\n        FROM cached_remote_servers s\n        LEFT JOIN user_remote_server_memberships m\n            ON m.remote_server_id = s.id\n        WHERE s.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "host",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "cached_remote_servers",
+            "name": "host"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "user_name?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_remote_server_memberships",
+            "name": "user_name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "user_host?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_remote_server_memberships",
+            "name": "user_host"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "e78ae907c6051192ddaed14752fb68f628ec46458d5c93a1ba62a5bf511e1abc"
+}

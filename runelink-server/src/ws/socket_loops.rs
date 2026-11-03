@@ -12,7 +12,10 @@ use axum::{
     response::IntoResponse,
 };
 use futures_util::{SinkExt, StreamExt};
-use runelink_client::util::host_from_issuer;
+use runelink_client::{
+    util::{get_api_url, host_from_issuer},
+    validation::validate_host,
+};
 use runelink_types::{
     capability::{
         CapabilityWelcome, NegotiatedCapabilities, negotiate_capabilities,
@@ -222,6 +225,13 @@ async fn client_ws_loop(
     let _ = state.client_ws_manager.deregister_connection(conn_id).await;
 }
 
+/// The host named by a federation issuer, which must be that host's exact
+/// canonical API URL.
+fn issuer_host(iss: &str, secure: bool) -> Option<String> {
+    let host = validate_host(&host_from_issuer(iss)).ok()?;
+    (iss == get_api_url(&host, secure)).then_some(host)
+}
+
 async fn federation_ws_upgrade_loop(
     state: AppState,
     headers: HeaderMap,
@@ -241,7 +251,13 @@ async fn federation_ws_upgrade_loop(
             return;
         }
     };
-    let host = host_from_issuer(&auth.claims.iss);
+    let Some(host) = issuer_host(&auth.claims.iss, state.config.secure) else {
+        log::warn!(
+            "Rejected federation websocket with non-canonical issuer {}",
+            auth.claims.iss
+        );
+        return;
+    };
     let mut socket = FederationSocket::Inbound(Box::new(socket));
     let Some(capabilities) =
         negotiate_federation_socket(&host, &mut socket).await
@@ -473,7 +489,29 @@ pub async fn federation_socket_loop(
 
 #[cfg(test)]
 mod tests {
-    use super::hello_rejection;
+    use super::{hello_rejection, issuer_host};
+
+    #[test]
+    fn issuer_host_requires_canonical_issuers() {
+        assert_eq!(
+            issuer_host("http://example.com:7000", false).as_deref(),
+            Some("example.com")
+        );
+        assert_eq!(
+            issuer_host("https://example.com:7001", true).as_deref(),
+            Some("example.com:7001")
+        );
+        for iss in [
+            "http://http://example.com:7000",
+            "http://example.com:7000@evil.com",
+            "http://evil.com:7000/path",
+            "http://example.com:7000/",
+            "http://Example.com:7000",
+        ] {
+            assert_eq!(issuer_host(iss, false), None, "{iss}");
+        }
+        assert_eq!(issuer_host("http://example.com:7000", true), None);
+    }
 
     #[tokio::test]
     async fn client_and_federation_welcomes_resolve_every_offer() {

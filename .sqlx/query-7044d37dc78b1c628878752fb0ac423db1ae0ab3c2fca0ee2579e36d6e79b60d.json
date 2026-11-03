@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO cached_remote_servers (\n            id, host, title, description, remote_created_at,\n            remote_updated_at, synced_at\n        )\n        SELECT $1, $2, $3, $4, $5, $6, NOW()\n        WHERE NOT EXISTS (SELECT 1 FROM servers WHERE id = $1)\n        ON CONFLICT(id) DO UPDATE\n            SET title = EXCLUDED.title,\n                description = EXCLUDED.description,\n                remote_created_at = EXCLUDED.remote_created_at,\n                remote_updated_at = EXCLUDED.remote_updated_at,\n                synced_at = NOW()\n        WHERE cached_remote_servers.remote_updated_at <= EXCLUDED.remote_updated_at\n            AND cached_remote_servers.host = EXCLUDED.host\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7044d37dc78b1c628878752fb0ac423db1ae0ab3c2fca0ee2579e36d6e79b60d"
+}
