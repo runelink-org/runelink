@@ -117,11 +117,34 @@ impl ServerConfig {
         )
     }
 
-    pub fn is_remote_host(&self, host: Option<&str>) -> bool {
-        let Some(host) = host else {
-            return false;
-        };
-        !hosts_match(host, self.public_host().as_str())
+    /// Whether a host is this host or a remote one.
+    pub fn locality<'a>(&self, host: &'a str) -> Locality<'a> {
+        if hosts_match(host, &self.public_host()) {
+            Locality::Local
+        } else {
+            Locality::Remote(host)
+        }
+    }
+
+    /// Like [`Self::locality`], but no target host means this host.
+    pub fn target_locality<'a>(&self, host: Option<&'a str>) -> Locality<'a> {
+        host.map_or(Locality::Local, |host| self.locality(host))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Locality<'a> {
+    Local,
+    Remote(&'a str),
+}
+
+impl Locality<'_> {
+    pub fn is_local(self) -> bool {
+        self == Self::Local
+    }
+
+    pub fn is_remote(self) -> bool {
+        !self.is_local()
     }
 }
 
