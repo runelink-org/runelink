@@ -5,7 +5,7 @@ use runelink_client::util::get_api_url;
 use runelink_types::{
     auth::FederationClaims,
     server::{ServerId, ServerMembership, ServerRole},
-    user::{User, UserRef, UserRole},
+    user::{User, UserRef},
 };
 
 use crate::{
@@ -139,25 +139,21 @@ impl Requirement {
                             .into(),
                     ));
                 }
-                if user_ref.name != expected.name
-                    || user_ref.host != expected.host
-                {
+                if user_ref != expected {
                     return Ok(Some("Invalid delegated federated user".into()));
                 }
             }
 
             Requirement::User(expected) => {
                 let user = ctx.get_user().await?;
-                if user.is_none()
-                    || user.as_ref().unwrap().as_ref() != *expected
-                {
+                if !user.is_some_and(|user| user.as_ref() == *expected) {
                     return Ok(Some("Invalid user".into()));
                 }
             }
 
             Requirement::HostAdmin => {
                 let user = ctx.get_user().await?;
-                if user.is_none() || user.unwrap().role != UserRole::Admin {
+                if !user.is_some_and(User::is_admin) {
                     return Ok(Some("Host admin only".into()));
                 }
             }
@@ -171,9 +167,9 @@ impl Requirement {
 
             Requirement::ServerAdmin(server_id) => {
                 let membership = ctx.get_membership(*server_id).await?;
-                if membership.is_none()
-                    || membership.unwrap().role != ServerRole::Admin
-                {
+                if !membership.is_some_and(|membership| {
+                    membership.role == ServerRole::Admin
+                }) {
                     return Ok(Some("Server admin only".into()));
                 }
             }
@@ -208,14 +204,13 @@ impl Requirement {
                     }
                 }
                 if !found {
-                    let combined_error = if errors.len() == 1 {
-                        errors.first().unwrap().clone()
-                    } else {
-                        errors
+                    let combined_error = match errors.as_slice() {
+                        [error] => error.clone(),
+                        errors => errors
                             .iter()
                             .map(|e| format!("({e})"))
                             .collect::<Vec<String>>()
-                            .join(" and ")
+                            .join(" and "),
                     };
                     return Ok(Some(combined_error));
                 }

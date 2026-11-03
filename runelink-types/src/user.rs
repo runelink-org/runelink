@@ -49,6 +49,10 @@ impl User {
             host: self.host.clone(),
         }
     }
+
+    pub fn is_admin(&self) -> bool {
+        self.role == UserRole::Admin
+    }
 }
 
 impl fmt::Display for User {
