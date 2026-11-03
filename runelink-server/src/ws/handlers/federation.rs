@@ -10,22 +10,47 @@ use runelink_types::{
 
 use super::shared::authorize_federation;
 use crate::{
+    config::hosts_match,
     error::{ApiError, ApiResult},
     ids::ConnId,
     ops, queries,
     state::AppState,
 };
 
+/// Get the cached members of a remote server, rejecting senders that do not
+/// own it. Returns `None` for servers that are not cached.
+async fn authorized_remote_server_users(
+    state: &AppState,
+    sender: &str,
+    server_id: ServerId,
+) -> ApiResult<Option<Vec<UserRef>>> {
+    let Some(members) = state
+        .routing_index
+        .members_for_remote_server(server_id)
+        .await?
+    else {
+        return Ok(None);
+    };
+    if !hosts_match(&members.host, sender) {
+        return Err(ApiError::Conflict(format!(
+            "{sender} does not own server {server_id}"
+        )));
+    }
+    Ok(Some(members.users))
+}
+
 /// Fanout a remote server update to the local users (best effort).
 async fn fanout_remote_server_update(
     state: &AppState,
+    sender: &str,
     server_id: ServerId,
     client_update: ClientWsUpdate,
 ) -> ApiResult<()> {
-    let local_users = state
-        .routing_index
-        .users_for_remote_server(server_id)
-        .await?;
+    let Some(local_users) =
+        authorized_remote_server_users(state, sender, server_id).await?
+    else {
+        return Ok(());
+    };
     let _ = state
         .client_ws_manager
         .send_update_to_users(local_users, client_update)
@@ -33,16 +58,27 @@ async fn fanout_remote_server_update(
     Ok(())
 }
 
-/// Handle a federation websocket update.
+/// Handle a federation websocket update from `sender`, which must own the
+/// resource that the update is about.
 pub(super) async fn handle_federation_update(
     state: &AppState,
+    sender: &str,
     update: FederationWsUpdate,
 ) -> ApiResult<()> {
-    info!("WS federation: update={:#?}", update);
+    info!("WS federation: update from {sender}: {update:#?}");
+    if !state.config.is_remote_host(Some(sender)) {
+        return Err(ApiError::AuthError(
+            "Federation updates cannot come from the local host".into(),
+        ));
+    }
     match update {
         FederationWsUpdate::MembershipUpserted(membership) => {
-            queries::servers::upsert_remote(&state.db_pool, &membership.server)
-                .await?;
+            queries::servers::upsert_remote(
+                &state.db_pool,
+                &membership.server,
+                sender,
+            )
+            .await?;
             queries::memberships::insert_remote(
                 &state.db_pool,
                 &membership.clone().into(),
@@ -50,6 +86,7 @@ pub(super) async fn handle_federation_update(
             .await?;
             fanout_remote_server_update(
                 state,
+                sender,
                 membership.server.id,
                 ClientWsUpdate::MembershipUpserted(membership),
             )
@@ -60,37 +97,39 @@ pub(super) async fn handle_federation_update(
             server_id,
             user_ref,
         } => {
+            let Some(mut targets) =
+                authorized_remote_server_users(state, sender, server_id)
+                    .await?
+            else {
+                return Ok(());
+            };
             let _ = queries::memberships::delete_remote(
                 &state.db_pool,
                 server_id,
                 user_ref.clone(),
             )
             .await;
-            let mut targets = state
-                .routing_index
-                .users_for_remote_server(server_id)
-                .await?;
-            if user_ref.host == state.config.public_host()
-                && !targets.contains(&user_ref)
-            {
+            if !state.config.is_remote_host(Some(&user_ref.host)) {
                 targets.push(user_ref.clone());
             }
-            let client_update = ClientWsUpdate::MembershipDeleted {
-                server_id,
-                user_ref,
-            };
-            for local_user in targets {
-                let _ = state
-                    .client_ws_manager
-                    .send_update_to_user(&local_user, client_update.clone())
-                    .await;
-            }
+            let _ = state
+                .client_ws_manager
+                .send_update_to_users(
+                    targets,
+                    ClientWsUpdate::MembershipDeleted {
+                        server_id,
+                        user_ref,
+                    },
+                )
+                .await;
         }
 
         FederationWsUpdate::ServerUpserted(server) => {
-            queries::servers::upsert_remote(&state.db_pool, &server).await?;
+            queries::servers::upsert_remote(&state.db_pool, &server, sender)
+                .await?;
             fanout_remote_server_update(
                 state,
+                sender,
                 server.id,
                 ClientWsUpdate::ServerUpserted(server),
             )
@@ -100,6 +139,7 @@ pub(super) async fn handle_federation_update(
         FederationWsUpdate::ServerDeleted { server_id } => {
             fanout_remote_server_update(
                 state,
+                sender,
                 server_id,
                 ClientWsUpdate::ServerDeleted { server_id },
             )
@@ -109,6 +149,7 @@ pub(super) async fn handle_federation_update(
         FederationWsUpdate::ChannelUpserted(channel) => {
             fanout_remote_server_update(
                 state,
+                sender,
                 channel.server_id,
                 ClientWsUpdate::ChannelUpserted(channel),
             )
@@ -121,6 +162,7 @@ pub(super) async fn handle_federation_update(
         } => {
             fanout_remote_server_update(
                 state,
+                sender,
                 server_id,
                 ClientWsUpdate::ChannelDeleted {
                     server_id,
@@ -133,6 +175,7 @@ pub(super) async fn handle_federation_update(
         FederationWsUpdate::MessageUpserted { server_id, message } => {
             fanout_remote_server_update(
                 state,
+                sender,
                 server_id,
                 ClientWsUpdate::MessageUpserted(message),
             )
@@ -140,6 +183,12 @@ pub(super) async fn handle_federation_update(
         }
 
         FederationWsUpdate::RemoteUserDeleted { user_ref } => {
+            if !hosts_match(&user_ref.host, sender) {
+                return Err(ApiError::Conflict(format!(
+                    "{sender} cannot delete users on {}",
+                    user_ref.host
+                )));
+            }
             let _ = state
                 .client_ws_manager
                 .broadcast_update(ClientWsUpdate::UserDeleted { user_ref })

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use runelink_client::util::{get_api_url, pad_host};
+use runelink_client::util::{get_api_url, strip_default_port};
 use runelink_client::validation::validate_config_host;
 use serde::Deserialize;
 
@@ -121,8 +121,18 @@ impl ServerConfig {
         let Some(host) = host else {
             return false;
         };
-        pad_host(host) != pad_host(self.public_host().as_str())
+        !hosts_match(host, self.public_host().as_str())
     }
+}
+
+/// The canonical spelling of a host: lowercase, without the default port.
+pub fn canonical_host(host: &str) -> String {
+    strip_default_port(host).to_ascii_lowercase()
+}
+
+/// Whether two host strings name the same host.
+pub fn hosts_match(a: &str, b: &str) -> bool {
+    canonical_host(a) == canonical_host(b)
 }
 
 #[derive(Deserialize, Debug)]
@@ -239,4 +249,17 @@ fn validate_unique_resources(configs: &[ServerConfig]) -> ConfigResult<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hosts_match;
+
+    #[test]
+    fn hosts_match_ignores_default_port_and_case() {
+        assert!(hosts_match("example.com", "example.com:7000"));
+        assert!(hosts_match("Example.COM", "example.com"));
+        assert!(!hosts_match("example.com", "example.com:7001"));
+        assert!(!hosts_match("example.com", "example.org"));
+    }
 }

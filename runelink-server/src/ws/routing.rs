@@ -2,7 +2,12 @@ use std::sync::Arc;
 
 use runelink_types::{server::ServerId, user::UserRef};
 
-use crate::{config::ServerConfig, db::DbPool, error::ApiResult, queries};
+use crate::{
+    config::ServerConfig,
+    db::DbPool,
+    error::ApiResult,
+    queries::{self, memberships::RemoteServerMembers},
+};
 
 #[derive(Clone, Debug)]
 pub struct RoutingIndex {
@@ -59,12 +64,12 @@ impl RoutingIndex {
         Ok(local_users)
     }
 
-    /// Get the users for a remote server.
-    pub async fn users_for_remote_server(
+    /// Get the owning host and users for a cached remote server.
+    pub async fn members_for_remote_server(
         &self,
         server_id: ServerId,
-    ) -> ApiResult<Vec<UserRef>> {
-        queries::memberships::get_user_refs_by_remote_server(
+    ) -> ApiResult<Option<RemoteServerMembers>> {
+        queries::memberships::get_remote_server_members(
             self.db_pool.as_ref(),
             server_id,
         )

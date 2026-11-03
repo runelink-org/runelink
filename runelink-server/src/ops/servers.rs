@@ -99,7 +99,7 @@ pub async fn create(
             )));
         };
         // Cache the remote server and creator's admin membership on the home server.
-        queries::servers::upsert_remote(&state.db_pool, &server).await?;
+        queries::servers::upsert_remote(&state.db_pool, &server, host).await?;
         let remote_membership = ServerMembership {
             server: server.clone(),
             user_ref,
@@ -321,12 +321,13 @@ pub async fn update(
     target_host: Option<&str>,
 ) -> ApiResult<Server> {
     if state.config.is_remote_host(target_host) {
+        let host = target_host.unwrap();
         let user_ref = session.user_ref.clone().ok_or_else(|| {
             ApiError::AuthError("User identity required".into())
         })?;
         let reply = federation::request(
             state,
-            target_host.unwrap(),
+            host,
             Some(user_ref),
             FederationWsRequest::ServersUpdate {
                 server_id,
@@ -337,7 +338,8 @@ pub async fn update(
         let FederationWsReply::ServersUpdate(resource) = reply else {
             return Err(ApiError::Internal("Unexpected edit reply".into()));
         };
-        queries::servers::upsert_remote(&state.db_pool, &resource).await?;
+        queries::servers::upsert_remote(&state.db_pool, &resource, host)
+            .await?;
         return Ok(resource);
     }
     let resource =

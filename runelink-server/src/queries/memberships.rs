@@ -295,28 +295,40 @@ pub async fn get_user_refs_by_local_server(
         .collect())
 }
 
-pub async fn get_user_refs_by_remote_server(
+/// A cached remote server's owning host and its cached members.
+pub struct RemoteServerMembers {
+    pub host: String,
+    pub users: Vec<UserRef>,
+}
+
+pub async fn get_remote_server_members(
     pool: &DbPool,
     server_id: ServerId,
-) -> ApiResult<Vec<UserRef>> {
+) -> ApiResult<Option<RemoteServerMembers>> {
     let rows = sqlx::query!(
         r#"
-        SELECT DISTINCT
-            ursm.user_name,
-            ursm.user_host
-        FROM user_remote_server_memberships ursm
-        WHERE ursm.remote_server_id = $1
-        ORDER BY user_name, user_host
+        SELECT
+            s.host,
+            m.user_name AS "user_name?",
+            m.user_host AS "user_host?"
+        FROM cached_remote_servers s
+        LEFT JOIN user_remote_server_memberships m
+            ON m.remote_server_id = s.id
+        WHERE s.id = $1
         "#,
         server_id.as_uuid(),
     )
     .fetch_all(pool)
     .await?;
 
-    Ok(rows
+    let Some(host) = rows.first().map(|row| row.host.clone()) else {
+        return Ok(None);
+    };
+    let users = rows
         .into_iter()
-        .map(|row| UserRef::new(row.user_name, row.user_host))
-        .collect())
+        .filter_map(|row| Some(UserRef::new(row.user_name?, row.user_host?)))
+        .collect();
+    Ok(Some(RemoteServerMembers { host, users }))
 }
 
 pub async fn get_local_by_user_and_server(

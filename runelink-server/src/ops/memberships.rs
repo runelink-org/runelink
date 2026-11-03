@@ -58,8 +58,12 @@ pub async fn upsert(
         };
         let user = membership.user.clone();
         // Cache the remote server and membership locally
-        queries::servers::upsert_remote(&state.db_pool, &membership.server)
-            .await?;
+        queries::servers::upsert_remote(
+            &state.db_pool,
+            &membership.server,
+            host,
+        )
+        .await?;
         let cached_membership = queries::memberships::insert_remote(
             &state.db_pool,
             &membership.into(),
