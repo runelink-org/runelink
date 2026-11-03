@@ -11,6 +11,7 @@ use runelink_types::{
 use super::federation;
 use crate::{
     auth::Session,
+    config::Locality,
     error::{ApiError, ApiResult},
     ops::fanout,
     queries,
@@ -25,72 +26,74 @@ pub async fn create(
     new_message: &NewMessage,
     target_host: Option<&str>,
 ) -> ApiResult<Message> {
-    // Handle local case
-    if !state.config.is_remote_host(target_host) {
-        let server_id = queries::channels::get_server_id_by_text_channel(
-            &state.db_pool,
-            text_channel_id,
-        )
-        .await?;
-        if let Some(reply_to) = new_message.reply_to {
-            // Deleted targets remain valid. Channel restrictions belong here,
-            // rather than in the schema, to allow broader scopes in the future.
-            let target = queries::messages::get_by_id(&state.db_pool, reply_to)
-                .await
-                .map_err(|error| match error {
-                    ApiError::NotFound => ApiError::BadRequest(
-                        "Reply target not found in this text channel".into(),
-                    ),
-                    error => error,
-                })?;
-            if target.text_channel_id != text_channel_id {
-                return Err(ApiError::BadRequest(
-                    "Reply target not found in this text channel".into(),
-                ));
-            }
-        }
-        let message = queries::messages::insert(
-            &state.db_pool,
-            text_channel_id,
-            new_message,
-        )
-        .await?;
-        fanout::fanout_update(
-            state,
-            fanout::resolve_server_targets(state, server_id).await?,
-            ClientWsUpdate::MessageUpserted(message.clone()),
-            FederationWsUpdate::MessageUpserted {
-                server_id,
-                message: message.clone(),
-            },
-        )
-        .await;
-        Ok(message)
-    } else {
-        // Create on remote host using federation
-        let host = target_host.unwrap();
-        let user_ref = session.user_ref.as_ref().ok_or_else(|| {
-            ApiError::Internal(
-                "User reference required for federated message creation"
-                    .to_string(),
-            )
-        })?;
-        let reply = federation::request(
-            state,
-            host,
-            Some(user_ref.clone()),
-            FederationWsRequest::MessagesCreate {
+    match state.config.target_locality(target_host) {
+        Locality::Local => {
+            let server_id = queries::channels::get_server_id_by_text_channel(
+                &state.db_pool,
                 text_channel_id,
-                new_message: new_message.clone(),
-            },
-        )
-        .await?;
-        let FederationWsReply::MessagesCreate(message) = reply else {
-            return Err(ApiError::Internal(format!(
-                "Unexpected federation reply from {host} for messages.create"
-            )));
-        };
-        Ok(message)
+            )
+            .await?;
+            if let Some(reply_to) = new_message.reply_to {
+                // Deleted targets remain valid. Channel restrictions belong here,
+                // rather than in the schema, to allow broader scopes in the future.
+                let target =
+                    queries::messages::get_by_id(&state.db_pool, reply_to)
+                        .await
+                        .map_err(|error| match error {
+                            ApiError::NotFound => ApiError::BadRequest(
+                                "Reply target not found in this text channel"
+                                    .into(),
+                            ),
+                            error => error,
+                        })?;
+                if target.text_channel_id != text_channel_id {
+                    return Err(ApiError::BadRequest(
+                        "Reply target not found in this text channel".into(),
+                    ));
+                }
+            }
+            let message = queries::messages::insert(
+                &state.db_pool,
+                text_channel_id,
+                new_message,
+            )
+            .await?;
+            fanout::fanout_update(
+                state,
+                fanout::resolve_server_targets(state, server_id).await?,
+                ClientWsUpdate::MessageUpserted(message.clone()),
+                FederationWsUpdate::MessageUpserted {
+                    server_id,
+                    message: message.clone(),
+                },
+            )
+            .await;
+            Ok(message)
+        }
+        Locality::Remote(host) => {
+            let user_ref = session.user_ref.as_ref().ok_or_else(|| {
+                ApiError::Internal(
+                    "User reference required for federated message creation"
+                        .to_string(),
+                )
+            })?;
+            let reply = federation::request(
+                state,
+                host,
+                Some(user_ref.clone()),
+                FederationWsRequest::MessagesCreate {
+                    text_channel_id,
+                    new_message: new_message.clone(),
+                },
+            )
+            .await?;
+            let FederationWsReply::MessagesCreate(message) = reply else {
+                return Err(ApiError::Internal(format!(
+                    "Unexpected federation reply from {host} for messages.create"
+                )));
+            };
+            Ok(message)
+        }
     }
 }
 
@@ -100,32 +103,32 @@ pub async fn get_all(
     session: &Session,
     target_host: Option<&str>,
 ) -> ApiResult<Vec<Message>> {
-    // Handle local case
-    if !state.config.is_remote_host(target_host) {
-        let messages = queries::messages::get_all(&state.db_pool).await?;
-        Ok(messages)
-    } else {
-        // Fetch from remote host using federation
-        let host = target_host.unwrap();
-        let user_ref = session.user_ref.as_ref().ok_or_else(|| {
-            ApiError::Internal(
-                "User reference required for federated message fetching"
-                    .to_string(),
+    match state.config.target_locality(target_host) {
+        Locality::Local => {
+            let messages = queries::messages::get_all(&state.db_pool).await?;
+            Ok(messages)
+        }
+        Locality::Remote(host) => {
+            let user_ref = session.user_ref.as_ref().ok_or_else(|| {
+                ApiError::Internal(
+                    "User reference required for federated message fetching"
+                        .to_string(),
+                )
+            })?;
+            let reply = federation::request(
+                state,
+                host,
+                Some(user_ref.clone()),
+                FederationWsRequest::MessagesGetAll,
             )
-        })?;
-        let reply = federation::request(
-            state,
-            host,
-            Some(user_ref.clone()),
-            FederationWsRequest::MessagesGetAll,
-        )
-        .await?;
-        let FederationWsReply::MessagesGetAll(messages) = reply else {
-            return Err(ApiError::Internal(format!(
-                "Unexpected federation reply from {host} for messages.get_all"
-            )));
-        };
-        Ok(messages)
+            .await?;
+            let FederationWsReply::MessagesGetAll(messages) = reply else {
+                return Err(ApiError::Internal(format!(
+                    "Unexpected federation reply from {host} for messages.get_all"
+                )));
+            };
+            Ok(messages)
+        }
     }
 }
 
@@ -136,33 +139,34 @@ pub async fn get_by_server(
     server_id: ServerId,
     target_host: Option<&str>,
 ) -> ApiResult<Vec<Message>> {
-    // Handle local case
-    if !state.config.is_remote_host(target_host) {
-        let messages =
-            queries::messages::get_by_server(&state.db_pool, server_id).await?;
-        Ok(messages)
-    } else {
-        // Fetch from remote host using federation
-        let host = target_host.unwrap();
-        let user_ref = session.user_ref.as_ref().ok_or_else(|| {
-            ApiError::Internal(
-                "User reference required for federated message fetching"
-                    .to_string(),
+    match state.config.target_locality(target_host) {
+        Locality::Local => {
+            let messages =
+                queries::messages::get_by_server(&state.db_pool, server_id)
+                    .await?;
+            Ok(messages)
+        }
+        Locality::Remote(host) => {
+            let user_ref = session.user_ref.as_ref().ok_or_else(|| {
+                ApiError::Internal(
+                    "User reference required for federated message fetching"
+                        .to_string(),
+                )
+            })?;
+            let reply = federation::request(
+                state,
+                host,
+                Some(user_ref.clone()),
+                FederationWsRequest::MessagesGetByServer { server_id },
             )
-        })?;
-        let reply = federation::request(
-            state,
-            host,
-            Some(user_ref.clone()),
-            FederationWsRequest::MessagesGetByServer { server_id },
-        )
-        .await?;
-        let FederationWsReply::MessagesGetByServer(messages) = reply else {
-            return Err(ApiError::Internal(format!(
-                "Unexpected federation reply from {host} for messages.get_by_server"
-            )));
-        };
-        Ok(messages)
+            .await?;
+            let FederationWsReply::MessagesGetByServer(messages) = reply else {
+                return Err(ApiError::Internal(format!(
+                    "Unexpected federation reply from {host} for messages.get_by_server"
+                )));
+            };
+            Ok(messages)
+        }
     }
 }
 
@@ -173,37 +177,39 @@ pub async fn get_by_text_channel(
     text_channel_id: TextChannelId,
     target_host: Option<&str>,
 ) -> ApiResult<Vec<Message>> {
-    // Handle local case
-    if !state.config.is_remote_host(target_host) {
-        let messages = queries::messages::get_by_text_channel(
-            &state.db_pool,
-            text_channel_id,
-        )
-        .await?;
-        Ok(messages)
-    } else {
-        // Fetch from remote host using federation
-        let host = target_host.unwrap();
-        let user_ref = session.user_ref.as_ref().ok_or_else(|| {
-            ApiError::Internal(
-                "User reference required for federated message fetching"
-                    .to_string(),
+    match state.config.target_locality(target_host) {
+        Locality::Local => {
+            let messages = queries::messages::get_by_text_channel(
+                &state.db_pool,
+                text_channel_id,
             )
-        })?;
-        let reply = federation::request(
-            state,
-            host,
-            Some(user_ref.clone()),
-            FederationWsRequest::MessagesGetByTextChannel { text_channel_id },
-        )
-        .await?;
-        let FederationWsReply::MessagesGetByTextChannel(messages) = reply
-        else {
-            return Err(ApiError::Internal(format!(
-                "Unexpected federation reply from {host} for messages.get_by_text_channel"
-            )));
-        };
-        Ok(messages)
+            .await?;
+            Ok(messages)
+        }
+        Locality::Remote(host) => {
+            let user_ref = session.user_ref.as_ref().ok_or_else(|| {
+                ApiError::Internal(
+                    "User reference required for federated message fetching"
+                        .to_string(),
+                )
+            })?;
+            let reply = federation::request(
+                state,
+                host,
+                Some(user_ref.clone()),
+                FederationWsRequest::MessagesGetByTextChannel {
+                    text_channel_id,
+                },
+            )
+            .await?;
+            let FederationWsReply::MessagesGetByTextChannel(messages) = reply
+            else {
+                return Err(ApiError::Internal(format!(
+                    "Unexpected federation reply from {host} for messages.get_by_text_channel"
+                )));
+            };
+            Ok(messages)
+        }
     }
 }
 
@@ -214,33 +220,34 @@ pub async fn get_by_id(
     message_id: MessageId,
     target_host: Option<&str>,
 ) -> ApiResult<Message> {
-    // Handle local case
-    if !state.config.is_remote_host(target_host) {
-        let message =
-            queries::messages::get_by_id(&state.db_pool, message_id).await?;
-        Ok(message)
-    } else {
-        // Fetch from remote host using federation
-        let host = target_host.unwrap();
-        let user_ref = session.user_ref.as_ref().ok_or_else(|| {
-            ApiError::Internal(
-                "User reference required for federated message fetching"
-                    .to_string(),
+    match state.config.target_locality(target_host) {
+        Locality::Local => {
+            let message =
+                queries::messages::get_by_id(&state.db_pool, message_id)
+                    .await?;
+            Ok(message)
+        }
+        Locality::Remote(host) => {
+            let user_ref = session.user_ref.as_ref().ok_or_else(|| {
+                ApiError::Internal(
+                    "User reference required for federated message fetching"
+                        .to_string(),
+                )
+            })?;
+            let reply = federation::request(
+                state,
+                host,
+                Some(user_ref.clone()),
+                FederationWsRequest::MessagesGetById { message_id },
             )
-        })?;
-        let reply = federation::request(
-            state,
-            host,
-            Some(user_ref.clone()),
-            FederationWsRequest::MessagesGetById { message_id },
-        )
-        .await?;
-        let FederationWsReply::MessagesGetById(message) = reply else {
-            return Err(ApiError::Internal(format!(
-                "Unexpected federation reply from {host} for messages.get_by_id"
-            )));
-        };
-        Ok(message)
+            .await?;
+            let FederationWsReply::MessagesGetById(message) = reply else {
+                return Err(ApiError::Internal(format!(
+                    "Unexpected federation reply from {host} for messages.get_by_id"
+                )));
+            };
+            Ok(message)
+        }
     }
 }
 
@@ -251,51 +258,52 @@ pub async fn delete(
     message_id: MessageId,
     target_host: Option<&str>,
 ) -> ApiResult<Message> {
-    // Handle local case
-    if !state.config.is_remote_host(target_host) {
-        let message =
-            queries::messages::get_by_id(&state.db_pool, message_id).await?;
-        let text_channel_id = message.text_channel_id;
-        let server_id = queries::channels::get_server_id_by_text_channel(
-            &state.db_pool,
-            text_channel_id,
-        )
-        .await?;
-        let message =
-            queries::messages::delete(&state.db_pool, message_id).await?;
-        fanout::fanout_update(
-            state,
-            fanout::resolve_server_targets(state, server_id).await?,
-            ClientWsUpdate::MessageUpserted(message.clone()),
-            FederationWsUpdate::MessageUpserted {
-                server_id,
-                message: message.clone(),
-            },
-        )
-        .await;
-        Ok(message)
-    } else {
-        // Delete on remote host using federation
-        let host = target_host.unwrap();
-        let user_ref = session.user_ref.as_ref().ok_or_else(|| {
-            ApiError::Internal(
-                "User reference required for federated message deletion"
-                    .to_string(),
+    match state.config.target_locality(target_host) {
+        Locality::Local => {
+            let message =
+                queries::messages::get_by_id(&state.db_pool, message_id)
+                    .await?;
+            let text_channel_id = message.text_channel_id;
+            let server_id = queries::channels::get_server_id_by_text_channel(
+                &state.db_pool,
+                text_channel_id,
             )
-        })?;
-        let reply = federation::request(
-            state,
-            host,
-            Some(user_ref.clone()),
-            FederationWsRequest::MessagesDelete { message_id },
-        )
-        .await?;
-        let FederationWsReply::MessagesDelete(message) = reply else {
-            return Err(ApiError::Internal(format!(
-                "Unexpected federation reply from {host} for messages.delete"
-            )));
-        };
-        Ok(message)
+            .await?;
+            let message =
+                queries::messages::delete(&state.db_pool, message_id).await?;
+            fanout::fanout_update(
+                state,
+                fanout::resolve_server_targets(state, server_id).await?,
+                ClientWsUpdate::MessageUpserted(message.clone()),
+                FederationWsUpdate::MessageUpserted {
+                    server_id,
+                    message: message.clone(),
+                },
+            )
+            .await;
+            Ok(message)
+        }
+        Locality::Remote(host) => {
+            let user_ref = session.user_ref.as_ref().ok_or_else(|| {
+                ApiError::Internal(
+                    "User reference required for federated message deletion"
+                        .to_string(),
+                )
+            })?;
+            let reply = federation::request(
+                state,
+                host,
+                Some(user_ref.clone()),
+                FederationWsRequest::MessagesDelete { message_id },
+            )
+            .await?;
+            let FederationWsReply::MessagesDelete(message) = reply else {
+                return Err(ApiError::Internal(format!(
+                    "Unexpected federation reply from {host} for messages.delete"
+                )));
+            };
+            Ok(message)
+        }
     }
 }
 
@@ -364,7 +372,7 @@ pub mod auth {
         message_id: MessageId,
         target_host: Option<&str>,
     ) -> ApiResult<Req> {
-        if state.config.is_remote_host(target_host) {
+        if state.config.target_locality(target_host).is_remote() {
             return Ok(Req::Client);
         }
         Ok(update_base(state, message_id).await?.client_only())
@@ -390,7 +398,7 @@ pub mod auth {
         text_channel_id: TextChannelId,
         target_host: Option<&str>,
     ) -> ApiResult<Req> {
-        if state.config.is_remote_host(target_host) {
+        if state.config.target_locality(target_host).is_remote() {
             return Ok(Req::Client);
         }
         let base = text_channel_member(state, text_channel_id).await?;
@@ -402,7 +410,7 @@ pub mod auth {
         message_id: MessageId,
         target_host: Option<&str>,
     ) -> ApiResult<Req> {
-        if state.config.is_remote_host(target_host) {
+        if state.config.target_locality(target_host).is_remote() {
             return Ok(Req::Client);
         }
         let base = message_member(state, message_id).await?;
@@ -414,7 +422,7 @@ pub mod auth {
         message_id: MessageId,
         target_host: Option<&str>,
     ) -> ApiResult<Req> {
-        if state.config.is_remote_host(target_host) {
+        if state.config.target_locality(target_host).is_remote() {
             return Ok(Req::Client);
         }
         let base = delete_base(state, message_id).await?;
@@ -479,13 +487,13 @@ pub async fn update(
     message_update: &runelink_types::message::MessageUpdate,
     target_host: Option<&str>,
 ) -> ApiResult<Message> {
-    if state.config.is_remote_host(target_host) {
+    if let Locality::Remote(host) = state.config.target_locality(target_host) {
         let user_ref = session.user_ref.clone().ok_or_else(|| {
             ApiError::AuthError("User identity required".into())
         })?;
         let reply = federation::request(
             state,
-            target_host.unwrap(),
+            host,
             Some(user_ref),
             FederationWsRequest::MessagesUpdate {
                 message_id,

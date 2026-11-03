@@ -66,7 +66,7 @@ pub(super) async fn handle_federation_update(
     update: FederationWsUpdate,
 ) -> ApiResult<()> {
     info!("WS federation: update from {sender}: {update:#?}");
-    if !state.config.is_remote_host(Some(sender)) {
+    if state.config.locality(sender).is_local() {
         return Err(ApiError::AuthError(
             "Federation updates cannot come from the local host".into(),
         ));
@@ -109,7 +109,7 @@ pub(super) async fn handle_federation_update(
                 user_ref.clone(),
             )
             .await;
-            if !state.config.is_remote_host(Some(&user_ref.host)) {
+            if state.config.locality(&user_ref.host).is_local() {
                 targets.push(user_ref.clone());
             }
             let _ = state
@@ -252,7 +252,7 @@ pub(super) async fn handle_federation_request(
 
         FederationWsRequest::MembershipsUpsert { new_membership } => {
             let user = new_membership.user.clone();
-            if !state.config.is_remote_host(Some(&user.host)) {
+            if state.config.locality(&user.host).is_local() {
                 return Err(ApiError::BadRequest(
                     "User host in membership should not match local host"
                         .into(),

@@ -11,6 +11,7 @@ use super::federation;
 use crate::{
     auth::Session,
     auth_service,
+    config::Locality,
     error::{ApiError, ApiResult},
     queries,
     state::AppState,
@@ -40,24 +41,26 @@ pub async fn get_all(
     state: &AppState,
     target_host: Option<&str>,
 ) -> ApiResult<Vec<User>> {
-    if !state.config.is_remote_host(target_host) {
-        let users = queries::users::get_all(&state.db_pool).await?;
-        Ok(users)
-    } else {
-        let host = target_host.unwrap();
-        let reply = federation::request(
-            state,
-            host,
-            None,
-            FederationWsRequest::UsersGetAll,
-        )
-        .await?;
-        let FederationWsReply::UsersGetAll(users) = reply else {
-            return Err(ApiError::Internal(format!(
-                "Unexpected federation reply from {host} for users.get_all"
-            )));
-        };
-        Ok(users)
+    match state.config.target_locality(target_host) {
+        Locality::Local => {
+            let users = queries::users::get_all(&state.db_pool).await?;
+            Ok(users)
+        }
+        Locality::Remote(host) => {
+            let reply = federation::request(
+                state,
+                host,
+                None,
+                FederationWsRequest::UsersGetAll,
+            )
+            .await?;
+            let FederationWsReply::UsersGetAll(users) = reply else {
+                return Err(ApiError::Internal(format!(
+                    "Unexpected federation reply from {host} for users.get_all"
+                )));
+            };
+            Ok(users)
+        }
     }
 }
 
@@ -67,7 +70,7 @@ pub async fn get_by_ref(
     user_ref: UserRef,
     _target_host: Option<&str>,
 ) -> ApiResult<User> {
-    if !state.config.is_remote_host(Some(&user_ref.host)) {
+    if state.config.locality(&user_ref.host).is_local() {
         let user = queries::users::get_by_ref(&state.db_pool, user_ref).await?;
         Ok(user)
     } else {
@@ -186,26 +189,29 @@ pub async fn get_associated_hosts(
     user_ref: UserRef,
     target_host: Option<&str>,
 ) -> ApiResult<Vec<String>> {
-    if !state.config.is_remote_host(target_host) {
-        let hosts =
-            queries::users::get_associated_hosts(&state.db_pool, &user_ref)
-                .await?;
-        Ok(hosts)
-    } else {
-        let host = target_host.unwrap();
-        let reply = federation::request(
-            state,
-            host,
-            None,
-            FederationWsRequest::UsersGetAssociatedHosts { user_ref },
-        )
-        .await?;
-        let FederationWsReply::UsersGetAssociatedHosts(hosts) = reply else {
-            return Err(ApiError::Internal(format!(
-                "Unexpected federation reply from {host} for users.get_associated_hosts"
-            )));
-        };
-        Ok(hosts)
+    match state.config.target_locality(target_host) {
+        Locality::Local => {
+            let hosts =
+                queries::users::get_associated_hosts(&state.db_pool, &user_ref)
+                    .await?;
+            Ok(hosts)
+        }
+        Locality::Remote(host) => {
+            let reply = federation::request(
+                state,
+                host,
+                None,
+                FederationWsRequest::UsersGetAssociatedHosts { user_ref },
+            )
+            .await?;
+            let FederationWsReply::UsersGetAssociatedHosts(hosts) = reply
+            else {
+                return Err(ApiError::Internal(format!(
+                    "Unexpected federation reply from {host} for users.get_associated_hosts"
+                )));
+            };
+            Ok(hosts)
+        }
     }
 }
 
