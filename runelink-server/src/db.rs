@@ -1,9 +1,20 @@
-use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
+use sqlx::{Pool, Postgres, Transaction, postgres::PgPoolOptions};
 use std::time::Duration;
 
 use crate::config::ServerConfig;
 
 pub type DbPool = Pool<Postgres>;
+
+/// Begin a read-only transaction whose reads all see one snapshot.
+pub async fn begin_snapshot(
+    pool: &DbPool,
+) -> sqlx::Result<Transaction<'static, Postgres>> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+    Ok(tx)
+}
 
 pub async fn get_pool(config: &ServerConfig) -> sqlx::Result<DbPool> {
     PgPoolOptions::new()

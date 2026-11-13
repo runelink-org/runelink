@@ -5,9 +5,8 @@ use runelink_types::{
     user::User,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::types::Json;
+use sqlx::{PgConnection, PgExecutor, types::Json};
 use time::OffsetDateTime;
-use uuid::Uuid;
 
 use crate::{
     db::DbPool,
@@ -71,32 +70,55 @@ impl TryFrom<DbMessage> for Message {
     }
 }
 
+/// Insert a message with an ID and creation time chosen by the caller.
 pub async fn insert(
-    pool: &DbPool,
+    conn: &mut PgConnection,
+    message_id: MessageId,
     text_channel_id: TextChannelId,
     new_message: &NewMessage,
+    created_at: OffsetDateTime,
 ) -> ApiResult<Message> {
     if let Some(metadata) = &new_message.metadata {
         runelink_types::metadata::validate_metadata(metadata)
             .map_err(ApiError::BadRequest)?;
     }
-    let new_id: Uuid = sqlx::query_scalar!(
+    let row = sqlx::query_as!(
+        DbMessage,
         r#"
-        INSERT INTO messages (text_channel_id, author_name, author_host, body, reply_to, metadata)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id;
+        WITH m AS (
+            INSERT INTO messages (
+                id, text_channel_id, author_name, author_host, body, reply_to,
+                metadata, created_at, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+            RETURNING *
+        )
+        SELECT
+            m.id AS "id!",
+            m.text_channel_id AS "text_channel_id!",
+            m.body,
+            m.metadata,
+            m.reply_to AS "reply_to: MessageId",
+            m.deleted_at,
+            m.created_at AS "created_at!",
+            m.updated_at AS "updated_at!",
+            m.edited_at,
+            to_jsonb(a) AS "author: Json<User>"
+        FROM m
+        LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host;
         "#,
+        message_id.as_uuid(),
         text_channel_id.as_uuid(),
         new_message.author.name,
         new_message.author.host,
         new_message.body,
         new_message.reply_to.map(|id| id.as_uuid()),
         new_message.metadata.as_ref().map(Json) as _,
+        created_at,
     )
-    .fetch_one(pool)
+    .fetch_one(conn)
     .await?;
-    let message = get_by_id(pool, new_id.into()).await?;
-    Ok(message)
+    row.try_into()
 }
 
 pub async fn get_all(pool: &DbPool) -> ApiResult<Vec<Message>> {
@@ -185,7 +207,10 @@ pub async fn get_by_text_channel(
     rows.into_iter().map(Message::try_from).collect()
 }
 
-pub async fn get_by_id(pool: &DbPool, msg_id: MessageId) -> ApiResult<Message> {
+pub async fn get_by_id(
+    executor: impl PgExecutor<'_>,
+    msg_id: MessageId,
+) -> ApiResult<Message> {
     let db_message = sqlx::query_as!(
         DbMessage,
         r#"
@@ -206,27 +231,56 @@ pub async fn get_by_id(pool: &DbPool, msg_id: MessageId) -> ApiResult<Message> {
         "#,
         msg_id.as_uuid(),
     )
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await?;
     db_message.try_into()
 }
 
+/// Get the server and text channel that hold a message.
+pub async fn get_location(
+    pool: &DbPool,
+    message_id: MessageId,
+) -> ApiResult<(ServerId, TextChannelId)> {
+    let row = sqlx::query!(
+        r#"
+        SELECT c.server_id, m.text_channel_id
+        FROM messages m
+        JOIN server_channels c ON c.text_channel_id = m.text_channel_id
+        WHERE m.id = $1
+        "#,
+        message_id.as_uuid(),
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok((row.server_id.into(), row.text_channel_id.into()))
+}
+
 /// Retain identity and relationships, clear text, and preserve the first deletion time.
 pub async fn delete(
-    pool: &DbPool,
+    conn: &mut PgConnection,
+    text_channel_id: TextChannelId,
     message_id: MessageId,
 ) -> ApiResult<Message> {
     sqlx::query!(
-        "UPDATE messages SET body = NULL, metadata = NULL, deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL;",
+        r#"
+        UPDATE messages SET body = NULL, metadata = NULL, deleted_at = NOW()
+        WHERE id = $1 AND text_channel_id = $2 AND deleted_at IS NULL;
+        "#,
         message_id.as_uuid(),
+        text_channel_id.as_uuid(),
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
-    get_by_id(pool, message_id).await
+    let message = get_by_id(conn, message_id).await?;
+    if message.text_channel_id != text_channel_id {
+        return Err(ApiError::NotFound);
+    }
+    Ok(message)
 }
 
 pub async fn update(
-    pool: &DbPool,
+    conn: &mut PgConnection,
+    text_channel_id: TextChannelId,
     message_id: MessageId,
     update: &runelink_types::message::MessageUpdate,
 ) -> ApiResult<Message> {
@@ -241,19 +295,19 @@ pub async fn update(
         runelink_types::metadata::validate_metadata(metadata)
             .map_err(ApiError::BadRequest)?;
     }
-    let mut tx = pool.begin().await?;
     let mut row = sqlx::query_as::<_, DbMessage>(
         r#"
         SELECT m.id, m.text_channel_id, m.body, m.metadata, m.reply_to, m.deleted_at,
             m.created_at, m.updated_at, m.edited_at, to_jsonb(a) AS author
         FROM messages m
         LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host
-        WHERE m.id = $1
+        WHERE m.id = $1 AND m.text_channel_id = $2
         FOR UPDATE OF m
     "#,
     )
     .bind(message_id)
-    .fetch_one(&mut *tx)
+    .bind(text_channel_id)
+    .fetch_one(&mut *conn)
     .await?;
     if row.deleted_at.is_some() {
         return Err(ApiError::Conflict("Message was deleted".into()));
@@ -281,22 +335,21 @@ pub async fn update(
             .bind(message_id)
             .bind(body)
             .bind(&metadata)
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut *conn)
             .await?;
         row.body = body.cloned();
         row.metadata = metadata;
         row.updated_at = updated_at;
         row.edited_at = Some(edited_at);
     }
-    let message = row.try_into()?;
-    tx.commit().await?;
-    Ok(message)
+    row.try_into()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use sqlx::PgPool;
+    use uuid::Uuid;
 
     // Use one connection and roll back every test mutation. No database creation
     // privileges are needed, and other host connections cannot see the fixtures.
@@ -328,11 +381,20 @@ mod tests {
         let reply: Uuid = sqlx::query_scalar("INSERT INTO messages (text_channel_id, body, reply_to) VALUES ($1, 'reply', $2) RETURNING id")
             .bind(channel).bind(original).fetch_one(&pool).await.unwrap();
         let before = get_by_id(&pool, original.into()).await.unwrap();
-        let deleted = delete(&pool, original.into()).await.unwrap();
+        let mut conn = pool.acquire().await.unwrap();
+        let deleted = delete(&mut conn, channel.into(), original.into())
+            .await
+            .unwrap();
         assert!(matches!(deleted.content, MessageContent::Deleted { .. }));
         assert_eq!(before.id, deleted.id);
         assert_eq!(before.created_at, deleted.created_at);
-        assert_eq!(delete(&pool, original.into()).await.unwrap(), deleted);
+        assert_eq!(
+            delete(&mut conn, channel.into(), original.into())
+                .await
+                .unwrap(),
+            deleted
+        );
+        drop(conn);
         assert_eq!(
             get_by_id(&pool, reply.into()).await.unwrap().reply_to,
             Some(original.into())

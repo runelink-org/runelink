@@ -73,7 +73,7 @@ pub async fn authenticate_connection(
         ));
     }
     if let Err(error) =
-        queries::users::get_by_ref(&state.db_pool, user_ref).await
+        queries::users::get_by_ref(&*state.db_pool, user_ref).await
     {
         state
             .client_ws_manager
@@ -129,7 +129,7 @@ pub async fn issue_password_token(
     let scope = request.scope.unwrap_or_else(|| "openid".into());
 
     let user = queries::users::get_by_ref(
-        &state.db_pool,
+        &*state.db_pool,
         UserRef::new(username, state.config.public_host()),
     )
     .await?;

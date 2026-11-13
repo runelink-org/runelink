@@ -69,7 +69,9 @@ impl TryFrom<ServerChannelRow> for ServerChannel {
 }
 
 /// Lock a server's channel tree until the transaction ends, serializing
-/// changes to it. Fails with `NotFound` if the server does not exist.
+/// changes to it. Fails with `NotFound` if the server does not exist. The
+/// server's actor already serializes these changes, so this is only a second
+/// layer of protection.
 pub async fn lock_tree(
     conn: &mut PgConnection,
     server_id: ServerId,
@@ -246,30 +248,49 @@ pub async fn has_children(
     Ok(has_children)
 }
 
-/// Delete a server channel. Its text channel and messages are deleted by
-/// a database trigger.
+/// Delete a server channel, returning the text channel it owned, if any. The
+/// text channel and its messages are deleted by a database trigger.
 pub async fn delete(
     executor: impl PgExecutor<'_>,
+    server_id: ServerId,
     channel_id: ServerChannelId,
-) -> ApiResult<()> {
-    let result = sqlx::query!(
-        "DELETE FROM server_channels WHERE id = $1;",
-        channel_id.as_uuid()
+) -> ApiResult<Option<TextChannelId>> {
+    let text_channel_id = sqlx::query_scalar!(
+        r#"
+        DELETE FROM server_channels WHERE id = $1 AND server_id = $2
+        RETURNING text_channel_id;
+        "#,
+        channel_id.as_uuid(),
+        server_id.as_uuid(),
     )
-    .execute(executor)
+    .fetch_one(executor)
     .await?;
-    if result.rows_affected() == 0 {
-        return Err(ApiError::NotFound);
-    }
-    Ok(())
+    Ok(text_channel_id.map(Into::into))
+}
+
+/// The text channels in a server.
+pub async fn get_text_channel_ids(
+    executor: impl PgExecutor<'_>,
+    server_id: ServerId,
+) -> ApiResult<Vec<TextChannelId>> {
+    let ids = sqlx::query_scalar!(
+        r#"
+        SELECT text_channel_id AS "text_channel_id!" FROM server_channels
+        WHERE server_id = $1 AND text_channel_id IS NOT NULL;
+        "#,
+        server_id.as_uuid(),
+    )
+    .fetch_all(executor)
+    .await?;
+    Ok(ids.into_iter().map(Into::into).collect())
 }
 
 pub async fn update(
-    pool: &DbPool,
+    conn: &mut PgConnection,
+    server_id: ServerId,
     channel_id: ServerChannelId,
     update: &runelink_types::channel::ServerChannelUpdate,
 ) -> ApiResult<ServerChannel> {
-    use crate::error::ApiError;
     if update
         .title
         .as_ref()
@@ -281,12 +302,12 @@ pub async fn update(
         runelink_types::metadata::validate_metadata(metadata)
             .map_err(ApiError::BadRequest)?;
     }
-    let mut tx = pool.begin().await?;
     let mut row = sqlx::query_as::<_, ServerChannelRow>(
-        "SELECT * FROM server_channels WHERE id = $1 FOR UPDATE",
+        "SELECT * FROM server_channels WHERE id = $1 AND server_id = $2 FOR UPDATE",
     )
     .bind(channel_id)
-    .fetch_one(&mut *tx)
+    .bind(server_id)
+    .fetch_one(&mut *conn)
     .await?;
     if row.updated_at != update.expected_updated_at {
         return Err(ApiError::Conflict(
@@ -305,8 +326,7 @@ pub async fn update(
         || metadata != row.metadata
     {
         row = sqlx::query_as::<_, ServerChannelRow>("UPDATE server_channels SET title = $2, description = $3, metadata = $4 WHERE id = $1 RETURNING *")
-            .bind(channel_id).bind(title).bind(description).bind(metadata).fetch_one(&mut *tx).await?;
+            .bind(channel_id).bind(title).bind(description).bind(metadata).fetch_one(&mut *conn).await?;
     }
-    tx.commit().await?;
     row.try_into()
 }

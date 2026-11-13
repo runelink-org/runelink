@@ -4,8 +4,14 @@ use clap::Parser;
 use sqlx::migrate::Migrator;
 use tokio::{net::TcpListener, sync::RwLock, task::JoinSet};
 
-use crate::{config::ServerConfig, key_manager::KeyManager, state::AppState};
+use crate::{
+    actors::{ActorCtx, Actors},
+    config::ServerConfig,
+    key_manager::KeyManager,
+    state::AppState,
+};
 
+mod actors;
 mod api;
 mod auth;
 mod auth_service;
@@ -62,18 +68,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let config = Arc::new(config);
         let db_pool = Arc::new(db::get_pool(&config).await?);
 
+        let client_ws_manager = ws::ClientWsManager::new();
+        let federation_ws_manager = ws::FederationWsManager::new();
+        let actors = Actors::new(ActorCtx::new(
+            db_pool.clone(),
+            config.clone(),
+            client_ws_manager.clone(),
+            federation_ws_manager.clone(),
+        ));
         let app_state = AppState {
             config: config.clone(),
             db_pool: db_pool.clone(),
             http_client: reqwest::Client::new(),
-            client_ws_manager: ws::ClientWsManager::new(),
-            federation_ws_manager: ws::FederationWsManager::new(),
+            client_ws_manager,
+            federation_ws_manager,
             key_manager: KeyManager::load_or_generate(config.key_dir.clone())?,
             jwks_cache: Arc::new(RwLock::new(HashMap::new())),
-            routing_index: ws::RoutingIndex::new(
-                db_pool.clone(),
-                config.clone(),
-            ),
+            actors,
         };
 
         MIGRATOR.run(db_pool.as_ref()).await?;

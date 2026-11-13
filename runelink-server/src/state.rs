@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use crate::{config::ServerConfig, db::DbPool, key_manager::KeyManager, ws};
+use crate::{
+    actors::Actors, config::ServerConfig, db::DbPool, key_manager::KeyManager,
+    ws,
+};
 
 pub type JwksCache =
     std::collections::HashMap<String, crate::jwks_resolver::CachedJwks>;
@@ -14,5 +17,5 @@ pub struct AppState {
     pub federation_ws_manager: ws::FederationWsManager,
     pub key_manager: KeyManager,
     pub jwks_cache: Arc<tokio::sync::RwLock<JwksCache>>,
-    pub routing_index: ws::RoutingIndex,
+    pub actors: Actors,
 }

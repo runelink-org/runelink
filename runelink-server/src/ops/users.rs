@@ -82,7 +82,8 @@ pub async fn get_by_ref(
     _target_host: Option<&str>,
 ) -> ApiResult<User> {
     if state.config.locality(&user_ref.host).is_local() {
-        let user = queries::users::get_by_ref(&state.db_pool, user_ref).await?;
+        let user =
+            queries::users::get_by_ref(&*state.db_pool, user_ref).await?;
         Ok(user)
     } else {
         let host = user_ref.host.clone();
@@ -109,7 +110,7 @@ pub async fn delete_home_user(
     user_ref: &UserRef,
 ) -> ApiResult<()> {
     let user =
-        queries::users::get_by_ref(&state.db_pool, user_ref.clone()).await?;
+        queries::users::get_by_ref(&*state.db_pool, user_ref.clone()).await?;
     if user.host != state.config.public_host() {
         return Err(ApiError::BadRequest(
             "Can only delete users from their home server".into(),

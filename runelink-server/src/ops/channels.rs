@@ -3,17 +3,13 @@ use runelink_types::{
         NewServerChannel, ServerChannel, ServerChannelId, ServerChannelMove,
     },
     server::ServerId,
-    ws::{
-        ClientWsUpdate, FederationWsReply, FederationWsRequest,
-        FederationWsUpdate,
-    },
+    ws::{FederationWsReply, FederationWsRequest},
 };
 
-use super::{fanout, federation};
+use super::federation;
 
 use crate::{
     auth::Session,
-    channel_tree,
     config::Locality,
     error::{ApiError, ApiResult},
     queries,
@@ -30,32 +26,10 @@ pub async fn create(
 ) -> ApiResult<ServerChannel> {
     match state.config.target_locality(target_host) {
         Locality::Local => {
-            let mut tx = state.db_pool.begin().await?;
-            queries::channels::lock_tree(&mut tx, server_id).await?;
-            if let Some(parent_id) = new_channel.parent_channel_id {
-                let parent = queries::channels::get_by_id(&mut *tx, parent_id)
-                    .await
-                    .map_err(|error| match error {
-                        ApiError::NotFound => ApiError::BadRequest(
-                            "Parent channel not found in specified server"
-                                .into(),
-                        ),
-                        error => error,
-                    })?;
-                channel_tree::check_parent(server_id, &parent)?;
-            }
-            let channel =
-                queries::channels::insert(&mut tx, server_id, new_channel)
-                    .await?;
-            tx.commit().await?;
-            fanout::fanout_update(
-                state,
-                fanout::resolve_server_targets(state, server_id).await?,
-                ClientWsUpdate::ChannelUpserted(channel.clone()),
-                FederationWsUpdate::ChannelUpserted(channel.clone()),
-            )
-            .await;
-            Ok(channel)
+            state
+                .actors
+                .create_channel(server_id, new_channel.clone())
+                .await
         }
         Locality::Remote(host) => {
             let user_ref = session.user_ref.clone().ok_or_else(|| {
@@ -199,33 +173,10 @@ pub async fn delete(
 ) -> ApiResult<()> {
     match state.config.target_locality(target_host) {
         Locality::Local => {
-            let mut tx = state.db_pool.begin().await?;
             let server_id =
-                queries::channels::get_server_id(&mut *tx, channel_id).await?;
-            queries::channels::lock_tree(&mut tx, server_id).await?;
-            if queries::channels::has_children(&mut *tx, server_id, channel_id)
-                .await?
-            {
-                return Err(ApiError::BadRequest(
-                    "Only empty categories can be deleted".into(),
-                ));
-            }
-            queries::channels::delete(&mut *tx, channel_id).await?;
-            tx.commit().await?;
-            fanout::fanout_update(
-                state,
-                fanout::resolve_server_targets(state, server_id).await?,
-                ClientWsUpdate::ChannelDeleted {
-                    server_id,
-                    channel_id,
-                },
-                FederationWsUpdate::ChannelDeleted {
-                    server_id,
-                    channel_id,
-                },
-            )
-            .await;
-            Ok(())
+                queries::channels::get_server_id(&*state.db_pool, channel_id)
+                    .await?;
+            state.actors.delete_channel(server_id, channel_id).await
         }
         Locality::Remote(host) => {
             let user_ref = session.user_ref.clone().ok_or_else(|| {
@@ -263,29 +214,13 @@ pub async fn move_channel(
 ) -> ApiResult<Vec<ServerChannel>> {
     match state.config.target_locality(target_host) {
         Locality::Local => {
-            let mut tx = state.db_pool.begin().await?;
             let server_id =
-                queries::channels::get_server_id(&mut *tx, channel_id).await?;
-            queries::channels::lock_tree(&mut tx, server_id).await?;
-            let channels =
-                queries::channels::list(&mut *tx, Some(server_id)).await?;
-            let planned =
-                channel_tree::plan_move(&channels, channel_id, channel_move)?;
-            let changed =
-                queries::channels::update_placements(&mut tx, &planned).await?;
-            tx.commit().await?;
-            let targets =
-                fanout::resolve_server_targets(state, server_id).await?;
-            for channel in &changed {
-                fanout::fanout_update(
-                    state,
-                    targets.clone(),
-                    ClientWsUpdate::ChannelUpserted(channel.clone()),
-                    FederationWsUpdate::ChannelUpserted(channel.clone()),
-                )
-                .await;
-            }
-            Ok(changed)
+                queries::channels::get_server_id(&*state.db_pool, channel_id)
+                    .await?;
+            state
+                .actors
+                .move_channel(server_id, channel_id, channel_move.clone())
+                .await
         }
         Locality::Remote(host) => {
             let user_ref = session.user_ref.clone().ok_or_else(|| {
@@ -450,16 +385,10 @@ pub async fn update(
         };
         return Ok(resource);
     }
-    let resource =
-        queries::channels::update(&state.db_pool, channel_id, channel_update)
-            .await?;
-    let server_id = resource.server_id;
-    fanout::fanout_update(
-        state,
-        fanout::resolve_server_targets(state, server_id).await?,
-        ClientWsUpdate::ChannelUpserted(resource.clone()),
-        FederationWsUpdate::ChannelUpserted(resource.clone()),
-    )
-    .await;
-    Ok(resource)
+    let server_id =
+        queries::channels::get_server_id(&*state.db_pool, channel_id).await?;
+    state
+        .actors
+        .update_channel(server_id, channel_id, channel_update.clone())
+        .await
 }

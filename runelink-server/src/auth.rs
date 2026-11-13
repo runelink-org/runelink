@@ -236,7 +236,7 @@ impl<'a> AuthContext<'a> {
                 return Ok(None);
             };
             let user = queries::users::get_by_ref(
-                &self.state.db_pool,
+                &*self.state.db_pool,
                 user_ref.clone(),
             )
             .await?;
@@ -299,7 +299,7 @@ impl Session {
             return Ok(None);
         };
         let user_result =
-            queries::users::get_by_ref(&state.db_pool, user_ref.clone()).await;
+            queries::users::get_by_ref(&*state.db_pool, user_ref.clone()).await;
         let user = match user_result {
             Ok(user) => Some(user),
             Err(ApiError::NotFound) => None,

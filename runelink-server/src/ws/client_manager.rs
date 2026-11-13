@@ -92,22 +92,6 @@ impl ClientWsManager {
             .await
     }
 
-    pub async fn send_update_to_user(
-        &self,
-        user_ref: &UserRef,
-        update: ClientWsUpdate,
-    ) -> usize {
-        self.pool
-            .send_to_user(
-                user_ref,
-                ClientWsEnvelope::Update {
-                    event_id: EventId::new(),
-                    update,
-                },
-            )
-            .await
-    }
-
     pub async fn send_update_to_users<I, S>(
         &self,
         users: I,

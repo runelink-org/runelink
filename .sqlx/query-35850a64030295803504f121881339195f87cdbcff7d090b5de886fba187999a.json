@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT text_channel_id AS \"text_channel_id!\" FROM server_channels\n        WHERE server_id = $1 AND text_channel_id IS NOT NULL;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "text_channel_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "server_channels",
+            "name": "text_channel_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "35850a64030295803504f121881339195f87cdbcff7d090b5de886fba187999a"
+}
