@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE messages SET body = NULL, metadata = NULL, deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL;",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6707697d176bd85075ff38a7f6b0393e89d0a4f5f9144c1b31fd43b68a779cff"
+}

@@ -21,6 +21,7 @@ struct ServerChannelRow {
     kind: String,
     title: String,
     description: Option<String>,
+    metadata: Option<serde_json::Value>,
     text_channel_id: Option<Uuid>,
     parent_channel_id: Option<Uuid>,
     position: i32,
@@ -50,6 +51,15 @@ impl TryFrom<ServerChannelRow> for ServerChannel {
             content,
             title: row.title,
             description: row.description,
+            metadata: match row.metadata {
+                None => None,
+                Some(serde_json::Value::Object(metadata)) => Some(metadata),
+                _ => {
+                    return Err(ApiError::Internal(
+                        "Invalid channel metadata".into(),
+                    ));
+                }
+            },
             parent_channel_id: row.parent_channel_id.map(Into::into),
             position: row.position,
             created_at: row.created_at,
@@ -80,6 +90,10 @@ pub async fn insert(
     server_id: ServerId,
     new_channel: &NewServerChannel,
 ) -> ApiResult<ServerChannel> {
+    if let Some(metadata) = &new_channel.metadata {
+        runelink_types::metadata::validate_metadata(metadata)
+            .map_err(ApiError::BadRequest)?;
+    }
     let text_channel_id = match new_channel.kind {
         ServerChannelKind::Text => Some(
             sqlx::query_scalar!(
@@ -95,14 +109,14 @@ pub async fn insert(
         r#"
         INSERT INTO server_channels (
             server_id, kind, title, description, text_channel_id,
-            parent_channel_id, position
+            parent_channel_id, position, metadata
         )
         VALUES ($1, $2, $3, $4, $5, $6, (
             SELECT COALESCE(MAX(position) + 1, 0)
             FROM server_channels
             WHERE server_id = $1
                 AND parent_channel_id IS NOT DISTINCT FROM $6
-        ))
+        ), $7)
         RETURNING *;
         "#,
         server_id.as_uuid(),
@@ -111,6 +125,7 @@ pub async fn insert(
         new_channel.description,
         text_channel_id,
         new_channel.parent_channel_id.map(|id| id.as_uuid()),
+        new_channel.metadata.as_ref().map(sqlx::types::Json) as _,
     )
     .fetch_one(conn)
     .await?;
@@ -252,7 +267,7 @@ pub async fn delete(
 pub async fn update(
     pool: &DbPool,
     channel_id: ServerChannelId,
-    update: &runelink_types::edit::DetailsUpdate,
+    update: &runelink_types::channel::ServerChannelUpdate,
 ) -> ApiResult<ServerChannel> {
     use crate::error::ApiError;
     if update
@@ -261,6 +276,10 @@ pub async fn update(
         .is_some_and(|title| title.trim().is_empty())
     {
         return Err(ApiError::BadRequest("Title cannot be empty".into()));
+    }
+    if let Some(Some(metadata)) = &update.metadata {
+        runelink_types::metadata::validate_metadata(metadata)
+            .map_err(ApiError::BadRequest)?;
     }
     let mut tx = pool.begin().await?;
     let mut row = sqlx::query_as::<_, ServerChannelRow>(
@@ -276,9 +295,17 @@ pub async fn update(
     }
     let title = update.title.as_ref().unwrap_or(&row.title);
     let description = update.description.as_ref().unwrap_or(&row.description);
-    if title != &row.title || description != &row.description {
-        row = sqlx::query_as::<_, ServerChannelRow>("UPDATE server_channels SET title = $2, description = $3 WHERE id = $1 RETURNING *")
-            .bind(channel_id).bind(title).bind(description).fetch_one(&mut *tx).await?;
+    let metadata = update
+        .metadata
+        .as_ref()
+        .map(|value| value.clone().map(serde_json::Value::Object))
+        .unwrap_or_else(|| row.metadata.clone());
+    if title != &row.title
+        || description != &row.description
+        || metadata != row.metadata
+    {
+        row = sqlx::query_as::<_, ServerChannelRow>("UPDATE server_channels SET title = $2, description = $3, metadata = $4 WHERE id = $1 RETURNING *")
+            .bind(channel_id).bind(title).bind(description).bind(metadata).fetch_one(&mut *tx).await?;
     }
     tx.commit().await?;
     row.try_into()

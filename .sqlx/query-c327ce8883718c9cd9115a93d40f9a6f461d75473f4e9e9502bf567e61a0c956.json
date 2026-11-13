@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO server_channels (\n            server_id, kind, title, description, text_channel_id,\n            parent_channel_id, position\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, (\n            SELECT COALESCE(MAX(position) + 1, 0)\n            FROM server_channels\n            WHERE server_id = $1\n                AND parent_channel_id IS NOT DISTINCT FROM $6\n        ))\n        RETURNING *;\n        ",
+  "query": "\n        INSERT INTO server_channels (\n            server_id, kind, title, description, text_channel_id,\n            parent_channel_id, position, metadata\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, (\n            SELECT COALESCE(MAX(position) + 1, 0)\n            FROM server_channels\n            WHERE server_id = $1\n                AND parent_channel_id IS NOT DISTINCT FROM $6\n        ), $7)\n        RETURNING *;\n        ",
   "describe": {
     "columns": [
       {
@@ -112,6 +112,17 @@
             "name": "position"
           }
         }
+      },
+      {
+        "ordinal": 10,
+        "name": "metadata",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "server_channels",
+            "name": "metadata"
+          }
+        }
       }
     ],
     "parameters": {
@@ -121,7 +132,8 @@
         "Text",
         "Text",
         "Uuid",
-        "Uuid"
+        "Uuid",
+        "Jsonb"
       ]
     },
     "nullable": [
@@ -134,8 +146,9 @@
       false,
       true,
       true,
-      false
+      false,
+      true
     ]
   },
-  "hash": "ae7cf5722f41c7dbaeea690482d61fb582880677f39ecf07ce3f89a47d5fa16c"
+  "hash": "c327ce8883718c9cd9115a93d40f9a6f461d75473f4e9e9502bf567e61a0c956"
 }

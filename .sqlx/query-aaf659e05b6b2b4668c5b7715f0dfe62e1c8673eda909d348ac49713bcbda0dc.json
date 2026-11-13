@@ -112,6 +112,17 @@
             "name": "position"
           }
         }
+      },
+      {
+        "ordinal": 10,
+        "name": "metadata",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "server_channels",
+            "name": "metadata"
+          }
+        }
       }
     ],
     "parameters": {
@@ -129,7 +140,8 @@
       false,
       true,
       true,
-      false
+      false,
+      true
     ]
   },
   "hash": "aaf659e05b6b2b4668c5b7715f0dfe62e1c8673eda909d348ac49713bcbda0dc"

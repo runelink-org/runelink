@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use time::OffsetDateTime;
 
-use crate::ids::ServerId;
+use crate::{ids::ServerId, metadata::Metadata};
 
 pub use crate::ids::{ServerChannelId, TextChannelId};
 
@@ -28,7 +28,10 @@ pub struct ServerChannel {
     #[serde(flatten)]
     pub content: ServerChannelContent,
     pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Metadata>,
     /// The parent category, or `None` at the server root.
     pub parent_channel_id: Option<ServerChannelId>,
     /// Ordering among siblings, by `position` then `id`.
@@ -51,7 +54,10 @@ pub enum ServerChannelContent {
 pub struct NewServerChannel {
     pub kind: ServerChannelKind,
     pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Metadata>,
     pub parent_channel_id: Option<ServerChannelId>,
 }
 
@@ -104,7 +110,27 @@ impl fmt::Display for ServerChannel {
 }
 
 /// Editable presentation fields with optimistic concurrency.
-pub type ServerChannelUpdate = crate::edit::DetailsUpdate;
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ServerChannelUpdate {
+    #[serde(with = "time::serde::rfc3339")]
+    pub expected_updated_at: OffsetDateTime,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "crate::edit::nullable_patch",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub description: Option<Option<String>>,
+    /// Omitted preserves metadata, null clears it, and an object replaces it.
+    #[serde(
+        default,
+        deserialize_with = "crate::edit::nullable_patch",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub metadata: Option<Option<Metadata>>,
+}
 
 #[cfg(test)]
 mod tests {
@@ -117,6 +143,7 @@ mod tests {
             content,
             title: "general".into(),
             description: None,
+            metadata: None,
             parent_channel_id: None,
             position: 0,
             created_at: OffsetDateTime::UNIX_EPOCH,

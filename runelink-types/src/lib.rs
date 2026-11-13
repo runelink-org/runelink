@@ -4,6 +4,7 @@ pub mod channel;
 pub mod edit;
 pub mod ids;
 pub mod message;
+pub mod metadata;
 pub mod server;
 pub mod user;
 pub mod ws;

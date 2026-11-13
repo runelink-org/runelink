@@ -135,6 +135,8 @@ pub struct ChannelGetArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct ChannelCreateArgs {
+    #[clap(flatten)]
+    pub metadata: super::metadata::MetadataArgs,
     /// The title of the channel or category
     #[clap(long)]
     pub title: Option<String>,
@@ -219,8 +221,9 @@ pub async fn handle_channel_commands(
                 target_host.as_deref(),
             )
             .await?;
-            let update = runelink_types::edit::DetailsUpdate {
+            let update = runelink_types::channel::ServerChannelUpdate {
                 title: edit_args.title.clone(),
+                metadata: edit_args.metadata.patch()?,
                 description: if edit_args.clear_description {
                     Some(None)
                 } else {
@@ -415,6 +418,7 @@ pub async fn handle_channel_commands(
                 kind,
                 title,
                 description: desc,
+                metadata: create_args.metadata.value()?,
                 parent_channel_id,
             };
             let channel = requests::channels::create(
@@ -540,6 +544,8 @@ pub async fn handle_channel_commands(
 
 #[derive(clap::Args, Debug)]
 pub struct ChannelEditArgs {
+    #[clap(flatten)]
+    pub metadata: super::metadata::MetadataEditArgs,
     #[clap(long)]
     pub channel_id: ServerChannelId,
     #[clap(long)]

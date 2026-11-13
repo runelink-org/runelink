@@ -548,7 +548,7 @@ mod tests {
                 tokio_tungstenite::connect_async(format!("ws://{address}/ws"))
                     .await
                     .unwrap();
-            socket.send(tokio_tungstenite::tungstenite::Message::Text(r#"{"type":"hello","data":{"negotiation_version":1,"capabilities":{"messages.read":["2020.01.01"],"channels.read":["2026.10.22"],"vendor.unknown":["2020.01.01"]}}}"#.into())).await.unwrap();
+            socket.send(tokio_tungstenite::tungstenite::Message::Text(r#"{"type":"hello","data":{"negotiation_version":1,"capabilities":{"messages.read":["2020.01.01"],"channels.read":["2026.11.13"],"vendor.unknown":["2020.01.01"]}}}"#.into())).await.unwrap();
             let payload =
                 socket.next().await.unwrap().unwrap().into_text().unwrap();
             let welcome: serde_json::Value =
@@ -556,7 +556,7 @@ mod tests {
             assert_eq!(welcome["type"], "welcome");
             assert_eq!(
                 welcome["data"]["capabilities"]["channels.read"],
-                "2026.10.22"
+                "2026.11.13"
             );
             assert_eq!(
                 welcome["data"]["rejected_capabilities"]["messages.read"],

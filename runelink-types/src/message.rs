@@ -4,6 +4,7 @@ use time::OffsetDateTime;
 
 use crate::{
     ids::TextChannelId,
+    metadata::Metadata,
     user::{User, UserRef},
 };
 
@@ -15,6 +16,8 @@ pub struct Message {
     pub text_channel_id: TextChannelId,
     pub author: Option<User>,
     pub reply_to: Option<MessageId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Metadata>,
     #[serde(flatten)]
     pub content: MessageContent,
     #[serde(with = "time::serde::rfc3339")]
@@ -31,6 +34,8 @@ pub struct NewMessage {
     pub body: String,
     #[serde(default)]
     pub reply_to: Option<MessageId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Metadata>,
 }
 
 /// The wire format has nullable `body` and `deleted_at` fields. Parsing validates
@@ -121,7 +126,15 @@ mod tests {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct MessageUpdate {
-    pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    /// Omitted preserves metadata, null clears it, and an object replaces it.
+    #[serde(
+        default,
+        deserialize_with = "crate::edit::nullable_patch",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub metadata: Option<Option<Metadata>>,
     #[serde(with = "time::serde::rfc3339")]
     pub expected_updated_at: OffsetDateTime,
 }

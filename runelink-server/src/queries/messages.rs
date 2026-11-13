@@ -20,6 +20,7 @@ pub struct DbMessage {
     pub text_channel_id: TextChannelId,
     pub author: Option<Json<User>>,
     pub body: Option<String>,
+    pub metadata: Option<serde_json::Value>,
     pub reply_to: Option<MessageId>,
     pub deleted_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339")]
@@ -53,6 +54,15 @@ impl TryFrom<DbMessage> for Message {
             text_channel_id: msg.text_channel_id,
             author: msg.author.map(|json_user| json_user.0),
             reply_to: msg.reply_to,
+            metadata: match msg.metadata {
+                None => None,
+                Some(serde_json::Value::Object(metadata)) => Some(metadata),
+                _ => {
+                    return Err(ApiError::Internal(
+                        "Invalid message metadata".into(),
+                    ));
+                }
+            },
             content,
             created_at: msg.created_at,
             updated_at: msg.updated_at,
@@ -66,10 +76,14 @@ pub async fn insert(
     text_channel_id: TextChannelId,
     new_message: &NewMessage,
 ) -> ApiResult<Message> {
+    if let Some(metadata) = &new_message.metadata {
+        runelink_types::metadata::validate_metadata(metadata)
+            .map_err(ApiError::BadRequest)?;
+    }
     let new_id: Uuid = sqlx::query_scalar!(
         r#"
-        INSERT INTO messages (text_channel_id, author_name, author_host, body, reply_to)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO messages (text_channel_id, author_name, author_host, body, reply_to, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id;
         "#,
         text_channel_id.as_uuid(),
@@ -77,6 +91,7 @@ pub async fn insert(
         new_message.author.host,
         new_message.body,
         new_message.reply_to.map(|id| id.as_uuid()),
+        new_message.metadata.as_ref().map(Json) as _,
     )
     .fetch_one(pool)
     .await?;
@@ -92,6 +107,7 @@ pub async fn get_all(pool: &DbPool) -> ApiResult<Vec<Message>> {
             m.id AS "id!",
             m.text_channel_id AS "text_channel_id!",
             m.body,
+            m.metadata,
             m.reply_to AS "reply_to: MessageId",
             m.deleted_at,
             m.created_at AS "created_at!",
@@ -119,6 +135,7 @@ pub async fn get_by_server(
             m.id AS "id!",
             m.text_channel_id AS "text_channel_id!",
             m.body,
+            m.metadata,
             m.reply_to AS "reply_to: MessageId",
             m.deleted_at,
             m.created_at AS "created_at!",
@@ -149,6 +166,7 @@ pub async fn get_by_text_channel(
             m.id AS "id!",
             m.text_channel_id AS "text_channel_id!",
             m.body,
+            m.metadata,
             m.reply_to AS "reply_to: MessageId",
             m.deleted_at,
             m.created_at AS "created_at!",
@@ -175,6 +193,7 @@ pub async fn get_by_id(pool: &DbPool, msg_id: MessageId) -> ApiResult<Message> {
             m.id AS "id!",
             m.text_channel_id AS "text_channel_id!",
             m.body,
+            m.metadata,
             m.reply_to AS "reply_to: MessageId",
             m.deleted_at,
             m.created_at AS "created_at!",
@@ -198,7 +217,7 @@ pub async fn delete(
     message_id: MessageId,
 ) -> ApiResult<Message> {
     sqlx::query!(
-        "UPDATE messages SET body = NULL, deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL;",
+        "UPDATE messages SET body = NULL, metadata = NULL, deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL;",
         message_id.as_uuid(),
     )
     .execute(pool)
@@ -211,13 +230,21 @@ pub async fn update(
     message_id: MessageId,
     update: &runelink_types::message::MessageUpdate,
 ) -> ApiResult<Message> {
-    if update.body.trim().is_empty() {
+    if update
+        .body
+        .as_ref()
+        .is_some_and(|body| body.trim().is_empty())
+    {
         return Err(ApiError::BadRequest("Message cannot be empty".into()));
+    }
+    if let Some(Some(metadata)) = &update.metadata {
+        runelink_types::metadata::validate_metadata(metadata)
+            .map_err(ApiError::BadRequest)?;
     }
     let mut tx = pool.begin().await?;
     let mut row = sqlx::query_as::<_, DbMessage>(
         r#"
-        SELECT m.id, m.text_channel_id, m.body, m.reply_to, m.deleted_at,
+        SELECT m.id, m.text_channel_id, m.body, m.metadata, m.reply_to, m.deleted_at,
             m.created_at, m.updated_at, m.edited_at, to_jsonb(a) AS author
         FROM messages m
         LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host
@@ -236,20 +263,28 @@ pub async fn update(
             "Message changed. Reload it before saving.".into(),
         ));
     }
-    if row.body.as_deref() != Some(&update.body) {
+    let body = update.body.as_ref().or(row.body.as_ref());
+    let metadata = update
+        .metadata
+        .as_ref()
+        .map(|value| value.clone().map(serde_json::Value::Object))
+        .unwrap_or_else(|| row.metadata.clone());
+    if body != row.body.as_ref() || metadata != row.metadata {
         let (updated_at, edited_at): (OffsetDateTime, OffsetDateTime) =
             sqlx::query_as(
                 r#"
-            UPDATE messages SET body = $2, edited_at = clock_timestamp()
+            UPDATE messages SET body = $2, metadata = $3, edited_at = clock_timestamp()
             WHERE id = $1
             RETURNING updated_at, edited_at
         "#,
             )
             .bind(message_id)
-            .bind(&update.body)
+            .bind(body)
+            .bind(&metadata)
             .fetch_one(&mut *tx)
             .await?;
-        row.body = Some(update.body.clone());
+        row.body = body.cloned();
+        row.metadata = metadata;
         row.updated_at = updated_at;
         row.edited_at = Some(edited_at);
     }

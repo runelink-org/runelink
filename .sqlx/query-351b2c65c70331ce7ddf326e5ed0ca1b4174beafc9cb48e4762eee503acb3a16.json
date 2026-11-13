@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            m.id AS \"id!\",\n            m.text_channel_id AS \"text_channel_id!\",\n            m.body,\n            m.reply_to AS \"reply_to: MessageId\",\n            m.deleted_at,\n            m.created_at AS \"created_at!\",\n            m.updated_at AS \"updated_at!\",\n            m.edited_at,\n            to_jsonb(a) AS \"author: Json<User>\"\n        FROM messages m\n        LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host\n        ORDER BY m.created_at DESC;\n        ",
+  "query": "\n        SELECT\n            m.id AS \"id!\",\n            m.text_channel_id AS \"text_channel_id!\",\n            m.body,\n            m.metadata,\n            m.reply_to AS \"reply_to: MessageId\",\n            m.deleted_at,\n            m.created_at AS \"created_at!\",\n            m.updated_at AS \"updated_at!\",\n            m.edited_at,\n            to_jsonb(a) AS \"author: Json<User>\"\n        FROM messages m\n        LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host\n        ORDER BY m.created_at DESC;\n        ",
   "describe": {
     "columns": [
       {
@@ -38,6 +38,17 @@
       },
       {
         "ordinal": 3,
+        "name": "metadata",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "metadata"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
         "name": "reply_to: MessageId",
         "type_info": "Uuid",
         "origin": {
@@ -48,7 +59,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "deleted_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -59,7 +70,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "created_at!",
         "type_info": "Timestamptz",
         "origin": {
@@ -70,7 +81,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "updated_at!",
         "type_info": "Timestamptz",
         "origin": {
@@ -81,7 +92,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "edited_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -92,7 +103,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "author: Json<User>",
         "type_info": "Jsonb",
         "origin": "Expression"
@@ -107,11 +118,12 @@
       true,
       true,
       true,
+      true,
       false,
       false,
       true,
       null
     ]
   },
-  "hash": "a2e09a08cf4e5ee53f0a06bb27cbc3b2ad8f8992dbd038eae666f769ebd5c64c"
+  "hash": "351b2c65c70331ce7ddf326e5ed0ca1b4174beafc9cb48e4762eee503acb3a16"
 }
