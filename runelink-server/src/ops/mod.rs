@@ -1,4 +1,3 @@
-mod fanout;
 mod federation;
 
 pub mod channels;

@@ -3,10 +3,7 @@ use runelink_types::{
     message::{Message, MessageId, NewMessage},
     server::ServerId,
     user::UserRef,
-    ws::{
-        ClientWsUpdate, FederationWsReply, FederationWsRequest,
-        FederationWsUpdate,
-    },
+    ws::{FederationWsReply, FederationWsRequest},
 };
 
 use super::federation;
@@ -14,7 +11,6 @@ use crate::{
     auth::Session,
     config::Locality,
     error::{ApiError, ApiResult},
-    ops::fanout,
     queries,
     state::AppState,
 };
@@ -34,42 +30,10 @@ pub async fn create(
                 text_channel_id,
             )
             .await?;
-            if let Some(reply_to) = new_message.reply_to {
-                // Deleted targets remain valid. Channel restrictions belong here,
-                // rather than in the schema, to allow broader scopes in the future.
-                let target =
-                    queries::messages::get_by_id(&state.db_pool, reply_to)
-                        .await
-                        .map_err(|error| match error {
-                            ApiError::NotFound => ApiError::BadRequest(
-                                "Reply target not found in this text channel"
-                                    .into(),
-                            ),
-                            error => error,
-                        })?;
-                if target.text_channel_id != text_channel_id {
-                    return Err(ApiError::BadRequest(
-                        "Reply target not found in this text channel".into(),
-                    ));
-                }
-            }
-            let message = queries::messages::insert(
-                &state.db_pool,
-                text_channel_id,
-                new_message,
-            )
-            .await?;
-            fanout::fanout_update(
-                state,
-                fanout::resolve_server_targets(state, server_id).await?,
-                ClientWsUpdate::MessageUpserted(message.clone()),
-                FederationWsUpdate::MessageUpserted {
-                    server_id,
-                    message: message.clone(),
-                },
-            )
-            .await;
-            Ok(message)
+            state
+                .actors
+                .create_message(server_id, text_channel_id, new_message.clone())
+                .await
         }
         Locality::Remote(host) => {
             let user_ref = session.user_ref.as_ref().ok_or_else(|| {
@@ -224,7 +188,7 @@ pub async fn get_by_id(
     match state.config.target_locality(target_host) {
         Locality::Local => {
             let message =
-                queries::messages::get_by_id(&state.db_pool, message_id)
+                queries::messages::get_by_id(&*state.db_pool, message_id)
                     .await?;
             Ok(message)
         }
@@ -261,28 +225,13 @@ pub async fn delete(
 ) -> ApiResult<Message> {
     match state.config.target_locality(target_host) {
         Locality::Local => {
-            let message =
-                queries::messages::get_by_id(&state.db_pool, message_id)
+            let (server_id, text_channel_id) =
+                queries::messages::get_location(&state.db_pool, message_id)
                     .await?;
-            let text_channel_id = message.text_channel_id;
-            let server_id = queries::channels::get_server_id_by_text_channel(
-                &state.db_pool,
-                text_channel_id,
-            )
-            .await?;
-            let message =
-                queries::messages::delete(&state.db_pool, message_id).await?;
-            fanout::fanout_update(
-                state,
-                fanout::resolve_server_targets(state, server_id).await?,
-                ClientWsUpdate::MessageUpserted(message.clone()),
-                FederationWsUpdate::MessageUpserted {
-                    server_id,
-                    message: message.clone(),
-                },
-            )
-            .await;
-            Ok(message)
+            state
+                .actors
+                .delete_message(server_id, text_channel_id, message_id)
+                .await
         }
         Locality::Remote(host) => {
             let user_ref = session.user_ref.as_ref().ok_or_else(|| {
@@ -334,7 +283,7 @@ pub mod auth {
         message_id: MessageId,
     ) -> ApiResult<Req> {
         let message =
-            queries::messages::get_by_id(&state.db_pool, message_id).await?;
+            queries::messages::get_by_id(&*state.db_pool, message_id).await?;
         text_channel_member(state, message.text_channel_id).await
     }
 
@@ -343,7 +292,7 @@ pub mod auth {
         message_id: MessageId,
     ) -> ApiResult<Req> {
         let message =
-            queries::messages::get_by_id(&state.db_pool, message_id).await?;
+            queries::messages::get_by_id(&*state.db_pool, message_id).await?;
         let server_id = queries::channels::get_server_id_by_text_channel(
             &state.db_pool,
             message.text_channel_id,
@@ -361,7 +310,7 @@ pub mod auth {
         message_id: MessageId,
     ) -> ApiResult<Req> {
         let message =
-            queries::messages::get_by_id(&state.db_pool, message_id).await?;
+            queries::messages::get_by_id(&*state.db_pool, message_id).await?;
         let Some(author) = message.author else {
             return Ok(Req::Never);
         };
@@ -514,23 +463,15 @@ pub async fn update(
         };
         return Ok(resource);
     }
-    let resource =
-        queries::messages::update(&state.db_pool, message_id, message_update)
-            .await?;
-    let server_id = queries::channels::get_server_id_by_text_channel(
-        &state.db_pool,
-        resource.text_channel_id,
-    )
-    .await?;
-    fanout::fanout_update(
-        state,
-        fanout::resolve_server_targets(state, server_id).await?,
-        ClientWsUpdate::MessageUpserted(resource.clone()),
-        FederationWsUpdate::MessageUpserted {
+    let (server_id, text_channel_id) =
+        queries::messages::get_location(&state.db_pool, message_id).await?;
+    state
+        .actors
+        .update_message(
             server_id,
-            message: resource.clone(),
-        },
-    )
-    .await;
-    Ok(resource)
+            text_channel_id,
+            message_id,
+            message_update.clone(),
+        )
+        .await
 }

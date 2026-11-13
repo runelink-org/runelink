@@ -1,11 +1,11 @@
 use runelink_types::server::{NewServer, Server, ServerId};
+use sqlx::{PgConnection, PgExecutor};
 use time::OffsetDateTime;
 
 use crate::{
     config::{ServerConfig, canonical_host},
     db::DbPool,
     error::{ApiError, ApiResult},
-    state::AppState,
 };
 
 #[derive(sqlx::FromRow, Debug)]
@@ -32,22 +32,25 @@ impl LocalServerRow {
 }
 
 pub async fn insert(
-    state: &AppState,
+    executor: impl PgExecutor<'_>,
+    config: &ServerConfig,
+    server_id: ServerId,
     new_server: &NewServer,
 ) -> ApiResult<Server> {
     let row = sqlx::query_as!(
         LocalServerRow,
         r#"
-        INSERT INTO servers (title, description)
-        VALUES ($1, $2)
+        INSERT INTO servers (id, title, description)
+        VALUES ($1, $2, $3)
         RETURNING *;
         "#,
+        server_id.as_uuid(),
         new_server.title,
         new_server.description,
     )
-    .fetch_one(state.db_pool.as_ref())
+    .fetch_one(executor)
     .await?;
-    Ok(row.into_server(&state.config))
+    Ok(row.into_server(config))
 }
 
 /// Cache a remote server reported by `source_host`.
@@ -112,7 +115,8 @@ pub async fn upsert_remote(
 }
 
 pub async fn get_by_id(
-    state: &AppState,
+    executor: impl PgExecutor<'_>,
+    config: &ServerConfig,
     server_id: ServerId,
 ) -> ApiResult<Server> {
     let row = sqlx::query_as!(
@@ -120,31 +124,42 @@ pub async fn get_by_id(
         "SELECT * FROM servers WHERE id = $1;",
         server_id.as_uuid(),
     )
-    .fetch_one(state.db_pool.as_ref())
+    .fetch_one(executor)
     .await?;
-    Ok(row.into_server(&state.config))
+    Ok(row.into_server(config))
 }
 
-pub async fn get_all(state: &AppState) -> ApiResult<Vec<Server>> {
+pub async fn get_all(
+    pool: &DbPool,
+    config: &ServerConfig,
+) -> ApiResult<Vec<Server>> {
     let rows = sqlx::query_as!(LocalServerRow, "SELECT * FROM servers",)
-        .fetch_all(state.db_pool.as_ref())
+        .fetch_all(pool)
         .await?;
     let servers = rows
         .into_iter()
-        .map(|row| row.into_server(&state.config))
+        .map(|row| row.into_server(config))
         .collect();
     Ok(servers)
 }
 
-pub async fn delete(state: &AppState, server_id: ServerId) -> ApiResult<()> {
-    sqlx::query!("DELETE FROM servers WHERE id = $1;", server_id.as_uuid())
-        .execute(state.db_pool.as_ref())
-        .await?;
+pub async fn delete(
+    executor: impl PgExecutor<'_>,
+    server_id: ServerId,
+) -> ApiResult<()> {
+    let result =
+        sqlx::query!("DELETE FROM servers WHERE id = $1;", server_id.as_uuid())
+            .execute(executor)
+            .await?;
+    if result.rows_affected() == 0 {
+        return Err(ApiError::NotFound);
+    }
     Ok(())
 }
 
 pub async fn update(
-    state: &AppState,
+    conn: &mut PgConnection,
+    config: &ServerConfig,
     server_id: ServerId,
     update: &runelink_types::edit::DetailsUpdate,
 ) -> ApiResult<Server> {
@@ -155,12 +170,11 @@ pub async fn update(
     {
         return Err(ApiError::BadRequest("Title cannot be empty".into()));
     }
-    let mut tx = state.db_pool.begin().await?;
     let mut row = sqlx::query_as::<_, LocalServerRow>(
         "SELECT * FROM servers WHERE id = $1 FOR UPDATE",
     )
     .bind(server_id)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut *conn)
     .await?;
     if row.updated_at != update.expected_updated_at {
         return Err(ApiError::Conflict(
@@ -171,8 +185,7 @@ pub async fn update(
     let description = update.description.as_ref().unwrap_or(&row.description);
     if title != &row.title || description != &row.description {
         row = sqlx::query_as::<_, LocalServerRow>("UPDATE servers SET title = $2, description = $3 WHERE id = $1 RETURNING *")
-            .bind(server_id).bind(title).bind(description).fetch_one(&mut *tx).await?;
+            .bind(server_id).bind(title).bind(description).fetch_one(&mut *conn).await?;
     }
-    tx.commit().await?;
-    Ok(row.into_server(&state.config))
+    Ok(row.into_server(config))
 }

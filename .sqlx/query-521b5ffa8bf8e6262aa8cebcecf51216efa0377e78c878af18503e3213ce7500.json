@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM server_channels WHERE id = $1 AND server_id = $2\n        RETURNING text_channel_id;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "text_channel_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "server_channels",
+            "name": "text_channel_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "521b5ffa8bf8e6262aa8cebcecf51216efa0377e78c878af18503e3213ce7500"
+}

@@ -8,7 +8,7 @@ use runelink_types::{
     user::{User, UserRef},
 };
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, types::Json};
+use sqlx::{FromRow, PgConnection, PgExecutor, types::Json};
 use time::OffsetDateTime;
 
 use crate::{
@@ -92,7 +92,7 @@ impl ServerMembershipRow {
 }
 
 pub async fn upsert_local(
-    pool: &DbPool,
+    conn: &mut PgConnection,
     new_membership: &NewServerMembership,
 ) -> ApiResult<ServerMember> {
     sqlx::query!(
@@ -108,10 +108,10 @@ pub async fn upsert_local(
         new_membership.user_ref.host,
         new_membership.role as ServerRole,
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
     get_local_member_by_user_and_server(
-        pool,
+        conn,
         new_membership.server_id,
         new_membership.user_ref.clone(),
     )
@@ -188,7 +188,7 @@ pub async fn insert_remote(
 }
 
 pub async fn get_local_member_by_user_and_server(
-    pool: &DbPool,
+    executor: impl PgExecutor<'_>,
     server_id: ServerId,
     user_ref: UserRef,
 ) -> ApiResult<ServerMember> {
@@ -209,7 +209,7 @@ pub async fn get_local_member_by_user_and_server(
         user_ref.name,
         user_ref.host,
     )
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await?
     .try_into()
 }
@@ -284,14 +284,24 @@ pub async fn get_members_by_server(
     .collect()
 }
 
-pub async fn get_user_refs_by_local_server(
-    pool: &DbPool,
+/// The members of a local server and their roles.
+pub async fn get_local_roles(
+    executor: impl PgExecutor<'_>,
     server_id: ServerId,
-) -> ApiResult<Vec<UserRef>> {
-    let members = get_members_by_server(pool, server_id).await?;
-    Ok(members
+) -> ApiResult<Vec<(UserRef, ServerRole)>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT user_name, user_host, role AS "role: ServerRole"
+        FROM server_users
+        WHERE server_id = $1;
+        "#,
+        server_id.as_uuid(),
+    )
+    .fetch_all(executor)
+    .await?;
+    Ok(rows
         .into_iter()
-        .map(|member| member.user.as_ref())
+        .map(|row| (UserRef::new(row.user_name, row.user_host), row.role))
         .collect())
 }
 
@@ -332,7 +342,8 @@ pub async fn get_remote_server_members(
 }
 
 pub async fn get_local_by_user_and_server(
-    state: &AppState,
+    executor: impl PgExecutor<'_>,
+    config: &ServerConfig,
     server_id: ServerId,
     user: UserRef,
 ) -> ApiResult<ServerMembership> {
@@ -357,13 +368,13 @@ pub async fn get_local_by_user_and_server(
         user.name,
         user.host,
     )
-    .fetch_one(state.db_pool.as_ref())
+    .fetch_one(executor)
     .await?;
 
     Ok(ServerMembership {
         server: Server {
             id: row.id.into(),
-            host: state.config.public_host(),
+            host: config.public_host(),
             title: row.title,
             description: row.description,
             created_at: row.server_created_at,
@@ -459,7 +470,7 @@ pub async fn get_remote_server_hosts_for_user(
 
 /// Delete a local server membership.
 pub async fn delete_local(
-    pool: &DbPool,
+    executor: impl PgExecutor<'_>,
     server_id: ServerId,
     user: UserRef,
 ) -> ApiResult<()> {
@@ -472,7 +483,7 @@ pub async fn delete_local(
         user.name,
         user.host,
     )
-    .execute(pool)
+    .execute(executor)
     .await?;
     if result.rows_affected() == 0 {
         return Err(ApiError::NotFound);

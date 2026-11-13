@@ -24,10 +24,11 @@ async fn authorized_remote_server_users(
     sender: &str,
     server_id: ServerId,
 ) -> ApiResult<Option<Vec<UserRef>>> {
-    let Some(members) = state
-        .routing_index
-        .members_for_remote_server(server_id)
-        .await?
+    let Some(members) = queries::memberships::get_remote_server_members(
+        &state.db_pool,
+        server_id,
+    )
+    .await?
     else {
         return Ok(None);
     };

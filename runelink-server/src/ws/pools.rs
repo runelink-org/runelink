@@ -176,32 +176,6 @@ impl ClientWsPool {
             .is_some_and(|conn| supports(&conn.capabilities, capability))
     }
 
-    pub async fn send_to_user(
-        &self,
-        user_ref: &UserRef,
-        envelope: ClientWsEnvelope,
-    ) -> usize {
-        let targets = {
-            let state = self.inner.read().await;
-            state
-                .by_user
-                .get(user_ref)
-                .into_iter()
-                .flat_map(|conn_ids| conn_ids.iter())
-                .filter_map(|conn_id| {
-                    state
-                        .connections
-                        .get(conn_id)
-                        .filter(|conn| {
-                            client_supports_envelope(conn, &envelope)
-                        })
-                        .map(|conn| (*conn_id, conn.sender.clone()))
-                })
-                .collect::<Vec<_>>()
-        };
-        Self::send_to_many_client(targets, envelope, self).await
-    }
-
     /// Sends an envelope to the active connections for the given users.
     pub async fn send_to_users<I, S>(
         &self,

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use axum::{
     extract::{
@@ -24,7 +24,10 @@ use runelink_types::{
     user::UserRef,
     ws::{ClientWsEnvelope, FederationWsEnvelope},
 };
-use tokio::{net::TcpStream, sync::mpsc};
+use tokio::{
+    net::TcpStream,
+    sync::{Semaphore, mpsc},
+};
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
     tungstenite::protocol::{
@@ -33,7 +36,10 @@ use tokio_tungstenite::{
     },
 };
 
-use super::handlers::{handle_client_message, handle_federation_message};
+use super::handlers::{
+    MAX_IN_FLIGHT_CLIENT_REQUESTS, apply_federation_updates,
+    handle_client_message, handle_federation_message,
+};
 use crate::{
     auth::Principal,
     auth_service,
@@ -183,6 +189,7 @@ async fn client_ws_loop(
                 .await;
     }
 
+    let in_flight = Arc::new(Semaphore::new(MAX_IN_FLIGHT_CLIENT_REQUESTS));
     loop {
         tokio::select! {
             outbound = outbound_rx.recv() => {
@@ -205,7 +212,9 @@ async fn client_ws_loop(
                 match incoming {
                     Some(Ok(AxumMessage::Text(payload))) => {
                         match serde_json::from_str::<ClientWsEnvelope>(&payload) {
-                            Ok(message) => handle_client_message(&state, conn_id, message).await,
+                            Ok(message) => {
+                                handle_client_message(&state, conn_id, message, &in_flight).await;
+                            }
                             Err(error) => {
                                 log::warn!("Failed to parse client websocket message: {error}");
                             }
@@ -440,6 +449,9 @@ pub async fn federation_socket_loop(
     mut socket: FederationSocket,
     mut outbound_rx: mpsc::UnboundedReceiver<FederationWsEnvelope>,
 ) {
+    // Ends after applying what is queued, once this loop drops its sender.
+    let (updates, updates_rx) = mpsc::unbounded_channel();
+    tokio::spawn(apply_federation_updates(state.clone(), updates_rx));
     loop {
         tokio::select! {
             outbound = outbound_rx.recv() => {
@@ -463,7 +475,7 @@ pub async fn federation_socket_loop(
                     FederationIncomingEvent::Text(payload) => {
                         match serde_json::from_str::<FederationWsEnvelope>(&payload) {
                             Ok(message) => {
-                                handle_federation_message(&state, conn_id, message).await;
+                                handle_federation_message(&state, conn_id, message, &updates).await;
                             }
                             Err(error) => {
                                 log::warn!("Failed to parse federation websocket message: {error}");

@@ -1,5 +1,5 @@
 use runelink_types::{NewUser, User, UserRef, UserRole};
-use sqlx::{Postgres, Transaction};
+use sqlx::{PgExecutor, Postgres, Transaction};
 use time::{Duration, OffsetDateTime};
 
 use crate::{
@@ -64,7 +64,7 @@ async fn lock_user_name(
 }
 
 pub async fn upsert_remote(
-    pool: &DbPool,
+    executor: impl PgExecutor<'_>,
     remote_user: &User,
 ) -> ApiResult<User> {
     let user = sqlx::query_as!(
@@ -91,7 +91,7 @@ pub async fn upsert_remote(
         remote_user.updated_at,
         OffsetDateTime::now_utc(),
     )
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await?;
     Ok(user)
 }
@@ -116,7 +116,7 @@ pub async fn get_all(pool: &DbPool) -> ApiResult<Vec<User>> {
 }
 
 pub async fn ensure_exists(
-    pool: &DbPool,
+    executor: impl PgExecutor<'_>,
     user_ref: UserRef,
 ) -> ApiResult<User> {
     let user = sqlx::query_as!(
@@ -136,12 +136,15 @@ pub async fn ensure_exists(
         user_ref.name,
         user_ref.host,
     )
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await?;
     Ok(user)
 }
 
-pub async fn get_by_ref(pool: &DbPool, user_ref: UserRef) -> ApiResult<User> {
+pub async fn get_by_ref(
+    executor: impl PgExecutor<'_>,
+    user_ref: UserRef,
+) -> ApiResult<User> {
     let user = sqlx::query_as!(
         User,
         r#"
@@ -158,7 +161,7 @@ pub async fn get_by_ref(pool: &DbPool, user_ref: UserRef) -> ApiResult<User> {
         user_ref.name,
         user_ref.host,
     )
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await?;
     Ok(user)
 }

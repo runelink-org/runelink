@@ -1,20 +1,17 @@
 use runelink_types::{
     server::{
-        FullServerMembership, NewServer, NewServerMembership, Server, ServerId,
-        ServerMembership, ServerRole, ServerWithChannels,
+        NewServer, Server, ServerId, ServerMembership, ServerRole,
+        ServerWithChannels,
     },
-    ws::{
-        ClientWsUpdate, FederationWsReply, FederationWsRequest,
-        FederationWsUpdate,
-    },
+    ws::{FederationWsReply, FederationWsRequest},
 };
 
 use super::federation;
 use crate::{
     auth::Session,
     config::Locality,
+    db,
     error::{ApiError, ApiResult},
-    ops::fanout,
     queries,
     state::AppState,
 };
@@ -35,52 +32,10 @@ pub async fn create(
                     "Session missing user identity for server creation".into(),
                 )
             })?;
-            if state.config.locality(&user_ref.host).is_local() {
-                // Never recreate a home user deleted while this request ran
-                queries::users::get_by_ref(&state.db_pool, user_ref.clone())
-                    .await?;
-            } else {
-                // Creates the record for federated users from other hosts
-                queries::users::ensure_exists(&state.db_pool, user_ref.clone())
-                    .await?;
-            }
-            let server = queries::servers::insert(state, new_server).await?;
-            let new_membership = NewServerMembership {
-                user_ref,
-                server_id: server.id,
-                server_host: server.host.clone(),
-                role: ServerRole::Admin,
-            };
-            let member = queries::memberships::upsert_local(
-                &state.db_pool,
-                &new_membership,
-            )
-            .await?;
-            let targets =
-                fanout::resolve_server_targets(state, server.id).await?;
-            fanout::fanout_update(
-                state,
-                targets.clone(),
-                ClientWsUpdate::ServerUpserted(server.clone()),
-                FederationWsUpdate::ServerUpserted(server.clone()),
-            )
-            .await;
-            let full_membership = FullServerMembership {
-                server: server.clone(),
-                user: member.user,
-                role: ServerRole::Admin,
-                joined_at: member.joined_at,
-                updated_at: member.updated_at,
-                synced_at: None,
-            };
-            fanout::fanout_update(
-                state,
-                targets,
-                ClientWsUpdate::MembershipUpserted(full_membership.clone()),
-                FederationWsUpdate::MembershipUpserted(full_membership),
-            )
-            .await;
-            Ok(server)
+            state
+                .actors
+                .create_server(new_server.clone(), user_ref)
+                .await
         }
         Locality::Remote(host) => {
             let user_ref = session.user_ref.clone().ok_or_else(|| {
@@ -130,7 +85,9 @@ pub async fn get_all(
     match state.config.target_locality(target_host) {
         Locality::Local => {
             // TODO: add visibility specification for servers
-            let servers = queries::servers::get_all(state).await?;
+            let servers =
+                queries::servers::get_all(&state.db_pool, &state.config)
+                    .await?;
             Ok(servers)
         }
         Locality::Remote(host) => {
@@ -161,7 +118,12 @@ pub async fn get_by_id(
     match state.config.target_locality(target_host) {
         Locality::Local => {
             // TODO: separate public and private server objects?
-            let server = queries::servers::get_by_id(state, server_id).await?;
+            let server = queries::servers::get_by_id(
+                &*state.db_pool,
+                &state.config,
+                server_id,
+            )
+            .await?;
             Ok(server)
         }
         Locality::Remote(host) => {
@@ -192,14 +154,14 @@ pub async fn get_with_channels(
 ) -> ApiResult<ServerWithChannels> {
     match state.config.target_locality(target_host) {
         Locality::Local => {
-            let (server, channels) = tokio::join!(
-                queries::servers::get_by_id(state, server_id),
-                queries::channels::list(&*state.db_pool, Some(server_id)),
-            );
-            Ok(ServerWithChannels {
-                server: server?,
-                channels: channels?,
-            })
+            // One snapshot, so the channels always match the server.
+            let mut tx = db::begin_snapshot(&state.db_pool).await?;
+            let server =
+                queries::servers::get_by_id(&mut *tx, &state.config, server_id)
+                    .await?;
+            let channels =
+                queries::channels::list(&mut *tx, Some(server_id)).await?;
+            Ok(ServerWithChannels { server, channels })
         }
         Locality::Remote(host) => {
             let user_ref = session.user_ref.clone().ok_or_else(|| {
@@ -235,19 +197,7 @@ pub async fn delete(
     target_host: Option<&str>,
 ) -> ApiResult<()> {
     match state.config.target_locality(target_host) {
-        Locality::Local => {
-            let targets =
-                fanout::resolve_server_targets(state, server_id).await?;
-            queries::servers::delete(state, server_id).await?;
-            fanout::fanout_update(
-                state,
-                targets,
-                ClientWsUpdate::ServerDeleted { server_id },
-                FederationWsUpdate::ServerDeleted { server_id },
-            )
-            .await;
-            Ok(())
-        }
+        Locality::Local => state.actors.delete_server(server_id).await,
         Locality::Remote(host) => {
             let user_ref = session.user_ref.clone().ok_or_else(|| {
                 ApiError::Internal(
@@ -352,15 +302,8 @@ pub async fn update(
             .await?;
         return Ok(resource);
     }
-    let resource =
-        queries::servers::update(state, server_id, server_update).await?;
-    let server_id = resource.id;
-    fanout::fanout_update(
-        state,
-        fanout::resolve_server_targets(state, server_id).await?,
-        ClientWsUpdate::ServerUpserted(resource.clone()),
-        FederationWsUpdate::ServerUpserted(resource.clone()),
-    )
-    .await;
-    Ok(resource)
+    state
+        .actors
+        .update_server(server_id, server_update.clone())
+        .await
 }

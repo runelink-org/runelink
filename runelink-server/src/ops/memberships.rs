@@ -4,10 +4,7 @@ use runelink_types::{
         ServerMembership, ServerRole,
     },
     user::{User, UserRef},
-    ws::{
-        ClientWsUpdate, FederationWsReply, FederationWsRequest,
-        FederationWsUpdate,
-    },
+    ws::{FederationWsReply, FederationWsRequest},
 };
 
 use super::{federation, users};
@@ -15,7 +12,6 @@ use crate::{
     auth::Session,
     config::Locality,
     error::{ApiError, ApiResult},
-    ops::fanout,
     queries,
     state::AppState,
 };
@@ -80,7 +76,10 @@ pub async fn upsert(
         return Ok(cached_membership.as_full(user));
     }
 
-    if new_membership.user_ref.host != state.config.public_host() {
+    // Fetching a remote user waits on the network, so it stays out of the actor.
+    let remote_user = if new_membership.user_ref.host
+        != state.config.public_host()
+    {
         let remote_user = match remote_user {
             Some(user) => user.clone(),
             None => {
@@ -93,35 +92,14 @@ pub async fn upsert(
                 "User payload does not match membership user_ref".into(),
             ));
         }
-        queries::users::upsert_remote(&state.db_pool, &remote_user).await?;
-    }
-
-    // Create the membership
-    let member =
-        queries::memberships::upsert_local(&state.db_pool, new_membership)
-            .await?;
-    let membership = queries::memberships::get_local_by_user_and_server(
-        state,
-        new_membership.server_id,
-        new_membership.user_ref.clone(),
-    )
-    .await?;
-    let full_membership = FullServerMembership {
-        server: membership.server,
-        user: member.user,
-        role: membership.role,
-        joined_at: membership.joined_at,
-        updated_at: membership.updated_at,
-        synced_at: membership.synced_at,
+        Some(remote_user)
+    } else {
+        None
     };
-    fanout::fanout_update(
-        state,
-        fanout::resolve_server_targets(state, new_membership.server_id).await?,
-        ClientWsUpdate::MembershipUpserted(full_membership.clone()),
-        FederationWsUpdate::MembershipUpserted(full_membership.clone()),
-    )
-    .await;
-    Ok(full_membership)
+    state
+        .actors
+        .upsert_membership(new_membership.clone(), remote_user)
+        .await
 }
 
 /// Get all members of a server (public).
@@ -173,7 +151,7 @@ pub async fn get_member_by_user_and_server(
         Locality::Local => {
             let member =
                 queries::memberships::get_local_member_by_user_and_server(
-                    &state.db_pool,
+                    &*state.db_pool,
                     server_id,
                     user_ref,
                 )
@@ -228,41 +206,7 @@ pub async fn delete(
 
     match state.config.target_locality(target_host) {
         Locality::Local => {
-            let mut targets =
-                fanout::resolve_server_targets(state, server_id).await?;
-            if !targets.local_users.contains(&user_ref) {
-                targets.local_users.push(user_ref.clone());
-            }
-            if user_ref.host != state.config.public_host() {
-                targets.remote_hosts.push(user_ref.host.clone());
-            }
-            // Verify the membership exists
-            queries::memberships::get_local_member_by_user_and_server(
-                &state.db_pool,
-                server_id,
-                user_ref.clone(),
-            )
-            .await?;
-            queries::memberships::delete_local(
-                &state.db_pool,
-                server_id,
-                user_ref.clone(),
-            )
-            .await?;
-            fanout::fanout_update(
-                state,
-                targets,
-                ClientWsUpdate::MembershipDeleted {
-                    server_id,
-                    user_ref: user_ref.clone(),
-                },
-                FederationWsUpdate::MembershipDeleted {
-                    server_id,
-                    user_ref,
-                },
-            )
-            .await;
-            Ok(())
+            state.actors.delete_membership(server_id, user_ref).await
         }
         Locality::Remote(host) => {
             let reply = federation::request(
