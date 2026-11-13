@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO messages (text_channel_id, author_name, author_host, body, reply_to)\n        VALUES ($1, $2, $3, $4, $5)\n        RETURNING id;\n        ",
+  "query": "\n        INSERT INTO messages (text_channel_id, author_name, author_host, body, reply_to, metadata)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        RETURNING id;\n        ",
   "describe": {
     "columns": [
       {
@@ -21,12 +21,13 @@
         "Text",
         "Text",
         "Text",
-        "Uuid"
+        "Uuid",
+        "Jsonb"
       ]
     },
     "nullable": [
       false
     ]
   },
-  "hash": "c0dfca94151e6dbc02417f0408c8c97958252e878f113224471797846edfbb41"
+  "hash": "4b7ea469bd945e5bd757738574f50fd980a25320612e5c756469b383dc0aaf5a"
 }

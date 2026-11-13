@@ -695,6 +695,7 @@ mod tests {
                     text_channel_id: TextChannelId::new(),
                     author: None,
                     reply_to: None,
+                    metadata: None,
                     content: runelink_types::message::MessageContent::Deleted {
                         body: (),
                         deleted_at: time::OffsetDateTime::now_utc(),

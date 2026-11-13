@@ -135,6 +135,7 @@ mod tests {
             },
             title: format!("channel-{n}"),
             description: None,
+            metadata: None,
             parent_channel_id: parent.map(id),
             position,
             created_at: OffsetDateTime::UNIX_EPOCH,

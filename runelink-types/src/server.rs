@@ -15,6 +15,7 @@ pub struct Server {
     pub id: ServerId,
     pub host: String,
     pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
@@ -25,6 +26,7 @@ pub struct Server {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NewServer {
     pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
 

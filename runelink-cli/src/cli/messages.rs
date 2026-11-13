@@ -63,6 +63,8 @@ pub struct MessageGetArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct MessageSendArgs {
+    #[clap(flatten)]
+    pub metadata: super::metadata::MetadataArgs,
     /// The message to reply to, within the same text channel
     #[clap(long)]
     pub reply_to: Option<MessageId>,
@@ -123,6 +125,7 @@ pub async fn handle_message_commands(
             .await?;
             let update = runelink_types::message::MessageUpdate {
                 body: edit_args.body.clone(),
+                metadata: edit_args.metadata.patch()?,
                 expected_updated_at: original.updated_at,
             };
             let resource = requests::messages::update(
@@ -210,6 +213,7 @@ pub async fn handle_message_commands(
                 author: account.user_ref.clone(),
                 body,
                 reply_to: send_args.reply_to,
+                metadata: send_args.metadata.value()?,
             };
             let message = requests::messages::create(
                 ctx.client,
@@ -375,6 +379,7 @@ mod tests {
                 synced_at: None,
             }),
             reply_to: None,
+            metadata: None,
             content: MessageContent::Active {
                 body: body.into(),
                 deleted_at: (),
@@ -492,11 +497,13 @@ mod tests {
 
 #[derive(clap::Args, Debug)]
 pub struct MessageEditArgs {
+    #[clap(flatten)]
+    pub metadata: super::metadata::MetadataEditArgs,
     #[clap(long)]
     pub message_id: MessageId,
     #[clap(long)]
     pub host: Option<String>,
     /// Replacement message text
     #[clap(long)]
-    pub body: String,
+    pub body: Option<String>,
 }

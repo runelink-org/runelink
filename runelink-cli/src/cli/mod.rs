@@ -17,6 +17,7 @@ pub mod config;
 pub mod context;
 pub mod input;
 pub mod messages;
+pub mod metadata;
 pub mod select;
 pub mod servers;
 pub mod users;
