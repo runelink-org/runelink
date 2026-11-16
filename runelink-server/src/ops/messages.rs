@@ -32,7 +32,12 @@ pub async fn create(
             .await?;
             state
                 .actors
-                .create_message(server_id, text_channel_id, new_message.clone())
+                .create_message(
+                    server_id,
+                    text_channel_id,
+                    new_message.clone(),
+                    session.authorization(),
+                )
                 .await
         }
         Locality::Remote(host) => {
@@ -230,7 +235,12 @@ pub async fn delete(
                     .await?;
             state
                 .actors
-                .delete_message(server_id, text_channel_id, message_id)
+                .delete_message(
+                    server_id,
+                    text_channel_id,
+                    message_id,
+                    session.authorization(),
+                )
                 .await
         }
         Locality::Remote(host) => {
@@ -472,6 +482,7 @@ pub async fn update(
             text_channel_id,
             message_id,
             message_update.clone(),
+            session.authorization(),
         )
         .await
 }

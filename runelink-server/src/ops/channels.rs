@@ -28,7 +28,11 @@ pub async fn create(
         Locality::Local => {
             state
                 .actors
-                .create_channel(server_id, new_channel.clone())
+                .create_channel(
+                    server_id,
+                    new_channel.clone(),
+                    session.authorization(),
+                )
                 .await
         }
         Locality::Remote(host) => {
@@ -176,7 +180,10 @@ pub async fn delete(
             let server_id =
                 queries::channels::get_server_id(&*state.db_pool, channel_id)
                     .await?;
-            state.actors.delete_channel(server_id, channel_id).await
+            state
+                .actors
+                .delete_channel(server_id, channel_id, session.authorization())
+                .await
         }
         Locality::Remote(host) => {
             let user_ref = session.user_ref.clone().ok_or_else(|| {
@@ -219,7 +226,12 @@ pub async fn move_channel(
                     .await?;
             state
                 .actors
-                .move_channel(server_id, channel_id, channel_move.clone())
+                .move_channel(
+                    server_id,
+                    channel_id,
+                    channel_move.clone(),
+                    session.authorization(),
+                )
                 .await
         }
         Locality::Remote(host) => {
@@ -389,6 +401,11 @@ pub async fn update(
         queries::channels::get_server_id(&*state.db_pool, channel_id).await?;
     state
         .actors
-        .update_channel(server_id, channel_id, channel_update.clone())
+        .update_channel(
+            server_id,
+            channel_id,
+            channel_update.clone(),
+            session.authorization(),
+        )
         .await
 }

@@ -18,10 +18,11 @@ use sqlx::{PgConnection, Postgres, Transaction};
 use tokio::sync::{Mutex, mpsc};
 
 use super::{
-    ActorCtx, Envelope, MAILBOX_CAPACITY, Registry, ServerMailbox, ServerState,
-    SharedState, Update,
+    ActorCtx, ActorFacts, Envelope, MAILBOX_CAPACITY, Registry, ServerMailbox,
+    ServerState, SharedState, Update,
 };
 use crate::{
+    auth::Authorization,
     channel_tree,
     error::{ApiError, ApiResult},
     queries,
@@ -111,7 +112,7 @@ async fn run(
     state: SharedState,
     mut inbox: mpsc::Receiver<Envelope<ServerOp, ServerOutput>>,
 ) {
-    while let Some(Envelope { op, reply }) = inbox.recv().await {
+    while let Some(Envelope { op, auth, reply }) = inbox.recv().await {
         let mut state = state.write().await;
         if state.stopped {
             let _ = reply.send(Err(ApiError::NotFound));
@@ -119,7 +120,7 @@ async fn run(
         }
         let creating = matches!(op, ServerOp::Create { .. });
         let mut untrusted = false;
-        let result = match execute(&ctx, server_id, op).await {
+        let result = match execute(&ctx, server_id, &state, op, auth).await {
             Ok((tx, outcome)) => match tx.commit().await {
                 Ok(()) => Ok(outcome),
                 Err(error) => {
@@ -203,9 +204,17 @@ async fn run(
 async fn execute(
     ctx: &ActorCtx,
     server_id: ServerId,
+    state: &ServerState,
     op: ServerOp,
+    auth: Authorization,
 ) -> ApiResult<(Transaction<'static, Postgres>, Outcome)> {
     let mut tx = ctx.db_pool.begin().await?;
+    let mut facts = ActorFacts {
+        conn: &mut tx,
+        server_id,
+        state,
+    };
+    auth.check(&ctx.config, &mut facts).await?;
     let outcome = apply(ctx, server_id, &mut tx, op).await?;
     Ok((tx, outcome))
 }

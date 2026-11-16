@@ -39,9 +39,11 @@ use runelink_types::{
     user::{User, UserRef},
     ws::{ClientWsUpdate, FederationWsUpdate},
 };
+use sqlx::PgConnection;
 use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
 
 use crate::{
+    auth::{Authorization, Facts},
     config::ServerConfig,
     db::{self, DbPool},
     error::{ApiError, ApiResult},
@@ -159,10 +161,38 @@ impl ServerState {
 
 type SharedState = Arc<RwLock<ServerState>>;
 
-/// An operation and where to send its result.
+/// An operation, what it was authorized with, and where to send its result.
 struct Envelope<Op, Output> {
     op: Op,
+    auth: Authorization,
     reply: oneshot::Sender<ApiResult<Output>>,
+}
+
+/// Facts for checking an operation's authorization again inside its actor,
+/// against the actor's current state.
+struct ActorFacts<'a> {
+    conn: &'a mut PgConnection,
+    server_id: ServerId,
+    state: &'a ServerState,
+}
+
+impl Facts for ActorFacts<'_> {
+    async fn user(&mut self, user_ref: &UserRef) -> ApiResult<Option<User>> {
+        queries::users::find_by_ref(&mut *self.conn, user_ref.clone()).await
+    }
+
+    async fn server_role(
+        &mut self,
+        server_id: ServerId,
+        user_ref: &UserRef,
+    ) -> ApiResult<Option<ServerRole>> {
+        // Actors only know their own server's members, so requirements on any
+        // other server fail.
+        if server_id != self.server_id {
+            return Ok(None);
+        }
+        Ok(self.state.members.get(user_ref).copied())
+    }
 }
 
 type ServerMailbox = mpsc::Sender<Envelope<ServerOp, ServerOutput>>;
@@ -207,6 +237,7 @@ impl Actors {
         &self,
         new_server: NewServer,
         creator: UserRef,
+        auth: Authorization,
     ) -> ApiResult<Server> {
         // The actor exists before the server does, so nothing can overtake
         // the creation's updates. Nobody else knows the new ID yet.
@@ -217,15 +248,11 @@ impl Actors {
             .await
             .servers
             .insert(server_id, entry.clone());
-        let output = send(
-            &entry.mailbox,
-            ServerOp::Create {
-                new_server,
-                creator,
-            },
-        )
-        .await?;
-        match output {
+        let op = ServerOp::Create {
+            new_server,
+            creator,
+        };
+        match send(&entry.mailbox, op, auth).await? {
             ServerOutput::Server(server) => Ok(server),
             output => Err(unexpected(output)),
         }
@@ -235,15 +262,21 @@ impl Actors {
         &self,
         server_id: ServerId,
         update: ServerUpdate,
+        auth: Authorization,
     ) -> ApiResult<Server> {
-        match self.server_op(server_id, ServerOp::Update(update)).await? {
+        let op = ServerOp::Update(update);
+        match self.server_op(server_id, op, auth).await? {
             ServerOutput::Server(server) => Ok(server),
             output => Err(unexpected(output)),
         }
     }
 
-    pub async fn delete_server(&self, server_id: ServerId) -> ApiResult<()> {
-        match self.server_op(server_id, ServerOp::Delete).await? {
+    pub async fn delete_server(
+        &self,
+        server_id: ServerId,
+        auth: Authorization,
+    ) -> ApiResult<()> {
+        match self.server_op(server_id, ServerOp::Delete, auth).await? {
             ServerOutput::Done => Ok(()),
             output => Err(unexpected(output)),
         }
@@ -253,9 +286,10 @@ impl Actors {
         &self,
         server_id: ServerId,
         new_channel: NewServerChannel,
+        auth: Authorization,
     ) -> ApiResult<ServerChannel> {
         let op = ServerOp::CreateChannel(new_channel);
-        match self.server_op(server_id, op).await? {
+        match self.server_op(server_id, op, auth).await? {
             ServerOutput::Channel(channel) => Ok(channel),
             output => Err(unexpected(output)),
         }
@@ -266,9 +300,10 @@ impl Actors {
         server_id: ServerId,
         channel_id: ServerChannelId,
         update: ServerChannelUpdate,
+        auth: Authorization,
     ) -> ApiResult<ServerChannel> {
         let op = ServerOp::UpdateChannel { channel_id, update };
-        match self.server_op(server_id, op).await? {
+        match self.server_op(server_id, op, auth).await? {
             ServerOutput::Channel(channel) => Ok(channel),
             output => Err(unexpected(output)),
         }
@@ -280,12 +315,13 @@ impl Actors {
         server_id: ServerId,
         channel_id: ServerChannelId,
         channel_move: ServerChannelMove,
+        auth: Authorization,
     ) -> ApiResult<Vec<ServerChannel>> {
         let op = ServerOp::MoveChannel {
             channel_id,
             channel_move,
         };
-        match self.server_op(server_id, op).await? {
+        match self.server_op(server_id, op, auth).await? {
             ServerOutput::Channels(channels) => Ok(channels),
             output => Err(unexpected(output)),
         }
@@ -295,9 +331,10 @@ impl Actors {
         &self,
         server_id: ServerId,
         channel_id: ServerChannelId,
+        auth: Authorization,
     ) -> ApiResult<()> {
         let op = ServerOp::DeleteChannel(channel_id);
-        match self.server_op(server_id, op).await? {
+        match self.server_op(server_id, op, auth).await? {
             ServerOutput::Done => Ok(()),
             output => Err(unexpected(output)),
         }
@@ -309,13 +346,14 @@ impl Actors {
         &self,
         new_membership: NewServerMembership,
         remote_user: Option<User>,
+        auth: Authorization,
     ) -> ApiResult<FullServerMembership> {
         let server_id = new_membership.server_id;
         let op = ServerOp::UpsertMembership {
             new_membership,
             remote_user,
         };
-        match self.server_op(server_id, op).await? {
+        match self.server_op(server_id, op, auth).await? {
             ServerOutput::Membership(membership) => Ok(*membership),
             output => Err(unexpected(output)),
         }
@@ -325,9 +363,10 @@ impl Actors {
         &self,
         server_id: ServerId,
         user_ref: UserRef,
+        auth: Authorization,
     ) -> ApiResult<()> {
         let op = ServerOp::DeleteMembership(user_ref);
-        match self.server_op(server_id, op).await? {
+        match self.server_op(server_id, op, auth).await? {
             ServerOutput::Done => Ok(()),
             output => Err(unexpected(output)),
         }
@@ -338,9 +377,10 @@ impl Actors {
         server_id: ServerId,
         text_channel_id: TextChannelId,
         new_message: NewMessage,
+        auth: Authorization,
     ) -> ApiResult<Message> {
         let mailbox = self.channel(server_id, text_channel_id).await?;
-        send(&mailbox, ChannelOp::Create(new_message)).await
+        send(&mailbox, ChannelOp::Create(new_message), auth).await
     }
 
     pub async fn update_message(
@@ -349,9 +389,11 @@ impl Actors {
         text_channel_id: TextChannelId,
         message_id: MessageId,
         update: MessageUpdate,
+        auth: Authorization,
     ) -> ApiResult<Message> {
         let mailbox = self.channel(server_id, text_channel_id).await?;
-        send(&mailbox, ChannelOp::Update { message_id, update }).await
+        let op = ChannelOp::Update { message_id, update };
+        send(&mailbox, op, auth).await
     }
 
     pub async fn delete_message(
@@ -359,18 +401,20 @@ impl Actors {
         server_id: ServerId,
         text_channel_id: TextChannelId,
         message_id: MessageId,
+        auth: Authorization,
     ) -> ApiResult<Message> {
         let mailbox = self.channel(server_id, text_channel_id).await?;
-        send(&mailbox, ChannelOp::Delete(message_id)).await
+        send(&mailbox, ChannelOp::Delete(message_id), auth).await
     }
 
     async fn server_op(
         &self,
         server_id: ServerId,
         op: ServerOp,
+        auth: Authorization,
     ) -> ApiResult<ServerOutput> {
         let mailbox = self.server(server_id).await?.mailbox;
-        send(&mailbox, op).await
+        send(&mailbox, op, auth).await
     }
 
     /// Get a server's actor, starting it if needed.
@@ -472,12 +516,13 @@ impl Actors {
 async fn send<Op, Output>(
     mailbox: &mpsc::Sender<Envelope<Op, Output>>,
     op: Op,
+    auth: Authorization,
 ) -> ApiResult<Output> {
     let (reply, result) = oneshot::channel();
     // Actors only stop for good once their server or channel is gone, or a
     // server's state can no longer be trusted.
     mailbox
-        .send(Envelope { op, reply })
+        .send(Envelope { op, auth, reply })
         .await
         .map_err(|_| ApiError::NotFound)?;
     result
@@ -501,6 +546,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::auth::Requirement;
 
     struct Fixture {
         actors: Actors,
@@ -598,6 +644,7 @@ mod tests {
                         metadata: None,
                         parent_channel_id: None,
                     },
+                    Authorization::host(),
                 )
                 .await
                 .unwrap();
@@ -640,6 +687,7 @@ mod tests {
                     description: None,
                 },
                 f.user.clone(),
+                Authorization::host(),
             )
             .await
             .unwrap();
@@ -667,11 +715,13 @@ mod tests {
                 server.id,
                 text_channel_id,
                 f.message(format!("message {index}")),
+                Authorization::host(),
             )
         });
         let (sent, deleted) = tokio::join!(
             join_all(sends),
-            f.actors.delete_channel(server.id, doomed),
+            f.actors
+                .delete_channel(server.id, doomed, Authorization::host()),
         );
         deleted.unwrap();
         for (index, result) in sent.iter().enumerate() {
@@ -716,16 +766,79 @@ mod tests {
             sent.iter().filter(|result| result.is_ok()).count()
         );
 
-        f.actors.delete_server(server.id).await.unwrap();
+        f.actors
+            .delete_server(server.id, Authorization::host())
+            .await
+            .unwrap();
         assert!(matches!(
             f.actors
-                .create_message(server.id, kept_text, f.message("late".into()))
+                .create_message(
+                    server.id,
+                    kept_text,
+                    f.message("late".into()),
+                    Authorization::host(),
+                )
                 .await,
             Err(ApiError::NotFound)
         ));
         let registry = f.actors.registry.lock().await;
         assert!(registry.servers.is_empty() && registry.channels.is_empty());
         drop(registry);
+        f.cleanup().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL pointing to a migrated PostgreSQL database"]
+    async fn actors_check_authorization_against_their_own_state() {
+        let f = fixture().await;
+        let server = f
+            .actors
+            .create_server(
+                NewServer {
+                    title: "actors test".into(),
+                    description: None,
+                },
+                f.user.clone(),
+                Authorization::host(),
+            )
+            .await
+            .unwrap();
+        let (_, text_channel_id) = f.text_channel(server.id, "general").await;
+        let as_member = || {
+            Authorization::for_test_user(
+                f.user.clone(),
+                Requirement::ServerMember(server.id),
+            )
+        };
+        f.actors
+            .create_message(
+                server.id,
+                text_channel_id,
+                f.message("member".into()),
+                as_member(),
+            )
+            .await
+            .unwrap();
+
+        f.actors
+            .delete_membership(server.id, f.user.clone(), Authorization::host())
+            .await
+            .unwrap();
+        let result = f
+            .actors
+            .create_message(
+                server.id,
+                text_channel_id,
+                f.message("former member".into()),
+                as_member(),
+            )
+            .await;
+        assert!(matches!(result, Err(ApiError::AuthError(_))), "{result:?}");
+
+        f.actors
+            .delete_server(server.id, Authorization::host())
+            .await
+            .unwrap();
         f.cleanup().await;
     }
 }
