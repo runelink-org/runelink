@@ -525,6 +525,8 @@ async fn send<Op, Output>(
         .send(Envelope { op, auth, reply })
         .await
         .map_err(|_| ApiError::NotFound)?;
+    // Later requests from the same connection may now be read.
+    crate::admission::admit();
     result
         .await
         .map_err(|_| ApiError::Internal("Actor stopped unexpectedly".into()))?

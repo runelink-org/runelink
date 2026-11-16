@@ -170,6 +170,9 @@ impl FederationWsManager {
             pending.remove(&request_id);
             return Err(FederationRequestError::HostUnavailable { host });
         }
+        // The request is now queued on the peer's connection in order, so
+        // later requests on the caller's connection may be read.
+        crate::admission::admit();
 
         let result = tokio::time::timeout(timeout, rx).await;
         match result {
