@@ -121,7 +121,7 @@ pub async fn upsert_local(
 pub async fn insert_remote(
     pool: &DbPool,
     membership: &ServerMembership,
-) -> ApiResult<ServerMembership> {
+) -> ApiResult<()> {
     sqlx::query!(
         r#"
         INSERT INTO user_remote_server_memberships (
@@ -144,47 +144,7 @@ pub async fn insert_remote(
     )
     .execute(pool)
     .await?;
-
-    let row = sqlx::query!(
-        r#"
-        SELECT
-          s.id,
-          s.host,
-          s.title,
-          s.description,
-          s.remote_created_at AS server_created_at,
-          s.remote_updated_at AS server_updated_at,
-          m.role AS "role: ServerRole",
-          m.remote_created_at AS membership_created_at,
-          m.remote_updated_at AS membership_updated_at,
-          m.synced_at
-        FROM cached_remote_servers s
-        JOIN user_remote_server_memberships m
-          ON s.id = m.remote_server_id
-        WHERE m.user_name = $1 AND m.user_host = $2 AND m.remote_server_id = $3
-        "#,
-        membership.user_ref.name,
-        membership.user_ref.host,
-        membership.server.id.as_uuid(),
-    )
-    .fetch_one(pool)
-    .await?;
-
-    Ok(ServerMembership {
-        server: Server {
-            id: row.id.into(),
-            host: row.host,
-            title: row.title,
-            description: row.description,
-            created_at: row.server_created_at,
-            updated_at: row.server_updated_at,
-        },
-        user_ref: membership.user_ref.clone(),
-        role: row.role,
-        joined_at: row.membership_created_at,
-        updated_at: row.membership_updated_at,
-        synced_at: Some(row.synced_at),
-    })
+    Ok(())
 }
 
 pub async fn get_local_member_by_user_and_server(
@@ -212,50 +172,6 @@ pub async fn get_local_member_by_user_and_server(
     .fetch_one(executor)
     .await?
     .try_into()
-}
-
-pub async fn get_remote_member_by_user_and_server(
-    pool: &DbPool,
-    server_id: ServerId,
-    user_ref: UserRef,
-) -> ApiResult<ServerMember> {
-    sqlx::query_as!(
-        ServerMemberRow,
-        r#"
-        SELECT
-            to_jsonb(u) "user: Json<User>",
-            m.role AS "role: ServerRole",
-            m.remote_created_at AS created_at,
-            m.remote_updated_at AS updated_at
-        FROM users u
-        JOIN user_remote_server_memberships m
-          ON u.name = m.user_name AND u.host = m.user_host
-        WHERE m.remote_server_id = $1 AND m.user_name = $2 AND m.user_host = $3
-        "#,
-        server_id.as_uuid(),
-        user_ref.name,
-        user_ref.host,
-    )
-    .fetch_one(pool)
-    .await?
-    .try_into()
-}
-
-pub async fn get_member_by_user_and_server(
-    pool: &DbPool,
-    server_id: ServerId,
-    user_ref: UserRef,
-) -> ApiResult<ServerMember> {
-    match get_local_member_by_user_and_server(pool, server_id, user_ref.clone())
-        .await
-    {
-        Ok(member) => Ok(member),
-        Err(_) => {
-            // Fall back to remote membership cache
-            get_remote_member_by_user_and_server(pool, server_id, user_ref)
-                .await
-        }
-    }
 }
 
 pub async fn get_members_by_server(

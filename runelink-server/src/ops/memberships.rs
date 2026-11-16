@@ -60,21 +60,9 @@ pub async fn upsert(
                 "Unexpected federation reply from {host} for memberships.upsert"
             )));
         };
-        let user = membership.user.clone();
-        // Cache the remote server and membership locally
-        queries::servers::upsert_remote(
-            &state.db_pool,
-            &membership.server,
-            host,
-        )
-        .await?;
-        let cached_membership = queries::memberships::insert_remote(
-            &state.db_pool,
-            &membership.into(),
-        )
-        .await?;
-        // synced_at comes from cached membership
-        return Ok(cached_membership.as_full(user));
+        // The peer's update for this change, which arrived before the reply,
+        // is what caches it here.
+        return Ok(membership);
     }
 
     // Fetching a remote user waits on the network, so it stays out of the actor.
@@ -240,13 +228,7 @@ pub async fn delete(
                     "Unexpected federation reply from {host} for memberships.delete"
                 )));
             };
-            // Also delete from local cache if it exists
-            let _ = queries::memberships::delete_remote(
-                &state.db_pool,
-                server_id,
-                user_ref,
-            )
-            .await;
+            // The peer's update for this change removes it from the cache.
             Ok(())
         }
     }

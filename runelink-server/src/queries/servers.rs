@@ -114,6 +114,22 @@ pub async fn upsert_remote(
     Ok(())
 }
 
+/// Remove a cached remote server reported deleted by its own host.
+pub async fn delete_remote(
+    pool: &DbPool,
+    server_id: ServerId,
+    source_host: &str,
+) -> ApiResult<()> {
+    sqlx::query!(
+        "DELETE FROM cached_remote_servers WHERE id = $1 AND host = $2",
+        server_id.as_uuid(),
+        canonical_host(source_host),
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn get_by_id(
     executor: impl PgExecutor<'_>,
     config: &ServerConfig,
