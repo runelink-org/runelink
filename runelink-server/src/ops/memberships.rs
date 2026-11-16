@@ -1,7 +1,7 @@
 use runelink_types::{
     server::{
         FullServerMembership, NewServerMembership, ServerId, ServerMember,
-        ServerMembership,
+        ServerMembership, ServerRole,
     },
     user::{User, UserRef},
     ws::{
@@ -23,7 +23,7 @@ use crate::{
 /// Create a new membership for a user in a server.
 pub async fn upsert(
     state: &AppState,
-    _session: &mut Session,
+    session: &mut Session,
     new_membership: &NewServerMembership,
     remote_user: Option<&User>,
 ) -> ApiResult<FullServerMembership> {
@@ -44,10 +44,15 @@ pub async fn upsert(
         let user =
             users::get_by_ref(state, new_membership.user_ref.clone(), None)
                 .await?;
+        let session_user_ref = session.user_ref.clone().ok_or_else(|| {
+            ApiError::AuthError(
+                "User reference required for remote memberships".into(),
+            )
+        })?;
         let reply = federation::request(
             state,
             host,
-            Some(new_membership.user_ref.clone()),
+            Some(session_user_ref),
             FederationWsRequest::MembershipsUpsert {
                 new_membership: new_membership.clone().as_full(user),
             },
@@ -217,7 +222,7 @@ pub async fn delete(
     user_ref: UserRef,
     target_host: Option<&str>,
 ) -> ApiResult<()> {
-    let _session_user_ref = session.user_ref.clone().ok_or_else(|| {
+    let session_user_ref = session.user_ref.clone().ok_or_else(|| {
         ApiError::AuthError("User reference required for leaving server".into())
     })?;
 
@@ -263,7 +268,7 @@ pub async fn delete(
             let reply = federation::request(
                 state,
                 host,
-                Some(user_ref.clone()),
+                Some(session_user_ref),
                 FederationWsRequest::MembershipsDelete {
                     server_id,
                     user_ref: user_ref.clone(),
@@ -293,10 +298,42 @@ pub mod auth {
     use crate::auth::Requirement as Req;
     use crate::or;
 
-    pub fn create(_server_id: ServerId) -> Req {
-        // TODO: make this admin only and create an invite system
-        // Servers should also be public or private
-        Req::Always.or_admin().client_only()
+    /// Users may join a server themselves as a member. Anything else (adding
+    /// another user or granting the admin role) needs a server admin.
+    fn upsert_base(
+        new_membership_user: Req,
+        server_id: ServerId,
+        role: ServerRole,
+    ) -> Req {
+        // TODO: create an invite system. Servers should also be public or
+        // private.
+        match role {
+            ServerRole::Member => {
+                or!(new_membership_user, Req::ServerAdmin(server_id))
+            }
+            ServerRole::Admin => Req::ServerAdmin(server_id),
+        }
+    }
+
+    pub fn create(
+        state: &AppState,
+        new_membership: &NewServerMembership,
+    ) -> Req {
+        // The owning host enforces the rules for remote servers
+        if state
+            .config
+            .locality(&new_membership.server_host)
+            .is_remote()
+        {
+            return Req::Client;
+        }
+        upsert_base(
+            Req::User(new_membership.user_ref.clone()),
+            new_membership.server_id,
+            new_membership.role,
+        )
+        .or_admin()
+        .client_only()
     }
 
     pub fn delete(server_id: ServerId, user_ref: UserRef) -> Req {
@@ -308,12 +345,51 @@ pub mod auth {
     pub mod federated {
         use super::*;
 
-        pub fn create(_server_id: ServerId, user_ref: UserRef) -> Req {
-            Req::FederatedUser(user_ref).federated_only()
+        pub fn create(
+            server_id: ServerId,
+            user_ref: UserRef,
+            role: ServerRole,
+        ) -> Req {
+            // Not `Req::User`, which needs the user to exist locally
+            upsert_base(Req::FederatedUser(user_ref), server_id, role)
+                .federated_only()
         }
 
-        pub fn delete(_server_id: ServerId, user_ref: UserRef) -> Req {
-            Req::FederatedUser(user_ref).federated_only()
+        pub fn delete(server_id: ServerId, user_ref: UserRef) -> Req {
+            or!(Req::FederatedUser(user_ref), Req::ServerAdmin(server_id))
+                .federated_only()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn user() -> UserRef {
+            UserRef::new("alice".into(), "example.com".into())
+        }
+
+        #[test]
+        fn members_may_join_themselves() {
+            let server_id = ServerId::new();
+            let req =
+                upsert_base(Req::User(user()), server_id, ServerRole::Member);
+            let Req::Or(reqs) = req else {
+                panic!("expected an or requirement, got {req:?}");
+            };
+            assert!(matches!(
+                reqs.as_slice(),
+                [Req::User(u), Req::ServerAdmin(id)]
+                    if *u == user() && *id == server_id
+            ));
+        }
+
+        #[test]
+        fn admin_role_requires_server_admin() {
+            let server_id = ServerId::new();
+            let req =
+                upsert_base(Req::User(user()), server_id, ServerRole::Admin);
+            assert!(matches!(req, Req::ServerAdmin(id) if id == server_id));
         }
     }
 }

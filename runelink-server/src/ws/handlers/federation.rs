@@ -258,13 +258,25 @@ pub(super) async fn handle_federation_request(
                         .into(),
                 ));
             }
+            // The payload carries the user's profile, which only their home
+            // host may provide
+            let sender = state
+                .federation_ws_manager
+                .authenticated_host(conn_id)
+                .await;
+            if !sender.is_some_and(|sender| hosts_match(&user.host, &sender)) {
+                return Err(ApiError::AuthError(
+                    "Peers may only add memberships for their own users".into(),
+                ));
+            }
             let mut session = authorize_federation(
                 state,
                 conn_id,
-                Some(user.as_ref()),
+                delegated_user_ref,
                 ops::memberships::auth::federated::create(
                     new_membership.server_id,
                     user.as_ref(),
+                    new_membership.role,
                 ),
             )
             .await?;
@@ -291,7 +303,7 @@ pub(super) async fn handle_federation_request(
             let mut session = authorize_federation(
                 state,
                 conn_id,
-                Some(user_ref.clone()),
+                delegated_user_ref,
                 ops::memberships::auth::federated::delete(
                     server_id,
                     user_ref.clone(),
