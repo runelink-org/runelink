@@ -218,7 +218,7 @@ pub(super) async fn handle_client_request(
             let mut session = authorize_client(
                 state,
                 conn_id,
-                ops::memberships::auth::create(server_id),
+                ops::memberships::auth::create(state, &new_membership),
             )
             .await?;
             let membership = ops::memberships::upsert(

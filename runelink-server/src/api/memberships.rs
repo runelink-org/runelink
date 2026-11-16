@@ -80,7 +80,7 @@ pub async fn create(
     let mut session = authorize(
         &state,
         Principal::from_client_headers(&headers, &state)?,
-        ops::memberships::auth::create(server_id),
+        ops::memberships::auth::create(&state, &new_membership),
     )
     .await?;
     let membership =
