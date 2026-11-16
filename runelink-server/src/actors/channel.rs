@@ -13,10 +13,11 @@ use time::OffsetDateTime;
 use tokio::sync::{Mutex, mpsc};
 
 use super::{
-    ActorCtx, ChannelMailbox, Envelope, MAILBOX_CAPACITY, Registry,
-    SharedState, Update,
+    ActorCtx, ActorFacts, ChannelMailbox, Envelope, MAILBOX_CAPACITY, Registry,
+    ServerState, SharedState, Update,
 };
 use crate::{
+    auth::Authorization,
     error::{ApiError, ApiResult},
     queries,
 };
@@ -41,7 +42,7 @@ pub(super) fn spawn(
     let (mailbox, mut inbox) =
         mpsc::channel::<Envelope<ChannelOp, Message>>(MAILBOX_CAPACITY);
     tokio::spawn(async move {
-        while let Some(Envelope { op, reply }) = inbox.recv().await {
+        while let Some(Envelope { op, auth, reply }) = inbox.recv().await {
             // Held until the message is fanned out, so that server operations
             // never interleave with it.
             let state = state.read().await;
@@ -62,7 +63,9 @@ pub(super) fn spawn(
                 }
                 continue;
             }
-            let result = execute(&ctx, text_channel_id, op).await;
+            let result =
+                execute(&ctx, server_id, text_channel_id, &state, op, auth)
+                    .await;
             let result = match result {
                 Ok(message) => {
                     let update = Update {
@@ -88,10 +91,19 @@ pub(super) fn spawn(
 /// Run one operation in its own transaction.
 async fn execute(
     ctx: &ActorCtx,
+    server_id: ServerId,
     text_channel_id: TextChannelId,
+    state: &ServerState,
     op: ChannelOp,
+    auth: Authorization,
 ) -> ApiResult<Message> {
     let mut tx = ctx.db_pool.begin().await?;
+    let mut facts = ActorFacts {
+        conn: &mut tx,
+        server_id,
+        state,
+    };
+    auth.check(&ctx.config, &mut facts).await?;
     let message = apply(&mut tx, text_channel_id, op).await?;
     tx.commit().await?;
     Ok(message)

@@ -10,6 +10,7 @@ use runelink_types::{
 
 use crate::{
     bearer_auth::{ClientAuth, FederationAuth},
+    config::ServerConfig,
     error::{ApiError, ApiResult},
     queries,
     state::AppState,
@@ -91,7 +92,8 @@ pub enum Requirement {
 
 impl Requirement {
     pub fn or_admin(self) -> Self {
-        or!(Requirement::HostAdmin, self)
+        // Checked last, since it is rarely the requirement that holds.
+        or!(self, Requirement::HostAdmin)
     }
 
     pub fn client_only(self) -> Self {
@@ -102,38 +104,38 @@ impl Requirement {
         and!(Requirement::Federation, self)
     }
 
+    /// Check the requirement, returning why it fails, if it does.
     async fn check(
         &self,
-        ctx: &mut AuthContext<'_>,
+        auth: &Authorization,
+        config: &ServerConfig,
+        facts: &mut impl Facts,
     ) -> ApiResult<Option<String>> {
         match self {
             Requirement::Client => {
-                if !matches!(ctx.principal, Principal::Client(_)) {
+                if !matches!(auth.principal, Some(Principal::Client(_))) {
                     return Ok(Some("Client auth required".into()));
                 }
             }
 
             Requirement::Federation => {
-                if !matches!(ctx.principal, Principal::Federation(_)) {
+                if !matches!(auth.principal, Some(Principal::Federation(_))) {
                     return Ok(Some("Federation auth required".into()));
                 }
             }
 
             Requirement::FederatedUser(expected) => {
-                let (claims, user_ref) = match &ctx.principal {
-                    Principal::Federation(auth) => {
-                        (&auth.claims, auth.claims.user_ref.as_ref())
-                    }
-                    _ => return Ok(Some("Federation auth required".into())),
+                let Some(Principal::Federation(federation)) = &auth.principal
+                else {
+                    return Ok(Some("Federation auth required".into()));
                 };
-                let Some(user_ref) = user_ref else {
+                let Some(user_ref) = federation.claims.user_ref.as_ref() else {
                     return Ok(Some(
                         "Federated delegated user required".into(),
                     ));
                 };
-                let expected_iss =
-                    get_api_url(&expected.host, ctx.state.config.secure);
-                if claims.iss != expected_iss {
+                let expected_iss = get_api_url(&expected.host, config.secure);
+                if federation.claims.iss != expected_iss {
                     return Ok(Some(
                         "Federation issuer does not match delegated user host"
                             .into(),
@@ -145,31 +147,29 @@ impl Requirement {
             }
 
             Requirement::User(expected) => {
-                let user = ctx.get_user().await?;
+                let user = auth.user(facts).await?;
                 if !user.is_some_and(|user| user.as_ref() == *expected) {
                     return Ok(Some("Invalid user".into()));
                 }
             }
 
             Requirement::HostAdmin => {
-                let user = ctx.get_user().await?;
-                if !user.is_some_and(User::is_admin) {
+                let user = auth.user(facts).await?;
+                if !user.is_some_and(|user| user.is_admin()) {
                     return Ok(Some("Host admin only".into()));
                 }
             }
 
             Requirement::ServerMember(server_id) => {
-                let membership = ctx.get_membership(*server_id).await?;
-                if membership.is_none() {
+                let role = auth.server_role(facts, *server_id).await?;
+                if role.is_none() {
                     return Ok(Some("Server member only".into()));
                 }
             }
 
             Requirement::ServerAdmin(server_id) => {
-                let membership = ctx.get_membership(*server_id).await?;
-                if !membership.is_some_and(|membership| {
-                    membership.role == ServerRole::Admin
-                }) {
+                let role = auth.server_role(facts, *server_id).await?;
+                if role != Some(ServerRole::Admin) {
                     return Ok(Some("Server admin only".into()));
                 }
             }
@@ -184,7 +184,9 @@ impl Requirement {
 
             Requirement::And(reqs) => {
                 for req in reqs {
-                    if let Some(error) = Box::pin(req.check(ctx)).await? {
+                    if let Some(error) =
+                        Box::pin(req.check(auth, config, facts)).await?
+                    {
                         return Ok(Some(error));
                     }
                 }
@@ -195,64 +197,135 @@ impl Requirement {
                     return Ok(Some("No requirements".into()));
                 }
                 let mut errors = Vec::<String>::new();
-                let mut found = false;
                 for req in reqs {
-                    if let Some(error) = Box::pin(req.check(ctx)).await? {
-                        errors.push(error);
-                    } else {
-                        found = true;
+                    match Box::pin(req.check(auth, config, facts)).await? {
+                        Some(error) => errors.push(error),
+                        None => return Ok(None),
                     }
                 }
-                if !found {
-                    let combined_error = match errors.as_slice() {
-                        [error] => error.clone(),
-                        errors => errors
-                            .iter()
-                            .map(|e| format!("({e})"))
-                            .collect::<Vec<String>>()
-                            .join(" and "),
-                    };
-                    return Ok(Some(combined_error));
-                }
+                let combined_error = match errors.as_slice() {
+                    [error] => error.clone(),
+                    errors => errors
+                        .iter()
+                        .map(|e| format!("({e})"))
+                        .collect::<Vec<String>>()
+                        .join(" and "),
+                };
+                return Ok(Some(combined_error));
             }
         }
         Ok(None)
     }
 }
 
+/// The state that requirements are checked against. Requests are checked once
+/// against the database before they are queued, and mutations again inside
+/// their actor against its current state, so that a permission revoked
+/// meanwhile is always respected.
+pub trait Facts: Send {
+    /// The user, if they exist on this host.
+    fn user(
+        &mut self,
+        user_ref: &UserRef,
+    ) -> impl Future<Output = ApiResult<Option<User>>> + Send;
+
+    /// The user's role in a server, if they are a member.
+    fn server_role(
+        &mut self,
+        server_id: ServerId,
+        user_ref: &UserRef,
+    ) -> impl Future<Output = ApiResult<Option<ServerRole>>> + Send;
+}
+
+/// Who a request acts for and what it was authorized with, so that the
+/// requirement can be checked again where the request runs.
 #[derive(Clone, Debug)]
-struct AuthContext<'a> {
-    state: &'a AppState,
-    principal: Principal,
+pub struct Authorization {
+    principal: Option<Principal>,
     user_ref: Option<UserRef>,
-    user: Option<User>,
+    requirement: Requirement,
+}
+
+impl Authorization {
+    /// For changes made by the host itself rather than for a request.
+    pub fn host() -> Self {
+        Self {
+            principal: None,
+            user_ref: None,
+            requirement: Requirement::Always,
+        }
+    }
+
+    /// A user's request with no principal, for tests of what actors check.
+    #[cfg(test)]
+    pub fn for_test_user(user_ref: UserRef, requirement: Requirement) -> Self {
+        Self {
+            principal: None,
+            user_ref: Some(user_ref),
+            requirement,
+        }
+    }
+
+    /// The requesting user, if they exist on this host.
+    async fn user(&self, facts: &mut impl Facts) -> ApiResult<Option<User>> {
+        match &self.user_ref {
+            Some(user_ref) => facts.user(user_ref).await,
+            None => Ok(None),
+        }
+    }
+
+    /// The requesting user's role in a server, if they are a member.
+    async fn server_role(
+        &self,
+        facts: &mut impl Facts,
+        server_id: ServerId,
+    ) -> ApiResult<Option<ServerRole>> {
+        match &self.user_ref {
+            Some(user_ref) => facts.server_role(server_id, user_ref).await,
+            None => Ok(None),
+        }
+    }
+
+    /// Check the requirement, failing with an auth error if it does not hold.
+    pub async fn check(
+        &self,
+        config: &ServerConfig,
+        facts: &mut impl Facts,
+    ) -> ApiResult<()> {
+        match self.requirement.check(self, config, facts).await? {
+            Some(error) => Err(ApiError::AuthError(error)),
+            None => Ok(()),
+        }
+    }
+}
+
+/// Facts read from the database, cached for one request. Only its request's
+/// own user is ever looked up, so one cached user is enough.
+struct DbFacts<'a> {
+    state: &'a AppState,
+    user: Option<Option<User>>,
     memberships: Option<Vec<ServerMembership>>,
 }
 
-impl<'a> AuthContext<'a> {
-    async fn get_user(&mut self) -> ApiResult<Option<&User>> {
+impl Facts for DbFacts<'_> {
+    async fn user(&mut self, user_ref: &UserRef) -> ApiResult<Option<User>> {
         if self.user.is_none() {
-            let Some(user_ref) = self.user_ref.as_ref() else {
-                return Ok(None);
-            };
-            let user = queries::users::get_by_ref(
+            let user = queries::users::find_by_ref(
                 &*self.state.db_pool,
                 user_ref.clone(),
             )
             .await?;
             self.user = Some(user);
         }
-        Ok(self.user.as_ref())
+        Ok(self.user.clone().flatten())
     }
 
-    async fn get_membership(
+    async fn server_role(
         &mut self,
         server_id: ServerId,
-    ) -> ApiResult<Option<&ServerMembership>> {
+        user_ref: &UserRef,
+    ) -> ApiResult<Option<ServerRole>> {
         if self.memberships.is_none() {
-            let Some(user_ref) = self.user_ref.as_ref() else {
-                return Ok(None);
-            };
             let memberships =
                 queries::memberships::get_by_user(self.state, user_ref.clone())
                     .await?;
@@ -262,6 +335,7 @@ impl<'a> AuthContext<'a> {
             memberships
                 .iter()
                 .find(|membership| membership.server.id == server_id)
+                .map(|membership| membership.role)
         }))
     }
 }
@@ -280,9 +354,16 @@ pub struct Session {
     pub federation: Option<FederationClaims>,
     /// Cached user lookup result (None = not looked up, Some(None) = looked up but not found, Some(Some(user)) = found)
     cached_user: Option<Option<User>>,
+    /// What the request was authorized with
+    authorization: Authorization,
 }
 
 impl Session {
+    /// What this request was authorized with, for actors to check again.
+    pub fn authorization(&self) -> Authorization {
+        self.authorization.clone()
+    }
+
     /// Perform a lazy DB lookup of the delegated user (cached).
     /// Returns Ok(None) if the user does not exist locally.
     pub async fn lookup_user(
@@ -298,13 +379,9 @@ impl Session {
             self.cached_user = Some(None);
             return Ok(None);
         };
-        let user_result =
-            queries::users::get_by_ref(&*state.db_pool, user_ref.clone()).await;
-        let user = match user_result {
-            Ok(user) => Some(user),
-            Err(ApiError::NotFound) => None,
-            Err(e) => return Err(e),
-        };
+        let user =
+            queries::users::find_by_ref(&*state.db_pool, user_ref.clone())
+                .await?;
         self.cached_user = Some(user.clone());
         Ok(user)
     }
@@ -343,27 +420,29 @@ pub async fn authorize(
             (auth.claims.user_ref.clone(), Some(auth.claims.clone()))
         }
     };
-    let mut ctx = AuthContext {
+    let authorization = Authorization {
+        principal: Some(principal.clone()),
+        user_ref: user_ref.clone(),
+        requirement: req,
+    };
+    let mut facts = DbFacts {
         state,
-        principal,
-        user_ref,
         user: None,
         memberships: None,
     };
-    if let Some(error) = req.check(&mut ctx).await? {
-        return Err(ApiError::AuthError(error));
-    }
-    let cached_user = if ctx.user_ref.is_some() {
-        ctx.user.map(Some)
+    authorization.check(&state.config, &mut facts).await?;
+    let cached_user = if user_ref.is_some() {
+        facts.user
     } else {
         // Not delegated
         Some(None)
     };
     let session = Session {
-        principal: ctx.principal,
-        user_ref: ctx.user_ref,
+        principal,
+        user_ref,
         federation: federation_claims,
         cached_user,
+        authorization,
     };
     Ok(session)
 }

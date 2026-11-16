@@ -98,7 +98,11 @@ pub async fn upsert(
     };
     state
         .actors
-        .upsert_membership(new_membership.clone(), remote_user)
+        .upsert_membership(
+            new_membership.clone(),
+            remote_user,
+            session.authorization(),
+        )
         .await
 }
 
@@ -206,7 +210,10 @@ pub async fn delete(
 
     match state.config.target_locality(target_host) {
         Locality::Local => {
-            state.actors.delete_membership(server_id, user_ref).await
+            state
+                .actors
+                .delete_membership(server_id, user_ref, session.authorization())
+                .await
         }
         Locality::Remote(host) => {
             let reply = federation::request(

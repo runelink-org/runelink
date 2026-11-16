@@ -141,6 +141,18 @@ pub async fn ensure_exists(
     Ok(user)
 }
 
+/// Like [`get_by_ref`], with `None` for an unknown user.
+pub async fn find_by_ref(
+    executor: impl PgExecutor<'_>,
+    user_ref: UserRef,
+) -> ApiResult<Option<User>> {
+    match get_by_ref(executor, user_ref).await {
+        Ok(user) => Ok(Some(user)),
+        Err(ApiError::NotFound) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 pub async fn get_by_ref(
     executor: impl PgExecutor<'_>,
     user_ref: UserRef,

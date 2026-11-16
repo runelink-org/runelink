@@ -34,7 +34,11 @@ pub async fn create(
             })?;
             state
                 .actors
-                .create_server(new_server.clone(), user_ref)
+                .create_server(
+                    new_server.clone(),
+                    user_ref,
+                    session.authorization(),
+                )
                 .await
         }
         Locality::Remote(host) => {
@@ -197,7 +201,12 @@ pub async fn delete(
     target_host: Option<&str>,
 ) -> ApiResult<()> {
     match state.config.target_locality(target_host) {
-        Locality::Local => state.actors.delete_server(server_id).await,
+        Locality::Local => {
+            state
+                .actors
+                .delete_server(server_id, session.authorization())
+                .await
+        }
         Locality::Remote(host) => {
             let user_ref = session.user_ref.clone().ok_or_else(|| {
                 ApiError::Internal(
@@ -304,6 +313,10 @@ pub async fn update(
     }
     state
         .actors
-        .update_server(server_id, server_update.clone())
+        .update_server(
+            server_id,
+            server_update.clone(),
+            session.authorization(),
+        )
         .await
 }
