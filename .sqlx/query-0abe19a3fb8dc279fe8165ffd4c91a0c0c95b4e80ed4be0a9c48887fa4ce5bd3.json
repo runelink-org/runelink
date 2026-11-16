@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT server_id FROM server_users WHERE user_name = $1 AND user_host = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "server_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "server_users",
+            "name": "server_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0abe19a3fb8dc279fe8165ffd4c91a0c0c95b4e80ed4be0a9c48887fa4ce5bd3"
+}

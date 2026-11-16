@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT EXISTS (\n            SELECT 1 FROM deleted_users\n            WHERE name = $1 AND host = $2\n                AND deleted_at > NOW() - make_interval(secs => $3)\n        ) AS \"exists!\";\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "405f2d073796a9aa747f897280b5cd642cba9455916de1f85a71ce1946245f8c"
+}

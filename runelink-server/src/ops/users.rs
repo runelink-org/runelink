@@ -1,16 +1,12 @@
 use runelink_client::util::get_api_url;
 use runelink_types::{
     user::{NewUser, User, UserRef},
-    ws::{
-        ClientWsUpdate, FederationWsReply, FederationWsRequest,
-        FederationWsUpdate,
-    },
+    ws::{FederationWsReply, FederationWsRequest},
 };
 
 use super::federation;
 use crate::{
     auth::Session,
-    auth_service,
     config::Locality,
     error::{ApiError, ApiResult},
     queries,
@@ -21,7 +17,7 @@ use crate::{
 /// with accounts.
 pub async fn create(
     state: &AppState,
-    _session: &Session,
+    session: &Session,
     new_user: &NewUser,
 ) -> ApiResult<User> {
     if state.config.locality(&new_user.host).is_remote() {
@@ -34,17 +30,10 @@ pub async fn create(
         host: state.config.public_host(),
         ..new_user.clone()
     };
-    let user = queries::users::insert(
-        &state.db_pool,
-        &new_user,
-        auth_service::NAME_REUSE_DELAY,
-    )
-    .await?;
-    let _ = state
-        .client_ws_manager
-        .broadcast_update(ClientWsUpdate::UserUpserted(user.clone()))
-        .await;
-    Ok(user)
+    state
+        .actors
+        .create_user(new_user, None, session.authorization())
+        .await
 }
 
 /// List all users (public).
@@ -106,46 +95,18 @@ pub async fn get_by_ref(
 /// Delete a user from their home server.
 pub async fn delete_home_user(
     state: &AppState,
-    _session: &Session,
+    session: &Session,
     user_ref: &UserRef,
 ) -> ApiResult<()> {
-    let user =
-        queries::users::get_by_ref(&*state.db_pool, user_ref.clone()).await?;
-    if user.host != state.config.public_host() {
+    if state.config.locality(&user_ref.host).is_remote() {
         return Err(ApiError::BadRequest(
             "Can only delete users from their home server".into(),
         ));
     }
-
-    let foreign_hosts = queries::memberships::get_remote_server_hosts_for_user(
-        &state.db_pool,
-        user_ref.clone(),
-    )
-    .await?;
-
-    queries::users::delete_home(
-        &state.db_pool,
-        user_ref.clone(),
-        auth_service::NAME_REUSE_DELAY,
-    )
-    .await?;
-    state.client_ws_manager.deauthenticate_user(user_ref).await;
-    let _ = state
-        .client_ws_manager
-        .broadcast_update(ClientWsUpdate::UserDeleted {
-            user_ref: user_ref.clone(),
-        })
-        .await;
-    let _ = state
-        .federation_ws_manager
-        .send_update_to_hosts(
-            foreign_hosts,
-            FederationWsUpdate::RemoteUserDeleted {
-                user_ref: user_ref.clone(),
-            },
-        )
-        .await;
-    Ok(())
+    state
+        .actors
+        .delete_home_user(user_ref.clone(), session.authorization())
+        .await
 }
 
 /// Delete a remote user record from a foreign server.
@@ -185,14 +146,10 @@ pub async fn delete_remote_user_record(
         ));
     }
 
-    queries::users::delete(&state.db_pool, user_ref.clone()).await?;
-    let _ = state
-        .client_ws_manager
-        .broadcast_update(ClientWsUpdate::UserDeleted {
-            user_ref: user_ref.clone(),
-        })
-        .await;
-    Ok(())
+    state
+        .actors
+        .delete_remote_user(user_ref.clone(), session.authorization())
+        .await
 }
 
 /// Get all hosts associated with a user (public).

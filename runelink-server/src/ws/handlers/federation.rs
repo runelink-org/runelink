@@ -10,6 +10,7 @@ use runelink_types::{
 
 use super::shared::authorize_federation;
 use crate::{
+    auth::Authorization,
     config::hosts_match,
     error::{ApiError, ApiResult},
     ids::ConnId,
@@ -190,10 +191,11 @@ pub(super) async fn handle_federation_update(
                     user_ref.host
                 )));
             }
-            let _ = state
-                .client_ws_manager
-                .broadcast_update(ClientWsUpdate::UserDeleted { user_ref })
-                .await;
+            // Removes the record and its memberships, then tells clients.
+            state
+                .actors
+                .delete_remote_user(user_ref, Authorization::host())
+                .await?;
         }
     }
     Ok(())
