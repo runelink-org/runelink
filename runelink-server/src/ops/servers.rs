@@ -1,8 +1,5 @@
 use runelink_types::{
-    server::{
-        NewServer, Server, ServerId, ServerMembership, ServerRole,
-        ServerWithChannels,
-    },
+    server::{NewServer, Server, ServerId, ServerWithChannels},
     ws::{FederationWsReply, FederationWsRequest},
 };
 
@@ -60,22 +57,8 @@ pub async fn create(
                     "Unexpected federation reply from {host} for servers.create"
                 )));
             };
-            // Cache the remote server and creator's admin membership on the home server.
-            queries::servers::upsert_remote(&state.db_pool, &server, host)
-                .await?;
-            let remote_membership = ServerMembership {
-                server: server.clone(),
-                user_ref,
-                role: ServerRole::Admin,
-                joined_at: server.created_at,
-                updated_at: server.updated_at,
-                synced_at: Some(server.created_at),
-            };
-            queries::memberships::insert_remote(
-                &state.db_pool,
-                &remote_membership,
-            )
-            .await?;
+            // The peer's updates for the server and its creator's membership
+            // cache them here.
             Ok(server)
         }
     }
@@ -307,8 +290,6 @@ pub async fn update(
         let FederationWsReply::ServersUpdate(resource) = reply else {
             return Err(ApiError::Internal("Unexpected edit reply".into()));
         };
-        queries::servers::upsert_remote(&state.db_pool, &resource, host)
-            .await?;
         return Ok(resource);
     }
     state

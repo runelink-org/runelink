@@ -15,8 +15,8 @@ use runelink_client::util::{get_api_url, get_federation_ws_url, pad_host};
 use runelink_types::{
     FederationClaims,
     capability::{
-        CapabilityHello, NegotiatedCapabilities, VersionedCapability,
-        preferred_version, supported_capabilities,
+        Capability, CapabilityHello, NegotiatedCapabilities,
+        VersionedCapability, preferred_version, supported_capabilities,
         versions::NEGOTIATION_VERSION,
     },
     ids::{EventId, RequestId},
@@ -47,6 +47,25 @@ use crate::{
 
 type PendingFederationReplySender =
     oneshot::Sender<Result<FederationWsReply, WsError>>;
+
+/// The updates that cache a request's result here. Only the host's updates
+/// write these caches, so a request is refused unless the host sends them.
+fn cached_by(request: &FederationWsRequest) -> &'static [Capability] {
+    match request {
+        FederationWsRequest::ServersCreate(_) => {
+            &[Capability::ServersEvents, Capability::MembershipsEvents]
+        }
+        FederationWsRequest::ServersUpdate { .. }
+        | FederationWsRequest::ServersDelete { .. } => {
+            &[Capability::ServersEvents]
+        }
+        FederationWsRequest::MembershipsUpsert { .. }
+        | FederationWsRequest::MembershipsDelete { .. } => {
+            &[Capability::MembershipsEvents]
+        }
+        _ => &[],
+    }
+}
 
 /// High-level manager for federation websocket connections.
 ///
@@ -144,22 +163,25 @@ impl FederationWsManager {
             return Err(FederationRequestError::HostUnavailable { host });
         }
 
-        let capability = request.capability();
-        let Some(capability) = preferred_version(
-            crate::capabilities::federation_websocket,
-            &capability,
-        )
-        .map(|version| capability.with_version(version)) else {
-            return Err(FederationRequestError::UnsupportedCapability {
-                host,
-                capability: capability.to_string(),
-            });
-        };
-        if !self.pool.host_supports_capability(&host, &capability).await {
-            return Err(FederationRequestError::UnsupportedCapability {
-                host,
-                capability: capability.capability.to_string(),
-            });
+        for capability in std::iter::once(request.capability())
+            .chain(cached_by(&request).iter().cloned())
+        {
+            let Some(capability) = preferred_version(
+                crate::capabilities::federation_websocket,
+                &capability,
+            )
+            .map(|version| capability.with_version(version)) else {
+                return Err(FederationRequestError::UnsupportedCapability {
+                    host,
+                    capability: capability.to_string(),
+                });
+            };
+            if !self.pool.host_supports_capability(&host, &capability).await {
+                return Err(FederationRequestError::UnsupportedCapability {
+                    host,
+                    capability: capability.capability.to_string(),
+                });
+            }
         }
 
         let request_id = RequestId::new();
@@ -244,16 +266,19 @@ impl FederationWsManager {
             .await
     }
 
-    /// Sends a reply to the given connection.
-    pub async fn send_reply_to_connection(
+    /// Sends a reply to a request from `host` that arrived on `conn_id`, on
+    /// the connection the host is sent messages on.
+    pub async fn send_reply(
         &self,
         conn_id: ConnId,
+        host: Option<&str>,
         request_id: RequestId,
         reply: FederationWsReply,
     ) -> bool {
         self.pool
-            .send_to_connection(
+            .send_response(
                 conn_id,
+                host,
                 FederationWsEnvelope::Reply {
                     request_id,
                     event_id: EventId::new(),
@@ -263,16 +288,19 @@ impl FederationWsManager {
             .await
     }
 
-    /// Sends an error to the given connection.
-    pub async fn send_error_to_connection(
+    /// Sends an error for a request from `host` that arrived on `conn_id`, on
+    /// the connection the host is sent messages on.
+    pub async fn send_error(
         &self,
         conn_id: ConnId,
+        host: Option<&str>,
         request_id: Option<RequestId>,
         error: WsError,
     ) -> bool {
         self.pool
-            .send_to_connection(
+            .send_response(
                 conn_id,
+                host,
                 FederationWsEnvelope::Error {
                     request_id,
                     event_id: EventId::new(),

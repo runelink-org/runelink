@@ -383,21 +383,29 @@ impl FederationWsPool {
         Self::remove_federation_connection(&mut state, conn_id)
     }
 
-    /// Sends an envelope to the active connection for the given connection ID.
-    pub async fn send_to_connection(
+    /// Sends a response to a request from `host` that arrived on `conn_id`.
+    /// It goes out on the connection that the host is sent updates on, so that
+    /// it follows the updates its request caused, even if the request's own
+    /// connection has closed since.
+    pub async fn send_response(
         &self,
         conn_id: ConnId,
+        host: Option<&str>,
         envelope: FederationWsEnvelope,
     ) -> bool {
-        let sender = {
+        let target = {
             let state = self.inner.read().await;
+            let conn_id = host
+                .and_then(|host| state.by_host.get(&canonical_host(host)))
+                .copied()
+                .unwrap_or(conn_id);
             state
                 .connections
                 .get(&conn_id)
-                .map(|conn| conn.sender.clone())
+                .map(|conn| (conn_id, conn.sender.clone()))
         };
 
-        let Some(sender) = sender else {
+        let Some((conn_id, sender)) = target else {
             return false;
         };
 

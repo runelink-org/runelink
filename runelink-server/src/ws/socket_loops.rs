@@ -37,8 +37,8 @@ use tokio_tungstenite::{
 };
 
 use super::handlers::{
-    MAX_IN_FLIGHT_CLIENT_REQUESTS, apply_federation_updates,
-    handle_client_message, handle_federation_message,
+    MAX_IN_FLIGHT_CLIENT_REQUESTS, handle_client_message,
+    handle_federation_message,
 };
 use crate::{
     auth::Principal,
@@ -449,9 +449,6 @@ pub async fn federation_socket_loop(
     mut socket: FederationSocket,
     mut outbound_rx: mpsc::UnboundedReceiver<FederationWsEnvelope>,
 ) {
-    // Ends after applying what is queued, once this loop drops its sender.
-    let (updates, updates_rx) = mpsc::unbounded_channel();
-    tokio::spawn(apply_federation_updates(state.clone(), updates_rx));
     loop {
         tokio::select! {
             outbound = outbound_rx.recv() => {
@@ -475,7 +472,7 @@ pub async fn federation_socket_loop(
                     FederationIncomingEvent::Text(payload) => {
                         match serde_json::from_str::<FederationWsEnvelope>(&payload) {
                             Ok(message) => {
-                                handle_federation_message(&state, conn_id, message, &updates).await;
+                                handle_federation_message(&state, conn_id, message).await;
                             }
                             Err(error) => {
                                 log::warn!("Failed to parse federation websocket message: {error}");

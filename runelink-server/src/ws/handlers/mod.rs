@@ -10,10 +10,10 @@ use runelink_types::{
     user::UserRef,
     ws::{
         ClientWsEnvelope, ClientWsRequest, FederationWsEnvelope,
-        FederationWsRequest, FederationWsUpdate, WsError,
+        FederationWsRequest, WsError,
     },
 };
-use tokio::sync::{Semaphore, mpsc};
+use tokio::sync::Semaphore;
 
 use crate::{
     admission,
@@ -24,9 +24,6 @@ use crate::{
 
 /// Requests beyond this many in flight on one connection wait for room.
 pub const MAX_IN_FLIGHT_CLIENT_REQUESTS: usize = 32;
-
-/// A federation update and the host that sent it.
-pub type SenderUpdate = (String, FederationWsUpdate);
 
 /// Dispatch a client websocket message, waiting only until it is admitted.
 /// Requests that change connection state are never admitted early, so they
@@ -149,15 +146,14 @@ async fn handle_client_request(
 /// Dispatch a federation websocket message, waiting only until a request is
 /// admitted, like client requests.
 ///
-/// Replies resolve here, so that requests waiting on this connection always
-/// make progress. Updates queue on `updates` to be applied in order. Requests
-/// are not limited, since waiting for room here could also hold up the replies
-/// that the running requests depend on.
+/// Updates and responses are handled before the next message is read, which
+/// never waits on the network, so requests waiting on a peer always make
+/// progress. Requests are not limited, since waiting for room here could also
+/// hold up the replies that the running requests depend on.
 pub async fn handle_federation_message(
     state: &AppState,
     conn_id: ConnId,
     message: FederationWsEnvelope,
-    updates: &mpsc::UnboundedSender<SenderUpdate>,
 ) {
     match message {
         FederationWsEnvelope::Request {
@@ -180,6 +176,10 @@ pub async fn handle_federation_message(
             tokio::spawn(request);
             admitted.await;
         }
+        // Handled before the next message from this connection is read. A
+        // host sends its updates and replies on one connection, so a reply
+        // resolves only after the updates the peer sent before it, which are
+        // all that write what is cached about its servers.
         response_envelope @ (FederationWsEnvelope::Reply { .. }
         | FederationWsEnvelope::Error { .. }) => {
             let resolved = state
@@ -220,25 +220,17 @@ pub async fn handle_federation_message(
                 log::warn!("Ignoring update from unauthenticated connection");
                 return;
             };
-            let _ = updates.send((sender, update));
+            if let Err(error) =
+                federation::handle_federation_update(state, &sender, update)
+                    .await
+            {
+                log::warn!(
+                    "Failed handling federation websocket update: {error}"
+                );
+            }
         }
         FederationWsEnvelope::Hello(_) | FederationWsEnvelope::Welcome(_) => {
             log::warn!("Ignoring repeated federation capability negotiation");
-        }
-    }
-}
-
-/// Apply a connection's federation updates one at a time, in the order the peer
-/// sent them.
-pub async fn apply_federation_updates(
-    state: AppState,
-    mut updates: mpsc::UnboundedReceiver<SenderUpdate>,
-) {
-    while let Some((sender, update)) = updates.recv().await {
-        if let Err(error) =
-            federation::handle_federation_update(&state, &sender, update).await
-        {
-            log::warn!("Failed handling federation websocket update: {error}");
         }
     }
 }
@@ -250,6 +242,13 @@ async fn handle_federation_request(
     delegated_user_ref: Option<UserRef>,
     request: FederationWsRequest,
 ) {
+    // Captured now, so that the response still reaches the host if this
+    // connection closes meanwhile.
+    let host = state
+        .federation_ws_manager
+        .authenticated_host(conn_id)
+        .await;
+    let host = host.as_deref();
     let capability = request.capability();
     let version = preferred_version(federation_websocket, &capability);
     let Some(required) =
@@ -257,8 +256,9 @@ async fn handle_federation_request(
     else {
         let _ = state
             .federation_ws_manager
-            .send_error_to_connection(
+            .send_error(
                 conn_id,
+                host,
                 Some(request_id),
                 unsupported_capability(
                     &capability,
@@ -276,8 +276,9 @@ async fn handle_federation_request(
     {
         let _ = state
             .federation_ws_manager
-            .send_error_to_connection(
+            .send_error(
                 conn_id,
+                host,
                 Some(request_id),
                 unsupported_capability(
                     &capability,
@@ -299,7 +300,7 @@ async fn handle_federation_request(
         Ok(reply) => {
             let sent = state
                 .federation_ws_manager
-                .send_reply_to_connection(conn_id, request_id, reply)
+                .send_reply(conn_id, host, request_id, reply)
                 .await;
             if !sent {
                 log::warn!(
@@ -310,11 +311,7 @@ async fn handle_federation_request(
         Err(error) => {
             let sent = state
                 .federation_ws_manager
-                .send_error_to_connection(
-                    conn_id,
-                    Some(request_id),
-                    error.into(),
-                )
+                .send_error(conn_id, host, Some(request_id), error.into())
                 .await;
             if !sent {
                 log::warn!(

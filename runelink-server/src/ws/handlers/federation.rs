@@ -81,11 +81,15 @@ pub(super) async fn handle_federation_update(
                 sender,
             )
             .await?;
-            queries::memberships::insert_remote(
-                &state.db_pool,
-                &membership.clone().into(),
-            )
-            .await?;
+            // Only local users' memberships are cached. Others may not even
+            // have a user record here, but members still hear about them.
+            if state.config.locality(&membership.user.host).is_local() {
+                queries::memberships::insert_remote(
+                    &state.db_pool,
+                    &membership.clone().into(),
+                )
+                .await?;
+            }
             fanout_remote_server_update(
                 state,
                 sender,
@@ -105,12 +109,17 @@ pub(super) async fn handle_federation_update(
             else {
                 return Ok(());
             };
-            let _ = queries::memberships::delete_remote(
+            match queries::memberships::delete_remote(
                 &state.db_pool,
                 server_id,
                 user_ref.clone(),
             )
-            .await;
+            .await
+            {
+                // Not cached here, as for other hosts' users
+                Ok(()) | Err(ApiError::NotFound) => {}
+                Err(error) => return Err(error),
+            }
             if state.config.locality(&user_ref.host).is_local() {
                 targets.push(user_ref.clone());
             }
@@ -146,6 +155,10 @@ pub(super) async fn handle_federation_update(
                 ClientWsUpdate::ServerDeleted { server_id },
             )
             .await?;
+            // Only deletes a server cached as the sender's. Cached memberships
+            // go with it.
+            queries::servers::delete_remote(&state.db_pool, server_id, sender)
+                .await?;
         }
 
         FederationWsUpdate::ChannelUpserted(channel) => {
