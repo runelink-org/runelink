@@ -5,6 +5,10 @@ use std::{
     time::Duration as StdDuration,
 };
 
+use futures_util::{
+    FutureExt,
+    future::{BoxFuture, Shared},
+};
 use jsonwebtoken::{Algorithm, Header};
 use log::{info, warn};
 use runelink_client::util::{get_api_url, get_federation_ws_url, pad_host};
@@ -36,7 +40,10 @@ use super::{
         federation_socket_loop,
     },
 };
-use crate::{capabilities::federation_websocket, ids::ConnId, state::AppState};
+use crate::{
+    capabilities::federation_websocket, config::canonical_host, ids::ConnId,
+    state::AppState,
+};
 
 type PendingFederationReplySender =
     oneshot::Sender<Result<FederationWsReply, WsError>>;
@@ -50,6 +57,11 @@ type PendingFederationReplySender =
 pub struct FederationWsManager {
     pool: FederationWsPool,
     pending: Arc<Mutex<HashMap<RequestId, PendingFederationReplySender>>>,
+    /// Connection attempts in progress, by canonical host. Concurrent
+    /// requests to a host share one attempt, since each new connection would
+    /// take over sending to that host, and messages sent before and after a
+    /// switch can arrive out of order.
+    connecting: Arc<Mutex<HashMap<String, Shared<BoxFuture<'static, ()>>>>>,
 }
 
 impl Default for FederationWsManager {
@@ -65,6 +77,7 @@ impl FederationWsManager {
         Self {
             pool,
             pending: Arc::new(Mutex::new(HashMap::new())),
+            connecting: Arc::default(),
         }
     }
 
@@ -316,11 +329,44 @@ impl FederationWsManager {
         if self.pool.has_host(host).await {
             return true;
         }
-
-        if !self.connect_to_host(state, host).await {
-            return false;
-        }
-
+        let key = canonical_host(host);
+        let attempt = {
+            let mut connecting = self.connecting.lock().await;
+            match connecting.get(&key) {
+                Some(attempt) => attempt.clone(),
+                None => {
+                    // An attempt registers its connection before it leaves
+                    // the map, so one may have finished since the check above.
+                    if self.pool.has_host(host).await {
+                        return true;
+                    }
+                    let manager = self.clone();
+                    let state = state.clone();
+                    let host = host.to_owned();
+                    let attempt_key = key.clone();
+                    // Spawned, so that it finishes and leaves the map even if
+                    // every caller waiting on it gives up.
+                    let task = tokio::spawn(async move {
+                        manager.connect_to_host(&state, &host).await;
+                        manager.connecting.lock().await.remove(&attempt_key);
+                    });
+                    let connecting_map = self.connecting.clone();
+                    let panicked_key = key.clone();
+                    let attempt = async move {
+                        // A panic skipped the removal above.
+                        if task.await.is_err() {
+                            connecting_map.lock().await.remove(&panicked_key);
+                        }
+                    }
+                    .boxed()
+                    .shared();
+                    connecting.insert(key, attempt.clone());
+                    attempt
+                }
+            }
+        };
+        // Whether it worked or not, the host may also have connected to us.
+        attempt.await;
         self.pool.has_host(host).await
     }
 
@@ -328,7 +374,7 @@ impl FederationWsManager {
         &'a self,
         state: &'a AppState,
         host: &'a str,
-    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
             info!("Opening federation websocket to {host}");
             let claims = FederationClaims::new_server_only(
@@ -346,7 +392,7 @@ impl FederationWsManager {
                     warn!(
                         "Failed creating federation token for {host}: {error}"
                     );
-                    return false;
+                    return;
                 }
             };
             let ws_url = get_federation_ws_url(host, state.config.secure);
@@ -356,7 +402,7 @@ impl FederationWsManager {
                     warn!(
                         "Failed building federation websocket request for {host}: {error}"
                     );
-                    return false;
+                    return;
                 }
             };
             let auth_header = match format!("Bearer {token}").parse() {
@@ -365,7 +411,7 @@ impl FederationWsManager {
                     warn!(
                         "Failed building federation auth header for {host}: {error}"
                     );
-                    return false;
+                    return;
                 }
             };
             request.headers_mut().insert("Authorization", auth_header);
@@ -379,13 +425,13 @@ impl FederationWsManager {
                 Ok(Ok((stream, _))) => stream,
                 Err(_) => {
                     warn!("Timed out opening federation websocket to {host}");
-                    return false;
+                    return;
                 }
                 Ok(Err(error)) => {
                     warn!(
                         "Failed opening federation websocket to {host}: {error}"
                     );
-                    return false;
+                    return;
                 }
             };
 
@@ -396,7 +442,7 @@ impl FederationWsManager {
                 capabilities: offered_capabilities.clone(),
             });
             let Ok(payload) = serde_json::to_string(&hello) else {
-                return false;
+                return;
             };
             let mut socket = FederationSocket::Outbound(Box::new(stream));
             if !matches!(
@@ -408,7 +454,7 @@ impl FederationWsManager {
                 Ok(Ok(()))
             ) {
                 warn!("Failed sending federation capability hello to {host}");
-                return false;
+                return;
             }
             let event =
                 tokio::time::timeout(HELLO_TIMEOUT, socket.recv_event()).await;
@@ -417,7 +463,7 @@ impl FederationWsManager {
                 warn!(
                     "Federation peer {host} did not send a capability welcome"
                 );
-                return false;
+                return;
             };
             let capabilities = match serde_json::from_str(&payload) {
                 Ok(FederationWsEnvelope::Welcome(welcome))
@@ -441,7 +487,7 @@ impl FederationWsManager {
                     socket
                         .close_protocol_error("Invalid capability welcome")
                         .await;
-                    return false;
+                    return;
                 }
             };
 
@@ -462,7 +508,6 @@ impl FederationWsManager {
                     info!("Federation websocket closed for {host}");
                 });
             tokio::spawn(loop_task);
-            true
         })
     }
 }
