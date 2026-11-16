@@ -1,4 +1,4 @@
-//! Actors that serialize every mutation of a local server.
+//! Actors that serialize every mutation of local servers and users.
 //!
 //! Each local server has a server actor for the server itself, its channel
 //! tree, and its memberships, and each of its text channels has a channel
@@ -15,11 +15,16 @@
 //! network, because that would stall every other change it serializes. Reads
 //! do not go through actors.
 //!
+//! Each user has a user actor for creating and deleting them, which may wait
+//! on server actors to remove the user's memberships first. Server actors
+//! never wait on user actors.
+//!
 //! Lock order: the registry, then a server's state. An actor never takes the
 //! registry while it holds its server's state.
 
 mod channel;
 mod server;
+mod user;
 
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
@@ -36,7 +41,7 @@ use runelink_types::{
         FullServerMembership, NewServer, NewServerMembership, Server, ServerId,
         ServerRole, ServerUpdate,
     },
-    user::{User, UserRef},
+    user::{NewUser, User, UserRef},
     ws::{ClientWsUpdate, FederationWsUpdate},
 };
 use sqlx::PgConnection;
@@ -53,6 +58,7 @@ use crate::{
 
 use channel::ChannelOp;
 use server::{ServerOp, ServerOutput};
+use user::{UserOp, UserOutput};
 
 /// Callers wait for room once this many operations are queued for an actor.
 const MAILBOX_CAPACITY: usize = 256;
@@ -197,6 +203,7 @@ impl Facts for ActorFacts<'_> {
 
 type ServerMailbox = mpsc::Sender<Envelope<ServerOp, ServerOutput>>;
 type ChannelMailbox = mpsc::Sender<Envelope<ChannelOp, Message>>;
+type UserMailbox = mpsc::Sender<Envelope<UserOp, UserOutput>>;
 
 #[derive(Clone, Debug)]
 struct ServerEntry {
@@ -204,10 +211,11 @@ struct ServerEntry {
     state: SharedState,
 }
 
-/// The running actors. Idle actors are only a parked task and a channel, so
-/// they stay around until their server or channel is deleted, or a server's
-/// state can no longer be trusted. A closed mailbox belongs to an actor that
-/// stopped or panicked and is replaced.
+/// The running actors. Idle server and channel actors are only a parked task
+/// and a channel, so they stay around until their server or channel is
+/// deleted (or a server's state can no longer be trusted), while user actors
+/// stop once idle. A closed mailbox belongs to an actor that stopped or
+/// panicked and is replaced.
 #[derive(Debug, Default)]
 struct Registry {
     servers: HashMap<ServerId, ServerEntry>,
@@ -215,6 +223,7 @@ struct Registry {
     /// load.
     stopped_servers: u64,
     channels: HashMap<TextChannelId, ChannelMailbox>,
+    users: HashMap<UserRef, UserMailbox>,
 }
 
 /// The actors of a host's local servers, started on first use.
@@ -252,7 +261,7 @@ impl Actors {
             new_server,
             creator,
         };
-        match send(&entry.mailbox, op, auth).await? {
+        match send(entry.mailbox, op, auth).await? {
             ServerOutput::Server(server) => Ok(server),
             output => Err(unexpected(output)),
         }
@@ -380,7 +389,7 @@ impl Actors {
         auth: Authorization,
     ) -> ApiResult<Message> {
         let mailbox = self.channel(server_id, text_channel_id).await?;
-        send(&mailbox, ChannelOp::Create(new_message), auth).await
+        send(mailbox, ChannelOp::Create(new_message), auth).await
     }
 
     pub async fn update_message(
@@ -393,7 +402,7 @@ impl Actors {
     ) -> ApiResult<Message> {
         let mailbox = self.channel(server_id, text_channel_id).await?;
         let op = ChannelOp::Update { message_id, update };
-        send(&mailbox, op, auth).await
+        send(mailbox, op, auth).await
     }
 
     pub async fn delete_message(
@@ -404,7 +413,72 @@ impl Actors {
         auth: Authorization,
     ) -> ApiResult<Message> {
         let mailbox = self.channel(server_id, text_channel_id).await?;
-        send(&mailbox, ChannelOp::Delete(message_id), auth).await
+        send(mailbox, ChannelOp::Delete(message_id), auth).await
+    }
+
+    /// Create a home user, with a local account if a password hash is given.
+    pub async fn create_user(
+        &self,
+        new_user: NewUser,
+        password_hash: Option<String>,
+        auth: Authorization,
+    ) -> ApiResult<User> {
+        let user_ref =
+            UserRef::new(new_user.name.clone(), new_user.host.clone());
+        let op = UserOp::Create {
+            new_user,
+            password_hash,
+        };
+        match self.user_op(user_ref, op, auth).await? {
+            UserOutput::User(user) => Ok(user),
+            output => Err(unexpected(output)),
+        }
+    }
+
+    /// Delete a home user along with their memberships.
+    pub async fn delete_home_user(
+        &self,
+        user_ref: UserRef,
+        auth: Authorization,
+    ) -> ApiResult<()> {
+        match self.user_op(user_ref, UserOp::DeleteHome, auth).await? {
+            UserOutput::Done => Ok(()),
+            output => Err(unexpected(output)),
+        }
+    }
+
+    /// Delete a remote user's record along with their memberships here.
+    pub async fn delete_remote_user(
+        &self,
+        user_ref: UserRef,
+        auth: Authorization,
+    ) -> ApiResult<()> {
+        // Unknown users are recorded as deleted too.
+        match self.user_op(user_ref, UserOp::DeleteRemote, auth).await? {
+            UserOutput::Done => Ok(()),
+            output => Err(unexpected(output)),
+        }
+    }
+
+    /// Queue an operation on a user's actor, starting it if needed.
+    async fn user_op(
+        &self,
+        user_ref: UserRef,
+        op: UserOp,
+        auth: Authorization,
+    ) -> ApiResult<UserOutput> {
+        let mailbox = {
+            let mut registry = self.registry.lock().await;
+            match registry.users.get(&user_ref) {
+                Some(mailbox) if !mailbox.is_closed() => mailbox.clone(),
+                _ => {
+                    let mailbox = user::spawn(self.clone(), user_ref.clone());
+                    registry.users.insert(user_ref, mailbox.clone());
+                    mailbox
+                }
+            }
+        };
+        send(mailbox, op, auth).await
     }
 
     async fn server_op(
@@ -414,7 +488,7 @@ impl Actors {
         auth: Authorization,
     ) -> ApiResult<ServerOutput> {
         let mailbox = self.server(server_id).await?.mailbox;
-        send(&mailbox, op, auth).await
+        send(mailbox, op, auth).await
     }
 
     /// Get a server's actor, starting it if needed.
@@ -512,19 +586,21 @@ impl Actors {
     }
 }
 
-/// Queue an operation and wait for its result.
+/// Queue an operation and wait for its result. The mailbox is dropped once the
+/// operation is queued, which user actors rely on to tell when they are idle.
 async fn send<Op, Output>(
-    mailbox: &mpsc::Sender<Envelope<Op, Output>>,
+    mailbox: mpsc::Sender<Envelope<Op, Output>>,
     op: Op,
     auth: Authorization,
 ) -> ApiResult<Output> {
     let (reply, result) = oneshot::channel();
-    // Actors only stop for good once their server or channel is gone, or a
-    // server's state can no longer be trusted.
+    // Server and channel actors stop for good once their server or channel
+    // is gone, and also when a server's state can no longer be trusted.
     mailbox
         .send(Envelope { op, auth, reply })
         .await
         .map_err(|_| ApiError::NotFound)?;
+    drop(mailbox);
     // Later requests from the same connection may now be read.
     crate::admission::admit();
     result
@@ -532,8 +608,8 @@ async fn send<Op, Output>(
         .map_err(|_| ApiError::Internal("Actor stopped unexpectedly".into()))?
 }
 
-fn unexpected(output: ServerOutput) -> ApiError {
-    ApiError::Internal(format!("Unexpected server actor output: {output:?}"))
+fn unexpected(output: impl std::fmt::Debug) -> ApiError {
+    ApiError::Internal(format!("Unexpected actor output: {output:?}"))
 }
 
 #[cfg(test)]
@@ -592,6 +668,7 @@ mod tests {
             Capability::ChannelsEvents,
             Capability::MembershipsEvents,
             Capability::MessagesEvents,
+            Capability::UsersEvents,
         ]
         .into_iter()
         .map(|capability| {
@@ -668,12 +745,17 @@ mod tests {
         }
 
         async fn cleanup(self) {
-            sqlx::query("DELETE FROM users WHERE name = $1 AND host = $2")
-                .bind(&self.user.name)
-                .bind(&self.user.host)
-                .execute(&*self.pool)
-                .await
-                .unwrap();
+            for query in [
+                "DELETE FROM users WHERE name = $1 AND host = $2",
+                "DELETE FROM deleted_users WHERE name = $1 AND host = $2",
+            ] {
+                sqlx::query(query)
+                    .bind(&self.user.name)
+                    .bind(&self.user.host)
+                    .execute(&*self.pool)
+                    .await
+                    .unwrap();
+            }
         }
     }
 
@@ -836,6 +918,65 @@ mod tests {
             )
             .await;
         assert!(matches!(result, Err(ApiError::AuthError(_))), "{result:?}");
+
+        f.actors
+            .delete_server(server.id, Authorization::host())
+            .await
+            .unwrap();
+        f.cleanup().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL pointing to a migrated PostgreSQL database"]
+    async fn deleting_a_user_removes_their_memberships_first() {
+        let mut f = fixture().await;
+        let server = f
+            .actors
+            .create_server(
+                NewServer {
+                    title: "actors test".into(),
+                    description: None,
+                },
+                f.user.clone(),
+                Authorization::host(),
+            )
+            .await
+            .unwrap();
+        f.actors
+            .delete_home_user(f.user.clone(), Authorization::host())
+            .await
+            .unwrap();
+        assert!(matches!(
+            f.received().as_slice(),
+            [
+                ClientWsUpdate::ServerUpserted(_),
+                ClientWsUpdate::MembershipUpserted(_),
+                ClientWsUpdate::MembershipDeleted { .. },
+                ClientWsUpdate::UserDeleted { .. },
+            ]
+        ));
+        let registry = f.actors.registry.lock().await;
+        let state = registry.servers[&server.id].state.read().await;
+        assert!(state.members.is_empty());
+        drop(state);
+        drop(registry);
+        // The name stays reserved.
+        let recreated = f
+            .actors
+            .create_user(
+                NewUser {
+                    name: f.user.name.clone(),
+                    host: f.user.host.clone(),
+                    role: runelink_types::user::UserRole::User,
+                },
+                None,
+                Authorization::host(),
+            )
+            .await;
+        assert!(
+            matches!(recreated, Err(ApiError::Conflict(_))),
+            "{recreated:?}"
+        );
 
         f.actors
             .delete_server(server.id, Authorization::host())

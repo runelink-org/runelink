@@ -23,6 +23,7 @@ use super::{
 };
 use crate::{
     auth::Authorization,
+    auth_service::NAME_REUSE_DELAY,
     channel_tree,
     error::{ApiError, ApiResult},
     queries,
@@ -352,7 +353,12 @@ async fn apply(
             remote_user,
         } => {
             if let Some(remote_user) = &remote_user {
-                queries::users::upsert_remote(&mut *conn, remote_user).await?;
+                queries::users::upsert_remote(
+                    &mut *conn,
+                    remote_user,
+                    NAME_REUSE_DELAY,
+                )
+                .await?;
             }
             let membership =
                 upsert_membership(ctx, conn, &new_membership).await?;
@@ -404,7 +410,12 @@ async fn create(
         queries::users::get_by_ref(&mut *conn, creator.clone()).await?;
     } else {
         // Creates the record for federated users from other hosts
-        queries::users::ensure_exists(&mut *conn, creator.clone()).await?;
+        queries::users::ensure_exists(
+            &mut *conn,
+            creator.clone(),
+            NAME_REUSE_DELAY,
+        )
+        .await?;
     }
     let server = queries::servers::insert(
         &mut *conn,

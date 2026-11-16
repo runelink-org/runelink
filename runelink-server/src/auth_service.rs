@@ -11,6 +11,7 @@ use runelink_types::{
 use time::{Duration, OffsetDateTime};
 
 use crate::{
+    auth::Authorization,
     bearer_auth::ClientAuth,
     error::{ApiError, ApiResult},
     ids::ConnId,
@@ -100,23 +101,20 @@ pub async fn signup(
         host: state.config.public_host(),
         role: UserRole::User,
     };
-    let user =
-        queries::users::insert(&state.db_pool, &new_user, NAME_REUSE_DELAY)
-            .await?;
-
-    let password_hash = Argon2::default()
-        .hash_password(request.password.as_bytes())
-        .map_err(|error| ApiError::Internal(format!("hashing error: {error}")))?
-        .to_string();
-
-    let _ = queries::accounts::insert(
-        &state.db_pool,
-        user.as_ref(),
-        &password_hash,
-    )
-    .await?;
-
-    Ok(user)
+    // Hashing is slow on purpose, so it runs off the async workers.
+    let password = request.password;
+    let password_hash = tokio::task::spawn_blocking(move || {
+        Argon2::default()
+            .hash_password(password.as_bytes())
+            .map(|hash| hash.to_string())
+    })
+    .await?
+    .map_err(|error| ApiError::Internal(format!("hashing error: {error}")))?;
+    // The user and their account are created together.
+    state
+        .actors
+        .create_user(new_user, Some(password_hash), Authorization::host())
+        .await
 }
 
 pub async fn issue_password_token(

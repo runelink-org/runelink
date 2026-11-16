@@ -1,9 +1,11 @@
 use runelink_types::{LocalAccount, UserRef};
 
+use sqlx::PgExecutor;
+
 use crate::{db::DbPool, error::ApiResult};
 
 pub async fn insert(
-    pool: &DbPool,
+    executor: impl PgExecutor<'_>,
     user: UserRef,
     password_hash: &str,
 ) -> ApiResult<LocalAccount> {
@@ -18,7 +20,7 @@ pub async fn insert(
         user.host,
         password_hash,
     )
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await?;
     Ok(local_account)
 }

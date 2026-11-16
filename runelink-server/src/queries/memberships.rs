@@ -305,6 +305,21 @@ pub async fn get_local_roles(
         .collect())
 }
 
+/// The local servers a user belongs to.
+pub async fn get_local_server_ids_for_user(
+    executor: impl PgExecutor<'_>,
+    user: &UserRef,
+) -> ApiResult<Vec<ServerId>> {
+    let ids = sqlx::query_scalar!(
+        "SELECT server_id FROM server_users WHERE user_name = $1 AND user_host = $2",
+        user.name,
+        user.host,
+    )
+    .fetch_all(executor)
+    .await?;
+    Ok(ids.into_iter().map(Into::into).collect())
+}
+
 /// A cached remote server's owning host and its cached members.
 pub struct RemoteServerMembers {
     pub host: String,
@@ -445,27 +460,6 @@ pub async fn get_by_user(
     rows.into_iter()
         .map(|row| row.try_into_server_membership(&state.config))
         .collect()
-}
-
-/// Get distinct remote server hosts where a user has memberships.
-pub async fn get_remote_server_hosts_for_user(
-    pool: &DbPool,
-    user: UserRef,
-) -> ApiResult<Vec<String>> {
-    let rows = sqlx::query!(
-        r#"
-        SELECT DISTINCT crs.host
-        FROM cached_remote_servers crs
-        JOIN user_remote_server_memberships ursm
-            ON crs.id = ursm.remote_server_id
-        WHERE ursm.user_name = $1 AND ursm.user_host = $2
-        "#,
-        user.name,
-        user.host,
-    )
-    .fetch_all(pool)
-    .await?;
-    Ok(rows.into_iter().map(|row| row.host).collect())
 }
 
 /// Delete a local server membership.
