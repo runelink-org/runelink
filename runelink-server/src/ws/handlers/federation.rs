@@ -230,6 +230,11 @@ pub(super) async fn handle_federation_request(
         }
 
         FederationWsRequest::UsersGetByRef { user_ref } => {
+            // Peers ask a user's home host directly, so this never forwards
+            // the request to yet another host.
+            if state.config.locality(&user_ref.host).is_remote() {
+                return Err(ApiError::NotFound);
+            }
             let user = ops::users::get_by_ref(state, user_ref, None).await?;
             Ok(FederationWsReply::UsersGetByRef(user))
         }
