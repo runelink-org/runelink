@@ -16,6 +16,7 @@ use runelink_types::{
 use tokio::sync::{Semaphore, mpsc};
 
 use crate::{
+    admission,
     capabilities::{client_websocket, federation_websocket},
     ids::ConnId,
     state::AppState,
@@ -27,9 +28,9 @@ pub const MAX_IN_FLIGHT_CLIENT_REQUESTS: usize = 32;
 /// A federation update and the host that sent it.
 pub type SenderUpdate = (String, FederationWsUpdate);
 
-/// Dispatch a client websocket message without waiting for its handling, so
-/// that a slow request does not hold up the connection's other requests.
-/// Connection state changes run first, for requests that follow them.
+/// Dispatch a client websocket message, waiting only until it is admitted.
+/// Requests that change connection state are never admitted early, so they
+/// finish before later requests are read.
 pub async fn handle_client_message(
     state: &AppState,
     conn_id: ConnId,
@@ -41,25 +42,19 @@ pub async fn handle_client_message(
             request_id,
             request,
         } => {
-            if matches!(
-                request,
-                ClientWsRequest::AuthTokenAccess(_)
-                    | ClientWsRequest::AuthTokenPassword(_)
-                    | ClientWsRequest::AuthTokenRefresh(_)
-            ) {
-                handle_client_request(state, conn_id, request_id, request)
-                    .await;
-                return;
-            }
-            let Ok(permit) = in_flight.clone().acquire_owned().await else {
-                return;
-            };
+            let permit = in_flight
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("the in-flight semaphore is never closed");
             let state = state.clone();
-            tokio::spawn(async move {
+            let (request, admitted) = admission::track(async move {
                 handle_client_request(&state, conn_id, request_id, request)
                     .await;
                 drop(permit);
             });
+            tokio::spawn(request);
+            admitted.await;
         }
         ClientWsEnvelope::Reply { .. } => {
             log::warn!("Ignoring client websocket reply envelope");
@@ -151,7 +146,8 @@ async fn handle_client_request(
     }
 }
 
-/// Dispatch a federation websocket message without waiting on its handling.
+/// Dispatch a federation websocket message, waiting only until a request is
+/// admitted, like client requests.
 ///
 /// Replies resolve here, so that requests waiting on this connection always
 /// make progress. Updates queue on `updates` to be applied in order. Requests
@@ -171,7 +167,7 @@ pub async fn handle_federation_message(
             ..
         } => {
             let state = state.clone();
-            tokio::spawn(async move {
+            let (request, admitted) = admission::track(async move {
                 handle_federation_request(
                     &state,
                     conn_id,
@@ -181,6 +177,8 @@ pub async fn handle_federation_message(
                 )
                 .await;
             });
+            tokio::spawn(request);
+            admitted.await;
         }
         response_envelope @ (FederationWsEnvelope::Reply { .. }
         | FederationWsEnvelope::Error { .. }) => {

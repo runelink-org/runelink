@@ -12,6 +12,7 @@ use crate::{
 };
 
 mod actors;
+mod admission;
 mod api;
 mod auth;
 mod auth_service;

@@ -9,6 +9,7 @@ use runelink_types::{
 
 use super::{federation, users};
 use crate::{
+    admission,
     auth::Session,
     config::Locality,
     error::{ApiError, ApiResult},
@@ -77,14 +78,22 @@ pub async fn upsert(
     }
 
     // Fetching a remote user waits on the network, so it stays out of the actor.
-    let remote_user = if new_membership.user_ref.host
-        != state.config.public_host()
+    let remote_user = if state
+        .config
+        .locality(&new_membership.user_ref.host)
+        .is_remote()
     {
         let remote_user = match remote_user {
             Some(user) => user.clone(),
+            // Queued after the lookup, so later requests from the same
+            // connection wait for it rather than overtaking the membership.
             None => {
-                users::get_by_ref(state, new_membership.user_ref.clone(), None)
-                    .await?
+                admission::hold(users::get_by_ref(
+                    state,
+                    new_membership.user_ref.clone(),
+                    None,
+                ))
+                .await?
             }
         };
         if remote_user.as_ref() != new_membership.user_ref {
