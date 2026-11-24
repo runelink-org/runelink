@@ -68,6 +68,10 @@ impl AppConfig {
         })
     }
 
+    pub fn is_active(&self, user_ref: &UserRef) -> bool {
+        self.active_account.as_ref() == Some(user_ref)
+    }
+
     pub fn get_active_account_mut(&mut self) -> Option<&mut AccountConfig> {
         let user_ref = self.active_account.clone()?;
         self.accounts.iter_mut().find(|ac| ac.user_ref == user_ref)

@@ -13,7 +13,6 @@ use crate::{
 
 pub mod account;
 pub mod channels;
-pub mod config;
 pub mod context;
 pub mod input;
 pub mod messages;
@@ -68,8 +67,6 @@ pub enum Commands {
     Server(servers::ServerArgs),
     /// Manage users
     User(users::UserArgs),
-    /// Manage config
-    Config(config::ConfigArgs),
     /// Generate shell completion scripts
     Completions(CompletionsArgs),
 }
@@ -144,9 +141,6 @@ pub async fn handle_cli(
         }
         Commands::User(args) => {
             users::handle_user_commands(ctx, args).await?;
-        }
-        Commands::Config(args) => {
-            config::handle_config_commands(ctx, args).await?;
         }
         Commands::Completions(args) => {
             let mut cmd = Cli::command();
