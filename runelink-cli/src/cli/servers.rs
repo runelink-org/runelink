@@ -358,27 +358,25 @@ pub async fn handle_server_commands(
         }
 
         ServerCommands::Delete(delete_args) => {
-            let account = ctx.account.ok_or(CliError::MissingAccount)?;
+            ctx.account.ok_or(CliError::MissingAccount)?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
             let target_host = parse_optional_host_input(
                 delete_args.host.as_deref(),
                 ctx.strict_input,
             )?;
-            let server_id = if let Some(server_id) = delete_args.server_id {
-                server_id
-            } else {
-                let host = target_host
-                    .as_deref()
-                    .unwrap_or(account.user_ref.host.as_str());
-                get_server_selection(
-                    ctx,
-                    ServerSelectionType::MemberOnly,
-                    "--server-id",
-                )
-                .await?
-                .id
-            };
+            let (server_id, target_host) =
+                if let Some(server_id) = delete_args.server_id {
+                    (server_id, target_host)
+                } else {
+                    let server = get_server_selection(
+                        ctx,
+                        ServerSelectionType::MemberOnly,
+                        "--server-id",
+                    )
+                    .await?;
+                    (server.id, Some(server.host))
+                };
             requests::servers::delete(
                 ctx.client,
                 &api_url,
