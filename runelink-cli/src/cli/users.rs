@@ -53,9 +53,7 @@ pub async fn handle_user_commands(
                 list_args.host.as_deref(),
                 ctx.strict_input,
             )?;
-            let users;
             if let Some(server_id) = list_args.server_id {
-                // Fetch members of the server, then extract users
                 let members = requests::memberships::fetch_members_by_server(
                     ctx.client,
                     &api_url,
@@ -63,17 +61,23 @@ pub async fn handle_user_commands(
                     target_host.as_deref(),
                 )
                 .await?;
-                users = members.into_iter().map(|m| m.user).collect();
+                ctx.output(&members, || {
+                    for member in &members {
+                        println!("{}", member.user);
+                    }
+                })?;
             } else {
-                users = requests::users::fetch_all(
+                let users = requests::users::fetch_all(
                     ctx.client,
                     &api_url,
                     target_host.as_deref(),
                 )
                 .await?;
-            }
-            for user in users {
-                println!("{user}");
+                ctx.output(&users, || {
+                    for user in &users {
+                        println!("{user}");
+                    }
+                })?;
             }
         }
 
@@ -87,7 +91,7 @@ pub async fn handle_user_commands(
             let user =
                 requests::users::fetch_by_ref(ctx.client, &api_url, user_ref)
                     .await?;
-            println!("{user}");
+            ctx.output(&user, || println!("{user}"))?;
         }
     }
     Ok(())

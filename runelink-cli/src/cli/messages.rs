@@ -47,6 +47,10 @@ pub struct MessageListArgs {
     /// Hide IDs (the default)
     #[clap(long)]
     pub hide_ids: bool,
+    /// Include deleted messages. Without it, replies may refer to deleted
+    /// messages that are left out.
+    #[clap(long)]
+    pub include_deleted: bool,
     #[clap(flatten)]
     pub channel: TextChannelArgs,
 }
@@ -137,7 +141,7 @@ pub async fn handle_message_commands(
                 target_host.as_deref(),
             )
             .await?;
-            println!("Updated message: {resource}");
+            ctx.output(&resource, || println!("Updated message: {resource}"))?;
         }
 
         MessageCommands::List(list_args) => {
@@ -155,31 +159,41 @@ pub async fn handle_message_commands(
                 target_host.as_deref(),
             )
             .await?;
-            let messages_by_id: HashMap<_, _> = messages
+            // Oldest first, as people read them
+            let shown: Vec<_> = messages
                 .iter()
-                .map(|message| (message.id, message))
+                .rev()
+                .filter(|message| {
+                    list_args.include_deleted
+                        || message.content.body().is_some()
+                })
                 .collect();
-            let width = crossterm::terminal::size()
-                .ok()
-                .map(|(columns, _)| usize::from(columns))
-                .filter(|columns| *columns > 0)
-                .unwrap_or(80);
-            for message in messages.iter().rev() {
-                let Some(body) = message.content.body() else {
-                    continue;
-                };
-                if let Some(reply_to) = message.reply_to {
-                    println!(
-                        "{}",
-                        reply_preview(
-                            messages_by_id.get(&reply_to).copied(),
-                            width,
-                            show_ids,
-                        )
-                    );
+            ctx.output(&shown, || {
+                let messages_by_id: HashMap<_, _> = messages
+                    .iter()
+                    .map(|message| (message.id, message))
+                    .collect();
+                let width = crossterm::terminal::size()
+                    .ok()
+                    .map(|(columns, _)| usize::from(columns))
+                    .filter(|columns| *columns > 0)
+                    .unwrap_or(80);
+                for message in &shown {
+                    if let Some(reply_to) = message.reply_to {
+                        println!(
+                            "{}",
+                            reply_preview(
+                                messages_by_id.get(&reply_to).copied(),
+                                width,
+                                show_ids,
+                            )
+                        );
+                    }
+                    let body =
+                        message.content.body().unwrap_or("[Message deleted]");
+                    println!("{}: {body}", author_label(message, show_ids));
                 }
-                println!("{}: {body}", author_label(message, show_ids));
-            }
+            })?;
         }
 
         MessageCommands::Get(get_args) => {
@@ -198,7 +212,7 @@ pub async fn handle_message_commands(
                 target_host.as_deref(),
             )
             .await?;
-            println!("{message}");
+            ctx.output(&message, || println!("{message}"))?;
         }
 
         MessageCommands::Send(send_args) => {
@@ -224,7 +238,7 @@ pub async fn handle_message_commands(
                 target_host.as_deref(),
             )
             .await?;
-            println!("Sent message: {message}");
+            ctx.output(&message, || println!("Sent message: {message}"))?;
         }
 
         MessageCommands::Delete(delete_args) => {
@@ -243,7 +257,7 @@ pub async fn handle_message_commands(
                 target_host.as_deref(),
             )
             .await?;
-            println!("Deleted message: {}", delete_args.message_id);
+            ctx.message(format!("Deleted message: {}", delete_args.message_id));
         }
     };
     Ok(())

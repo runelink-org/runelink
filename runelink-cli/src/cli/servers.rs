@@ -146,7 +146,7 @@ pub async fn handle_server_commands(
                 target_host.as_deref(),
             )
             .await?;
-            println!("Updated server: {resource}");
+            ctx.output(&resource, || println!("Updated server: {resource}"))?;
         }
 
         ServerCommands::List(list_args) => {
@@ -165,16 +165,14 @@ pub async fn handle_server_commands(
                     Some(host.as_str()),
                 )
                 .await?;
-                if servers.is_empty() {
-                    println!("No servers found in host: {host}");
-                } else {
-                    for server in servers {
-                        println!(
-                            "{}",
-                            list_label(&server, server.id, show_ids)
-                        );
+                ctx.output(&servers, || {
+                    if servers.is_empty() {
+                        println!("No servers found in host: {host}");
                     }
-                }
+                    for server in &servers {
+                        println!("{}", list_label(server, server.id, show_ids));
+                    }
+                })?;
             } else {
                 // List servers the user is a member of (current behavior)
                 let account = ctx.account.ok_or(CliError::MissingAccount)?;
@@ -184,35 +182,37 @@ pub async fn handle_server_commands(
                     account.user_ref.clone(),
                 )
                 .await?;
-                if memberships.is_empty() {
-                    println!(
-                        "No servers joined.\n\
-                        For more information, try `rune server --help`."
-                    )
-                }
-                let mut is_first = true;
-                for (host, memberships) in
-                    group_memberships_by_host(&memberships)
-                {
-                    if is_first {
-                        is_first = false
-                    } else {
-                        println!(); // separation between host groups
+                ctx.output(&memberships, || {
+                    if memberships.is_empty() {
+                        println!(
+                            "No servers joined.\n\
+                            For more information, try `rune server --help`."
+                        )
                     }
-                    println!("{host}");
-                    for membership in memberships {
-                        let server = &membership.server;
-                        print!(
-                            "    {}",
-                            list_label(server, server.id, show_ids)
-                        );
-                        if membership.role == ServerRole::Admin {
-                            println!(" - admin");
+                    let mut is_first = true;
+                    for (host, memberships) in
+                        group_memberships_by_host(&memberships)
+                    {
+                        if is_first {
+                            is_first = false
                         } else {
-                            println!();
+                            println!(); // separation between host groups
+                        }
+                        println!("{host}");
+                        for membership in memberships {
+                            let server = &membership.server;
+                            print!(
+                                "    {}",
+                                list_label(server, server.id, show_ids)
+                            );
+                            if membership.role == ServerRole::Admin {
+                                println!(" - admin");
+                            } else {
+                                println!();
+                            }
                         }
                     }
-                }
+                })?;
             }
         }
 
@@ -229,12 +229,14 @@ pub async fn handle_server_commands(
                 target_host.as_deref(),
             )
             .await?;
-            println!(
-                "{host} / {title} ({id})",
-                host = server.host,
-                title = server.title,
-                id = server.id
-            );
+            ctx.output(&server, || {
+                println!(
+                    "{host} / {title} ({id})",
+                    host = server.host,
+                    title = server.title,
+                    id = server.id
+                )
+            })?;
         }
 
         ServerCommands::Create(create_args) => {
@@ -266,7 +268,9 @@ pub async fn handle_server_commands(
                 target_host.as_deref(),
             )
             .await?;
-            println!("Created server: {}", server.verbose());
+            ctx.output(&server, || {
+                println!("Created server: {}", server.verbose())
+            })?;
         }
 
         ServerCommands::Join(join_args) => {
@@ -302,14 +306,16 @@ pub async fn handle_server_commands(
                 server_host: server.host.clone(),
                 role: ServerRole::Member,
             };
-            let _member = requests::memberships::create(
+            let membership = requests::memberships::create(
                 ctx.client,
                 &api_url,
                 &access_token,
                 &new_member,
             )
             .await?;
-            println!("Joined server: {}", server.verbose());
+            ctx.output(&membership, || {
+                println!("Joined server: {}", server.verbose())
+            })?;
         }
 
         ServerCommands::Leave(leave_args) => {
@@ -348,7 +354,7 @@ pub async fn handle_server_commands(
                 Some(server.host.as_str()),
             )
             .await?;
-            println!("Left server: {}", server.verbose());
+            ctx.message(format!("Left server: {}", server.verbose()));
         }
 
         ServerCommands::Delete(delete_args) => {
@@ -381,7 +387,7 @@ pub async fn handle_server_commands(
                 target_host.as_deref(),
             )
             .await?;
-            println!("Deleted server: {server_id}");
+            ctx.message(format!("Deleted server: {server_id}"));
         }
     }
     Ok(())

@@ -60,11 +60,12 @@ pub async fn handle_default_account_commands(
 ) -> Result<(), CliError> {
     match &default_args.command {
         DefaultAccountCommands::Get => {
-            if let Some(account) = ctx.config.get_default_account() {
-                println!("{account}");
-            } else {
-                println!("No default account set.");
-            }
+            let account = ctx.config.get_default_account();
+            let user_ref = account.map(|account| &account.user_ref);
+            ctx.output(&user_ref, || match account {
+                Some(account) => println!("{account}"),
+                None => println!("No default account set."),
+            })?;
         }
 
         DefaultAccountCommands::Set(set_args) => {
@@ -89,13 +90,15 @@ pub async fn handle_default_account_commands(
                     AccountConfig::to_string,
                 )?
                 .ok_or(CliError::Cancellation)?;
-                println!();
+                eprintln!();
                 tmp
             }
             .clone();
             ctx.config.default_account = Some(account.user_ref.clone());
             ctx.config.save()?;
-            println!("Set default account: {account}");
+            ctx.output(&account.user_ref, || {
+                println!("Set default account: {account}")
+            })?;
         }
     }
     Ok(())
