@@ -52,6 +52,12 @@ pub struct SwitchArgs {
     /// The host name of the account's host
     #[clap(long, requires = "name")]
     pub host: Option<String>,
+    /// Log in first when the account is logged out (the default)
+    #[clap(long, conflicts_with = "no_login")]
+    pub login: bool,
+    /// Switch without logging in when the account is logged out
+    #[clap(long)]
+    pub no_login: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -569,6 +575,11 @@ pub async fn handle_account_commands(
             } else {
                 select_saved_account(ctx)?
             };
+            let login = switch_args.login || !switch_args.no_login;
+            if login && !ctx.auth_cache.has_auth(&user_ref) {
+                eprintln!("Logging in to {user_ref}");
+                ctx.login_with_password(&user_ref, None).await?;
+            }
             ctx.config.active_account = Some(user_ref.clone());
             ctx.config.save()?;
             let status = AccountStatus::new(
