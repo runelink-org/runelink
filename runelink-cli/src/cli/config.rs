@@ -12,8 +12,8 @@ pub struct ConfigArgs {
 #[allow(clippy::enum_variant_names)]
 #[derive(clap::Subcommand, Debug)]
 pub enum ConfigCommands {
-    /// Manage default account
-    DefaultAccount(DefaultAccountArgs),
+    /// Manage the active account
+    ActiveAccount(ActiveAccountArgs),
 }
 
 pub async fn handle_config_commands(
@@ -21,26 +21,26 @@ pub async fn handle_config_commands(
     config_args: &ConfigArgs,
 ) -> Result<(), CliError> {
     match &config_args.command {
-        ConfigCommands::DefaultAccount(default_account_args) => {
-            handle_default_account_commands(ctx, default_account_args).await?;
+        ConfigCommands::ActiveAccount(active_account_args) => {
+            handle_active_account_commands(ctx, active_account_args).await?;
         }
     }
     Ok(())
 }
 
-// DEFAULT HOST
+// ACTIVE ACCOUNT
 
 #[derive(clap::Args, Debug)]
-pub struct DefaultAccountArgs {
+pub struct ActiveAccountArgs {
     #[clap(subcommand)]
-    pub command: DefaultAccountCommands,
+    pub command: ActiveAccountCommands,
 }
 
 #[derive(clap::Subcommand, Debug)]
-pub enum DefaultAccountCommands {
-    /// Show the default account
+pub enum ActiveAccountCommands {
+    /// Show the active account
     Get,
-    /// Set the default account
+    /// Set the active account
     Set(NameAndHostArgs),
 }
 
@@ -54,21 +54,21 @@ pub struct NameAndHostArgs {
     pub host: Option<String>,
 }
 
-pub async fn handle_default_account_commands(
+pub async fn handle_active_account_commands(
     ctx: &mut CliContext<'_>,
-    default_args: &DefaultAccountArgs,
+    active_args: &ActiveAccountArgs,
 ) -> Result<(), CliError> {
-    match &default_args.command {
-        DefaultAccountCommands::Get => {
-            let account = ctx.config.get_default_account();
+    match &active_args.command {
+        ActiveAccountCommands::Get => {
+            let account = ctx.config.get_active_account();
             let user_ref = account.map(|account| &account.user_ref);
             ctx.output(&user_ref, || match account {
                 Some(account) => println!("{account}"),
-                None => println!("No default account set."),
+                None => println!("No active account set."),
             })?;
         }
 
-        DefaultAccountCommands::Set(set_args) => {
+        ActiveAccountCommands::Set(set_args) => {
             let account = if let (Some(name), Some(host)) =
                 (&set_args.name, &set_args.host)
             {
@@ -94,10 +94,10 @@ pub async fn handle_default_account_commands(
                 tmp
             }
             .clone();
-            ctx.config.default_account = Some(account.user_ref.clone());
+            ctx.config.active_account = Some(account.user_ref.clone());
             ctx.config.save()?;
             ctx.output(&account.user_ref, || {
-                println!("Set default account: {account}")
+                println!("Set active account: {account}")
             })?;
         }
     }

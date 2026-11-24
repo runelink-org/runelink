@@ -4,19 +4,19 @@ use std::{collections::HashMap, fmt::Display};
 
 use crate::error::CliError;
 
-/// Returns the prefix for a list item given an optional default value
+/// Returns the prefix for a list item given an optional active value
 pub fn get_prefix<T: PartialEq>(
     val: T,
-    default: Option<T>,
+    active: Option<T>,
     len: usize,
 ) -> &'static str {
     if len == 1 {
         return "";
     }
-    let Some(default) = default else {
+    let Some(active) = active else {
         return "";
     };
-    if val == default { "* " } else { "  " }
+    if val == active { "* " } else { "  " }
 }
 
 pub fn group_memberships_by_host<'a>(
