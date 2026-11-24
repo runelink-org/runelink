@@ -1,7 +1,3 @@
-#![allow(dead_code)]
-#![allow(unused_variables)]
-#![allow(unreachable_code)]
-
 use runelink_client::requests;
 use runelink_types::server::{
     NewServer, NewServerMembership, ServerId, ServerRole,
@@ -32,7 +28,7 @@ pub enum ServerCommands {
     Get(ServerGetArg),
     /// Create a new server
     Create(ServerCreateArgs),
-    /// Create a new server
+    /// Join a server
     Join(ServerJoinArgs),
     /// Leave a server
     Leave(ServerLeaveArgs),
@@ -240,7 +236,7 @@ pub async fn handle_server_commands(
         }
 
         ServerCommands::Create(create_args) => {
-            let account = ctx.account.ok_or(CliError::MissingAccount)?;
+            ctx.account.ok_or(CliError::MissingAccount)?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
             let target_host = parse_optional_host_input(
@@ -335,9 +331,6 @@ pub async fn handle_server_commands(
                 )
                 .await?
             } else {
-                let host = target_host
-                    .as_deref()
-                    .unwrap_or(account.user_ref.host.as_str());
                 get_server_selection(
                     ctx,
                     ServerSelectionType::MemberOnly,
