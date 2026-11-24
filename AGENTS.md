@@ -20,3 +20,7 @@ Do not manually specify `rustup` or override toolchains unless explicitly instru
 ### Working Directory
 
 Always run commands from the repository root.
+
+### Using the CLI
+
+When running `rune`, set `RUNE_NON_INTERACTIVE=1` so missing input fails instead of waiting on a prompt, unless you are testing the interactive prompts. Also set `RUNE_JSON=1` by default to get parseable output.
