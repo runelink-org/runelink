@@ -84,21 +84,20 @@ rune --help
 Typical flow:
 
 ```bash
-# 1) Create an account on your home host (signup policy may change)
+# 1) Create an account on your home host and log in (signup policy may change)
 rune account create
 
-# 2) Log in (stores tokens locally)
-rune account login
-
-# 3) Create a server (workspace/community)
+# 2) Create a server (workspace/community)
 rune server create
 
-# 4) Create a channel
+# 3) Create a channel
 rune channel create
 
-# 5) Send a message
+# 4) Send a message
 rune message send
 ```
+
+To use an account you already have, run `rune login` instead of `rune account create`. `rune account status` shows the active account, and `rune account switch` changes it.
 
 Most commands will prompt you for any missing values (host, IDs, message body, etc.) so you can get started quickly. For scripting, pass the values as `--...` flags (run `rune --help` and `rune <command> --help`) and use `rune --non-interactive` to fail instead of prompting when one is missing. `rune account create` and `rune login` take `--password-stdin`. Add `--json` to print returned data as JSON on stdout; prompts and diagnostics go to stderr.
 
