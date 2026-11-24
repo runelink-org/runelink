@@ -31,8 +31,8 @@ pub enum CliError {
     MissingContext(String),
 
     #[error(
-        "No account selected. Pass --name and --host, or set a default with \
-         `rune account default set`."
+        "No account selected. Pass --name and --host, or set an active \
+         account with `rune account switch`."
     )]
     MissingAccount,
 

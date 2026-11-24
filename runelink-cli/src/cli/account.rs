@@ -20,8 +20,8 @@ use crate::{
 
 use super::{
     config::{
-        self, DefaultAccountArgs, DefaultAccountCommands,
-        handle_default_account_commands,
+        self, ActiveAccountArgs, ActiveAccountCommands,
+        handle_active_account_commands,
     },
     context::CliContext,
     select::select_inline,
@@ -47,9 +47,9 @@ pub enum AccountCommands {
     Status(StatusArgs),
     /// Delete an account (deletes the underlying user)
     Delete(DeleteAccountArgs),
-    /// Manage default account
-    Default(DefaultAccountArgs),
-    /// Switch the default account (alias for `account default set`)
+    /// Manage the active account
+    Active(ActiveAccountArgs),
+    /// Switch the active account (alias for `account active set`)
     Switch(config::NameAndHostArgs),
 }
 
@@ -116,7 +116,7 @@ pub struct DeleteAccountArgs {
 struct AccountListEntry<'a> {
     #[serde(flatten)]
     user_ref: &'a UserRef,
-    default: bool,
+    active: bool,
 }
 
 /// The local authentication state of an account, for `--json`.
@@ -163,7 +163,7 @@ fn read_user_ref(strict: bool) -> Result<UserRef, CliError> {
     parse_user_ref_input(&name, &host, strict)
 }
 
-/// Chooses the account to log in to when there is no default: a saved
+/// Chooses the account to log in to when there is no active account: a saved
 /// account, or another one entered at prompts.
 fn choose_login_account(ctx: &CliContext<'_>) -> Result<UserRef, CliError> {
     let accounts = &ctx.config.accounts;
@@ -197,12 +197,12 @@ pub async fn handle_account_commands(
     match command {
         AccountCommands::List => {
             let accounts = &ctx.config.accounts;
-            let default = ctx.config.default_account.as_ref();
+            let active = ctx.config.active_account.as_ref();
             let entries: Vec<_> = accounts
                 .iter()
                 .map(|account| AccountListEntry {
                     user_ref: &account.user_ref,
-                    default: default == Some(&account.user_ref),
+                    active: active == Some(&account.user_ref),
                 })
                 .collect();
             ctx.output(&entries, || {
@@ -212,7 +212,7 @@ pub async fn handle_account_commands(
                 for account in accounts {
                     let prefix = util::get_prefix(
                         &account.user_ref,
-                        default,
+                        active,
                         accounts.len(),
                     );
                     println!("{prefix}{account}");
@@ -328,7 +328,7 @@ pub async fn handle_account_commands(
                 };
                 ctx.login_with_password(&account_user_ref, password).await?;
             }
-            ctx.config.default_account = Some(account_user_ref.clone());
+            ctx.config.active_account = Some(account_user_ref.clone());
             ctx.config.save()?;
 
             let status = AccountStatus::new(
@@ -488,8 +488,8 @@ pub async fn handle_account_commands(
 
             ctx.auth_cache.remove(&user_ref);
             ctx.config.accounts.retain(|a| a.user_ref != user_ref);
-            if ctx.config.default_account.as_ref() == Some(&user_ref) {
-                ctx.config.default_account = None;
+            if ctx.config.active_account.as_ref() == Some(&user_ref) {
+                ctx.config.active_account = None;
             }
             ctx.config.save()?;
             ctx.auth_cache.save()?;
@@ -497,15 +497,15 @@ pub async fn handle_account_commands(
             ctx.message(format!("Deleted account/user: {user_ref}"));
         }
 
-        AccountCommands::Default(default_args) => {
-            handle_default_account_commands(ctx, default_args).await?;
+        AccountCommands::Active(active_args) => {
+            handle_active_account_commands(ctx, active_args).await?;
         }
 
         AccountCommands::Switch(switch_args) => {
-            let default_args = DefaultAccountArgs {
-                command: DefaultAccountCommands::Set(switch_args.clone()),
+            let active_args = ActiveAccountArgs {
+                command: ActiveAccountCommands::Set(switch_args.clone()),
             };
-            handle_default_account_commands(ctx, &default_args).await?;
+            handle_active_account_commands(ctx, &active_args).await?;
         }
     }
     Ok(())

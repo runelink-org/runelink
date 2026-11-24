@@ -109,7 +109,7 @@ pub async fn handle_cli(
             let user_ref = parse_user_ref_input(name, host, cli.strict_input)?;
             config.get_account_config(user_ref).cloned()
         }
-        _ => config.get_default_account().cloned(),
+        _ => config.get_active_account().cloned(),
     };
     let mut ctx_owned = CliContext {
         client,

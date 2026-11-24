@@ -18,7 +18,9 @@ const CONFIG_FILENAME: &str = "config.json";
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct AppConfig {
-    pub default_account: Option<UserRef>,
+    /// Read from `default_account` in configs saved before the rename
+    #[serde(alias = "default_account")]
+    pub active_account: Option<UserRef>,
     pub default_server: Option<Uuid>,
     pub accounts: Vec<AccountConfig>,
     #[serde(default)]
@@ -60,14 +62,14 @@ impl AppConfig {
         save_data(self, CONFIG_FILENAME)
     }
 
-    pub fn get_default_account(&self) -> Option<&AccountConfig> {
-        self.default_account.as_ref().and_then(|user_ref| {
+    pub fn get_active_account(&self) -> Option<&AccountConfig> {
+        self.active_account.as_ref().and_then(|user_ref| {
             self.accounts.iter().find(|ac| ac.user_ref == *user_ref)
         })
     }
 
-    pub fn get_default_account_mut(&mut self) -> Option<&mut AccountConfig> {
-        let user_ref = self.default_account.clone()?;
+    pub fn get_active_account_mut(&mut self) -> Option<&mut AccountConfig> {
+        let user_ref = self.active_account.clone()?;
         self.accounts.iter_mut().find(|ac| ac.user_ref == user_ref)
     }
 
@@ -96,7 +98,7 @@ impl AppConfig {
             &mut self.accounts[idx]
         } else {
             if self.accounts.is_empty() {
-                self.default_account = Some(user_ref.clone());
+                self.active_account = Some(user_ref.clone());
             }
             self.accounts.push(AccountConfig { user_ref });
             self.accounts.last_mut().unwrap()
