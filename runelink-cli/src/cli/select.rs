@@ -58,11 +58,11 @@ where
         items.iter().position(&selectable),
         items.iter().rposition(&selectable),
     ) else {
-        println!("(no items to select)");
+        eprintln!("(no items to select)");
         return Ok(None);
     };
-    let mut stdout = std::io::stdout();
-    let draw = |stdout: &mut std::io::Stdout, selected: usize| {
+    let mut stderr = std::io::stderr();
+    let draw = |stderr: &mut std::io::Stderr, selected: usize| {
         for (i, item) in items.iter().enumerate() {
             let prefix = if i == selected { "> " } else { "  " };
             let row = indented(depth(item), display(item));
@@ -72,24 +72,24 @@ where
                 row.dim()
             };
             execute!(
-                stdout,
+                stderr,
                 Clear(ClearType::CurrentLine),
                 MoveToColumn(0),
                 Print(format!("{prefix}{row}\n"))
             )?;
         }
-        stdout.flush()
+        stderr.flush()
     };
 
     enable_raw_mode()?;
     execute!(
-        stdout,
+        stderr,
         Hide,
         MoveToColumn(0),
         Print(format!("{}\n", prompt))
     )?;
     let mut selected = first;
-    draw(&mut stdout, selected)?;
+    draw(&mut stderr, selected)?;
     loop {
         if let Event::Key(KeyEvent {
             kind: KeyEventKind::Press,
@@ -101,31 +101,31 @@ where
             match (code, modifiers) {
                 // Ctrl-C - propagate as Interrupted
                 (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                    execute!(stdout, MoveToColumn(0))?;
+                    execute!(stderr, MoveToColumn(0))?;
                     disable_raw_mode()?;
-                    execute!(stdout, Show)?;
+                    execute!(stderr, Show)?;
                     panic!("Interrupted by Ctrl-C");
                 }
                 // Esc or 'q' - cancel
                 (KeyCode::Esc, _) | (KeyCode::Char('q'), _) => {
-                    execute!(stdout, MoveToColumn(0))?;
+                    execute!(stderr, MoveToColumn(0))?;
                     disable_raw_mode()?;
-                    execute!(stdout, Show)?;
+                    execute!(stderr, Show)?;
                     return Ok(None);
                 }
                 // Enter - confirm
                 (KeyCode::Enter, _) => {
                     execute!(
-                        stdout,
+                        stderr,
                         MoveUp(items.len() as u16),
                         MoveToColumn(0),
                         Clear(ClearType::FromCursorDown),
                         Print(format!("> {}\n", display(&items[selected]))),
                         MoveToColumn(0),
                     )?;
-                    stdout.flush()?;
+                    stderr.flush()?;
                     disable_raw_mode()?;
-                    execute!(stdout, Show)?;
+                    execute!(stderr, Show)?;
                     return Ok(Some(&items[selected]));
                 }
                 // Up or 'k'
@@ -157,8 +157,8 @@ where
             }
 
             // Redraw the list in place
-            execute!(stdout, MoveUp(items.len() as u16))?;
-            draw(&mut stdout, selected)?;
+            execute!(stderr, MoveUp(items.len() as u16))?;
+            draw(&mut stderr, selected)?;
         }
     }
 }
@@ -241,7 +241,7 @@ pub async fn get_server_selection(
     let server =
         select_inline(&servers, "Select server", flags, Server::to_string)?
             .ok_or(CliError::Cancellation)?;
-    println!();
+    eprintln!();
     Ok(server.clone())
 }
 
@@ -325,7 +325,7 @@ pub async fn get_channel_selection(
         |(_, c)| c.to_string(),
     )?
     .ok_or(CliError::Cancellation)?;
-    println!();
+    eprintln!();
     Ok(ChannelSelection {
         host: server_host.to_string(),
         channel: (*channel).clone(),

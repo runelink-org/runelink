@@ -3,7 +3,9 @@ use runelink_client::{
     requests,
     util::{pad_host, strip_default_port},
 };
-use runelink_types::SignupRequest;
+use runelink_types::{SignupRequest, UserRef};
+use serde::Serialize;
+use time::OffsetDateTime;
 
 use crate::{
     cli::input::{
@@ -12,6 +14,7 @@ use crate::{
     },
     error::CliError,
     storage::{AccountConfig, resolve_api_url},
+    storage_auth::AccountAuth,
     util::{
         self, parse_host_input, parse_user_ref_input, parse_username_input,
     },
@@ -110,24 +113,70 @@ pub struct DeleteAccountArgs {
     pub dangerously_confirm_delete: Option<String>,
 }
 
+/// An account in `account list --json`.
+#[derive(Serialize)]
+struct AccountListEntry<'a> {
+    #[serde(flatten)]
+    user_ref: &'a UserRef,
+    default: bool,
+}
+
+/// The local authentication state of an account, for `--json`.
+#[derive(Serialize)]
+struct AccountStatus<'a> {
+    #[serde(flatten)]
+    user_ref: &'a UserRef,
+    /// Whether a refresh token is stored locally. The host may still reject
+    /// it.
+    authenticated: bool,
+    #[serde(with = "time::serde::rfc3339::option")]
+    access_token_expires_at: Option<OffsetDateTime>,
+    client_id: Option<&'a str>,
+    scope: Option<&'a str>,
+}
+
+impl<'a> AccountStatus<'a> {
+    fn new(user_ref: &'a UserRef, auth: Option<&'a AccountAuth>) -> Self {
+        Self {
+            user_ref,
+            authenticated: auth.is_some(),
+            access_token_expires_at: auth
+                .and_then(|auth| auth.expires_at)
+                .and_then(|t| OffsetDateTime::from_unix_timestamp(t).ok()),
+            client_id: auth.and_then(|auth| auth.client_id.as_deref()),
+            scope: auth.and_then(|auth| auth.scope.as_deref()),
+        }
+    }
+}
+
 pub async fn handle_account_commands(
     ctx: &mut CliContext<'_>,
     command: &AccountCommands,
 ) -> Result<(), CliError> {
     match command {
         AccountCommands::List => {
-            if ctx.config.accounts.is_empty() {
-                println!("No accounts.");
-                return Ok(());
-            }
-            for account in ctx.config.accounts.iter() {
-                let prefix = util::get_prefix(
-                    &account.user_ref,
-                    ctx.config.default_account.as_ref(),
-                    ctx.config.accounts.len(),
-                );
-                println!("{prefix}{account}");
-            }
+            let accounts = &ctx.config.accounts;
+            let default = ctx.config.default_account.as_ref();
+            let entries: Vec<_> = accounts
+                .iter()
+                .map(|account| AccountListEntry {
+                    user_ref: &account.user_ref,
+                    default: default == Some(&account.user_ref),
+                })
+                .collect();
+            ctx.output(&entries, || {
+                if accounts.is_empty() {
+                    println!("No accounts.");
+                }
+                for account in accounts {
+                    let prefix = util::get_prefix(
+                        &account.user_ref,
+                        default,
+                        accounts.len(),
+                    );
+                    println!("{prefix}{account}");
+                }
+            })?;
         }
 
         AccountCommands::Create(create_args) => {
@@ -179,7 +228,7 @@ pub async fn handle_account_commands(
                     })?;
             ctx.config.get_or_create_account_config(user.as_ref());
             ctx.config.save()?;
-            println!("Created account: {user}");
+            ctx.output(&user, || println!("Created account: {user}"))?;
         }
 
         AccountCommands::Login(login_args) => {
@@ -230,30 +279,35 @@ pub async fn handle_account_commands(
             let account_display = account.to_string();
 
             // An explicit password replaces credentials that may be stale
-            if !login_args.password_stdin
-                && ctx.auth_cache.has_auth(&account_user_ref)
-            {
-                println!("Already logged in: {account_display}");
-                return Ok(());
+            let already_logged_in = !login_args.password_stdin
+                && ctx.auth_cache.has_auth(&account_user_ref);
+            if !already_logged_in {
+                if explicit_account {
+                    eprintln!("Logging in to {account_display}");
+                } else {
+                    eprintln!(
+                        "Logging in to {account_display} \
+                         (use --name and --host to change)"
+                    );
+                }
+                let password = if login_args.password_stdin {
+                    Some(read_password_stdin()?)
+                } else {
+                    None
+                };
+                ctx.login_with_password(&account_user_ref, password).await?;
             }
 
-            if explicit_account {
-                println!("Logging in to {account_display}");
+            let status = AccountStatus::new(
+                &account_user_ref,
+                ctx.auth_cache.get(&account_user_ref),
+            );
+            let message = if already_logged_in {
+                "Already logged in"
             } else {
-                println!(
-                    "Logging in to {account_display} \
-                     (use --name and --host to change)"
-                );
-            }
-
-            let password = if login_args.password_stdin {
-                Some(read_password_stdin()?)
-            } else {
-                None
+                "Logged in successfully"
             };
-            ctx.login_with_password(&account_user_ref, password).await?;
-
-            println!("Logged in successfully: {account_display}");
+            ctx.output(&status, || println!("{message}: {account_display}"))?;
         }
 
         AccountCommands::Logout(logout_args) => {
@@ -269,12 +323,15 @@ pub async fn handle_account_commands(
                 ctx.account.ok_or(CliError::MissingAccount)?
             };
 
-            if ctx.auth_cache.remove(&account.user_ref).is_some() {
+            let message = if ctx.auth_cache.remove(&account.user_ref).is_some()
+            {
                 ctx.auth_cache.save()?;
-                println!("Logged out successfully: {account}");
+                "Logged out successfully"
             } else {
-                println!("Not logged in: {account}");
-            }
+                "Not logged in"
+            };
+            let status = AccountStatus::new(&account.user_ref, None);
+            ctx.output(&status, || println!("{message}: {account}"))?;
         }
 
         AccountCommands::Status(status_args) => {
@@ -290,38 +347,33 @@ pub async fn handle_account_commands(
                 ctx.account.ok_or(CliError::MissingAccount)?
             };
 
-            if let Some(auth) = ctx.auth_cache.get(&account.user_ref) {
+            let status = AccountStatus::new(
+                &account.user_ref,
+                ctx.auth_cache.get(&account.user_ref),
+            );
+            ctx.output(&status, || {
                 println!("Account: {account}");
+                if !status.authenticated {
+                    println!("  Authenticated: No");
+                    return;
+                }
                 println!("  Authenticated: Yes");
-                if let Some(expires_at) = auth.expires_at {
-                    let expires =
-                        time::OffsetDateTime::from_unix_timestamp(expires_at)
-                            .unwrap_or_else(|_| {
-                                time::OffsetDateTime::now_utc()
-                            });
-                    let now = time::OffsetDateTime::now_utc();
-                    if expires > now {
-                        let remaining = expires - now;
-                        println!(
-                            "  Access token expires in: {} seconds",
-                            remaining.whole_seconds()
-                        );
-                    } else {
-                        println!("  Access token: Expired");
-                    }
-                } else {
-                    println!("  Access token: Not cached");
+                let now = OffsetDateTime::now_utc();
+                match status.access_token_expires_at {
+                    Some(expires) if expires > now => println!(
+                        "  Access token expires in: {} seconds",
+                        (expires - now).whole_seconds()
+                    ),
+                    Some(_) => println!("  Access token: Expired"),
+                    None => println!("  Access token: Not cached"),
                 }
-                if let Some(ref client_id) = auth.client_id {
-                    println!("  Client ID: {}", client_id);
+                if let Some(client_id) = status.client_id {
+                    println!("  Client ID: {client_id}");
                 }
-                if let Some(ref scope) = auth.scope {
-                    println!("  Scope: {}", scope);
+                if let Some(scope) = status.scope {
+                    println!("  Scope: {scope}");
                 }
-            } else {
-                println!("Account: {account}");
-                println!("  Authenticated: No");
-            }
+            })?;
         }
 
         AccountCommands::Delete(delete_args) => {
@@ -348,7 +400,7 @@ pub async fn handle_account_commands(
                     AccountConfig::to_string,
                 )?
                 .ok_or(CliError::Cancellation)?;
-                println!();
+                eprintln!();
                 account.user_ref.clone()
             };
 
@@ -372,7 +424,7 @@ pub async fn handle_account_commands(
                     accepted[0]
                 )));
             } else {
-                println!(
+                eprintln!(
                     "This permanently deletes the account {user_ref} on its home host."
                 );
                 let input = read_input_preserving_whitespace(&format!(
@@ -409,7 +461,7 @@ pub async fn handle_account_commands(
             ctx.config.save()?;
             ctx.auth_cache.save()?;
 
-            println!("Deleted account/user: {}", user_ref);
+            ctx.message(format!("Deleted account/user: {user_ref}"));
         }
 
         AccountCommands::Default(default_args) => {
@@ -424,4 +476,49 @@ pub async fn handle_account_commands(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn alice() -> UserRef {
+        UserRef::new("alice".into(), "localhost".into())
+    }
+
+    #[test]
+    fn account_status_json() {
+        let user_ref = alice();
+        let auth = AccountAuth {
+            refresh_token: "refresh".into(),
+            access_token: Some("access".into()),
+            expires_at: Some(1_800_000_000),
+            client_id: Some("client".into()),
+            scope: None,
+        };
+        assert_eq!(
+            serde_json::to_value(AccountStatus::new(&user_ref, Some(&auth)))
+                .unwrap(),
+            json!({
+                "name": "alice",
+                "host": "localhost",
+                "authenticated": true,
+                "access_token_expires_at": "2027-01-15T08:00:00Z",
+                "client_id": "client",
+                "scope": null,
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(AccountStatus::new(&user_ref, None)).unwrap(),
+            json!({
+                "name": "alice",
+                "host": "localhost",
+                "authenticated": false,
+                "access_token_expires_at": null,
+                "client_id": null,
+                "scope": null,
+            })
+        );
+    }
 }

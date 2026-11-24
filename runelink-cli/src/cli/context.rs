@@ -1,6 +1,8 @@
 use reqwest::{Client, StatusCode};
 use runelink_client::requests;
 use runelink_types::UserRef;
+use serde::Serialize;
+use std::io::{ErrorKind, Write};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -17,9 +19,40 @@ pub struct CliContext<'a> {
     pub auth_cache: &'a mut AuthCache,
     pub account: Option<&'a AccountConfig>,
     pub strict_input: bool,
+    /// Print returned data as JSON, and nothing else, on stdout
+    pub json: bool,
 }
 
 impl<'a> CliContext<'a> {
+    /// Prints `value` as JSON with `--json`, or otherwise runs `human` to
+    /// print it as text.
+    pub fn output(
+        &self,
+        value: &impl Serialize,
+        human: impl FnOnce(),
+    ) -> Result<(), CliError> {
+        if self.json {
+            let json = serde_json::to_string_pretty(value)?;
+            // A reader such as `head` may close the pipe early
+            if let Err(e) = writeln!(std::io::stdout().lock(), "{json}")
+                && e.kind() != ErrorKind::BrokenPipe
+            {
+                return Err(e.into());
+            }
+        } else {
+            human();
+        }
+        Ok(())
+    }
+
+    /// Prints a message that has no JSON form, such as a confirmation,
+    /// unless `--json` is set.
+    pub fn message(&self, message: impl std::fmt::Display) {
+        if !self.json {
+            println!("{message}");
+        }
+    }
+
     pub async fn home_api_url(&mut self) -> Result<String, CliError> {
         let host = self.account.try_get_host()?.to_string();
         resolve_api_url(self.client, self.config, &host).await

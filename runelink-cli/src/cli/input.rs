@@ -66,15 +66,15 @@ fn read_input_internal(prompt: &str, trim: bool) -> io::Result<Option<String>> {
     if is_non_interactive() {
         return Ok(None);
     }
-    let mut stdout = io::stdout();
+    let mut stderr = io::stderr();
     let stdin = io::stdin();
 
-    stdout.write_all(prompt.as_bytes())?;
-    stdout.flush()?;
+    stderr.write_all(prompt.as_bytes())?;
+    stderr.flush()?;
 
     let mut buf = String::new();
     stdin.read_line(&mut buf)?;
-    println!();
+    eprintln!();
 
     let raw = buf.trim_end_matches(['\n', '\r']);
 

@@ -74,7 +74,7 @@ fn select_parent(
         },
     )?
     .ok_or(CliError::Cancellation)?;
-    println!();
+    eprintln!();
     Ok(parent.map(|c| c.id))
 }
 
@@ -240,7 +240,7 @@ pub async fn handle_channel_commands(
                 target_host.as_deref(),
             )
             .await?;
-            println!("Updated channel: {resource}");
+            ctx.output(&resource, || println!("Updated channel: {resource}"))?;
         }
 
         ChannelCommands::List(list_args) => {
@@ -294,22 +294,29 @@ pub async fn handle_channel_commands(
                     .await?
                 }
             };
-            if channels.is_empty() {
-                println!(
-                    "No channels available.\n\
-                    For more information, try `rune channel --help`."
-                )
-            }
-            for (depth, channel) in tree_order(&channels) {
-                let mut label =
-                    list_label(indented(depth, channel), channel.id, show_ids);
-                if list_args.show_raw_ids
-                    && let Some(raw_id) = channel.raw_id()
-                {
-                    label = format!("{label} [{raw_id}]");
+            let ordered = tree_order(&channels);
+            let flat: Vec<_> = ordered.iter().map(|(_, c)| c).collect();
+            ctx.output(&flat, || {
+                if channels.is_empty() {
+                    println!(
+                        "No channels available.\n\
+                        For more information, try `rune channel --help`."
+                    )
                 }
-                println!("{label}");
-            }
+                for (depth, channel) in &ordered {
+                    let mut label = list_label(
+                        indented(*depth, channel),
+                        channel.id,
+                        show_ids,
+                    );
+                    if list_args.show_raw_ids
+                        && let Some(raw_id) = channel.raw_id()
+                    {
+                        label = format!("{label} [{raw_id}]");
+                    }
+                    println!("{label}");
+                }
+            })?;
         }
 
         ChannelCommands::Get(get_args) => {
@@ -328,7 +335,7 @@ pub async fn handle_channel_commands(
                 target_host.as_deref(),
             )
             .await?;
-            println!("{}", channel.verbose());
+            ctx.output(&channel, || println!("{}", channel.verbose()))?;
         }
 
         ChannelCommands::Create(create_args) => {
@@ -395,7 +402,7 @@ pub async fn handle_channel_commands(
                         },
                     )?
                     .ok_or(CliError::Cancellation)?;
-                    println!();
+                    eprintln!();
                     kind
                 }
             };
@@ -430,11 +437,13 @@ pub async fn handle_channel_commands(
                 target_host,
             )
             .await?;
-            println!(
-                "Created {}: {}",
-                label(channel.kind()).to_lowercase(),
-                channel.verbose()
-            );
+            ctx.output(&channel, || {
+                println!(
+                    "Created {}: {}",
+                    label(channel.kind()).to_lowercase(),
+                    channel.verbose()
+                )
+            })?;
         }
 
         ChannelCommands::Delete(delete_args) => {
@@ -463,11 +472,11 @@ pub async fn handle_channel_commands(
                 Some(&selection.host),
             )
             .await?;
-            println!(
+            ctx.message(format!(
                 "Deleted {}: {}",
                 label(channel.kind()).to_lowercase(),
                 channel.verbose()
-            );
+            ));
         }
 
         ChannelCommands::Move(move_args) => {
@@ -524,19 +533,21 @@ pub async fn handle_channel_commands(
                 Some(&selection.host),
             )
             .await?;
-            if changed.is_empty() {
-                println!(
-                    "{} already in place: {}",
-                    label(channel.kind()),
-                    channel.verbose()
-                );
-            } else {
-                println!(
-                    "Moved {}: {}",
-                    label(channel.kind()).to_lowercase(),
-                    channel.verbose()
-                );
-            }
+            ctx.output(&changed, || {
+                if changed.is_empty() {
+                    println!(
+                        "{} already in place: {}",
+                        label(channel.kind()),
+                        channel.verbose()
+                    );
+                } else {
+                    println!(
+                        "Moved {}: {}",
+                        label(channel.kind()).to_lowercase(),
+                        channel.verbose()
+                    );
+                }
+            })?;
         }
     };
     Ok(())

@@ -36,16 +36,19 @@ pub struct Cli {
     #[clap(long, requires = "name")]
     pub host: Option<String>,
     /// Disable automatic identity input normalization and fail on non-canonical values
-    #[clap(long)]
+    #[clap(long, global = true)]
     pub strict_input: bool,
     /// Fail instead of prompting when input is missing, for scripts
-    #[clap(long)]
+    #[clap(long, global = true)]
     pub non_interactive: bool,
+    /// Print returned data as JSON instead of human-readable text
+    #[clap(long, global = true)]
+    pub json: bool,
     /// Allow and remember unencrypted HTTP for a host when HTTPS is unavailable, without prompting (repeatable)
-    #[clap(long, value_name = "HOST")]
+    #[clap(long, value_name = "HOST", global = true)]
     pub dangerously_allow_http: Vec<String>,
     /// Increase logging verbosity (-v, -vv, -vvv)
-    #[arg(short, long, action = clap::ArgAction::Count)]
+    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     verbose: u8,
 }
 
@@ -114,6 +117,7 @@ pub async fn handle_cli(
         auth_cache,
         account: account_owned.as_ref(),
         strict_input: cli.strict_input,
+        json: cli.json,
     };
     let ctx = &mut ctx_owned;
 
@@ -156,4 +160,14 @@ pub async fn handle_cli(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_definition_is_valid() {
+        Cli::command().debug_assert();
+    }
 }
