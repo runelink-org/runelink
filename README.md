@@ -99,7 +99,7 @@ rune message send
 
 To use an account you already have, run `rune login` instead of `rune account create`. `rune account status` shows the active account, and `rune account switch` changes it.
 
-Most commands will prompt you for any missing values (host, IDs, message body, etc.) so you can get started quickly. For scripting, pass the values as `--...` flags (run `rune --help` and `rune <command> --help`) and use `rune --non-interactive` to fail instead of prompting when one is missing. `rune account create` and `rune login` take `--password-stdin`. Add `--json` to print returned data as JSON on stdout; prompts and diagnostics go to stderr.
+Most commands will prompt you for any missing values (host, IDs, message body, etc.) so you can get started quickly. For scripting, pass the values as `--...` flags (run `rune --help` and `rune <command> --help`) and use `rune --non-interactive` to fail instead of prompting when one is missing. `rune account create` and `rune login` take `--password-stdin`. Add `--json` to print returned data as JSON on stdout; prompts and diagnostics go to stderr. `RUNE_NON_INTERACTIVE=1` and `RUNE_JSON=1` set these flags from the environment.
 
 The CLI tries HTTPS first. If only HTTP is reachable, it asks before sending credentials and remembers your approval for that host and port in `config.json`. This includes local development hosts. Existing automatically saved HTTP preferences require confirmation once. Non-interactive commands fail until HTTP has been approved in a terminal or with `rune --dangerously-allow-http <HOST>`. Redirects cannot change the host, port, or protocol.
 

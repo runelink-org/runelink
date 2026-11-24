@@ -1,4 +1,4 @@
-use clap::CommandFactory;
+use clap::{CommandFactory, builder::FalseyValueParser};
 use clap_complete::Shell;
 use context::CliContext;
 use log::LevelFilter;
@@ -38,10 +38,10 @@ pub struct Cli {
     #[clap(long, global = true)]
     pub strict_input: bool,
     /// Fail instead of prompting when input is missing, for scripts
-    #[clap(long, global = true)]
+    #[clap(long, global = true, env = "RUNE_NON_INTERACTIVE", action = clap::ArgAction::SetTrue, value_parser = FalseyValueParser::new())]
     pub non_interactive: bool,
     /// Print returned data as JSON instead of human-readable text
-    #[clap(long, global = true)]
+    #[clap(long, global = true, env = "RUNE_JSON", action = clap::ArgAction::SetTrue, value_parser = FalseyValueParser::new())]
     pub json: bool,
     /// Allow and remember unencrypted HTTP for a host when HTTPS is unavailable, without prompting (repeatable)
     #[clap(long, value_name = "HOST", global = true)]

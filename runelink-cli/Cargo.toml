@@ -18,7 +18,7 @@ thiserror = "2.0.21"
 time = { version = "0.3.55", features = ["serde", "formatting", "parsing"] }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros"] }
 uuid = { version = "1.29.0", features = ["v4", "serde"] }
-clap = { version = "4.6.7", features = ["derive"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
 clap_complete = "4.6.11"
 directories = "6.0.0"
 crossterm = "0.29.0"
