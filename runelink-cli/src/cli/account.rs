@@ -15,9 +15,7 @@ use crate::{
     error::CliError,
     storage::{AccountConfig, resolve_api_url},
     storage_auth::AccountAuth,
-    util::{
-        self, parse_host_input, parse_user_ref_input, parse_username_input,
-    },
+    util::{self, parse_user_ref_input},
 };
 
 use super::{
@@ -149,6 +147,49 @@ impl<'a> AccountStatus<'a> {
     }
 }
 
+/// Prompts for the host and name of an account. With `--non-interactive`,
+/// fails naming the flags that would provide them instead.
+fn read_user_ref(strict: bool) -> Result<UserRef, CliError> {
+    if is_non_interactive() {
+        return Err(missing_argument("--name and --host"));
+    }
+    let read = |prompt: &str, field: &str| {
+        read_input_preserving_whitespace(prompt)?.ok_or_else(|| {
+            CliError::InvalidArgument(format!("{field} is required."))
+        })
+    };
+    let host = read("Host: ", "Host")?;
+    let name = read("Name: ", "Name")?;
+    parse_user_ref_input(&name, &host, strict)
+}
+
+/// Chooses the account to log in to when there is no default: a saved
+/// account, or another one entered at prompts.
+fn choose_login_account(ctx: &CliContext<'_>) -> Result<UserRef, CliError> {
+    let accounts = &ctx.config.accounts;
+    if accounts.is_empty() {
+        return read_user_ref(ctx.strict_input);
+    }
+    let flags = "--name and --host";
+    let choices = ["Saved account", "Another account"];
+    let choice =
+        select_inline(&choices, "Log in to", flags, |c| c.to_string())?
+            .ok_or(CliError::Cancellation)?;
+    eprintln!();
+    if *choice == choices[1] {
+        return read_user_ref(ctx.strict_input);
+    }
+    let account = select_inline(
+        accounts,
+        "Select account",
+        flags,
+        AccountConfig::to_string,
+    )?
+    .ok_or(CliError::Cancellation)?;
+    eprintln!();
+    Ok(account.user_ref.clone())
+}
+
 pub async fn handle_account_commands(
     ctx: &mut CliContext<'_>,
     command: &AccountCommands,
@@ -180,25 +221,13 @@ pub async fn handle_account_commands(
         }
 
         AccountCommands::Create(create_args) => {
-            if is_non_interactive() && create_args.host.is_none() {
-                return Err(missing_argument("--name and --host"));
-            }
-            let raw_host = match &create_args.host {
-                Some(host) => host.clone(),
-                None => read_input_preserving_whitespace("Host: ")?
-                    .ok_or_else(|| {
-                        CliError::InvalidArgument("Host is required.".into())
-                    })?,
-            };
-            let raw_name = match &create_args.name {
-                Some(name) => name.clone(),
-                None => read_input_preserving_whitespace("Name: ")?
-                    .ok_or_else(|| {
-                        CliError::InvalidArgument("Name is required.".into())
-                    })?,
-            };
-            let host = parse_host_input(&raw_host, ctx.strict_input)?;
-            let name = parse_username_input(&raw_name, ctx.strict_input)?;
+            let UserRef { name, host } =
+                match (&create_args.name, &create_args.host) {
+                    (Some(name), Some(host)) => {
+                        parse_user_ref_input(name, host, ctx.strict_input)?
+                    }
+                    _ => read_user_ref(ctx.strict_input)?,
+                };
             let api_url =
                 resolve_api_url(ctx.client, ctx.config, &host).await?;
             let password = if create_args.password_stdin {
@@ -233,13 +262,15 @@ pub async fn handle_account_commands(
 
         AccountCommands::Login(login_args) => {
             // Get or discover account
-            let explicit_account =
-                login_args.name.is_some() && login_args.host.is_some();
-            let account = if let (Some(name), Some(host)) =
-                (&login_args.name, &login_args.host)
-            {
-                let user_ref =
-                    parse_user_ref_input(name, host, ctx.strict_input)?;
+            let user_ref = match (&login_args.name, &login_args.host) {
+                (Some(name), Some(host)) => {
+                    Some(parse_user_ref_input(name, host, ctx.strict_input)?)
+                }
+                _ if ctx.account.is_none() => Some(choose_login_account(ctx)?),
+                _ => None,
+            };
+            let explicit_account = user_ref.is_some();
+            let account = if let Some(user_ref) = user_ref {
                 // Try to find existing account in config
                 if let Some(acc) =
                     ctx.config.get_account_config(user_ref.clone())
@@ -297,6 +328,8 @@ pub async fn handle_account_commands(
                 };
                 ctx.login_with_password(&account_user_ref, password).await?;
             }
+            ctx.config.default_account = Some(account_user_ref.clone());
+            ctx.config.save()?;
 
             let status = AccountStatus::new(
                 &account_user_ref,
