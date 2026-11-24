@@ -83,6 +83,12 @@ pub struct LoginArgs {
     /// active account.
     #[clap(long)]
     pub switch: bool,
+    /// Prompt for the host and name of an account that isn't saved yet
+    #[clap(long, conflicts_with_all = ["name", "host", "existing"])]
+    pub new: bool,
+    /// Select a saved account, even when there is an active account
+    #[clap(long, conflicts_with_all = ["name", "host"])]
+    pub existing: bool,
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -177,23 +183,33 @@ fn read_user_ref(strict: bool) -> Result<UserRef, CliError> {
 /// Chooses the account to log in to when there is no active account: a saved
 /// account, or another one entered at prompts.
 fn choose_login_account(ctx: &CliContext<'_>) -> Result<UserRef, CliError> {
-    let accounts = &ctx.config.accounts;
-    if accounts.is_empty() {
+    if ctx.config.accounts.is_empty() {
         return read_user_ref(ctx.strict_input);
     }
-    let flags = "--name and --host";
     let choices = ["Saved account", "Another account"];
     let choice =
-        select_inline(&choices, "Log in to", flags, |c| c.to_string())?
-            .ok_or(CliError::Cancellation)?;
+        select_inline(&choices, "Log in to", "--name and --host", |c| {
+            c.to_string()
+        })?
+        .ok_or(CliError::Cancellation)?;
     eprintln!();
     if *choice == choices[1] {
         return read_user_ref(ctx.strict_input);
     }
+    select_saved_account(ctx)
+}
+
+/// Prompts for one of the saved accounts.
+fn select_saved_account(ctx: &CliContext<'_>) -> Result<UserRef, CliError> {
+    if ctx.config.accounts.is_empty() {
+        return Err(CliError::InvalidArgument(
+            "No accounts in local config.".into(),
+        ));
+    }
     let account = select_inline(
-        accounts,
+        &ctx.config.accounts,
         "Select account",
-        flags,
+        "--name and --host",
         AccountConfig::to_string,
     )?
     .ok_or(CliError::Cancellation)?;
@@ -295,6 +311,8 @@ pub async fn handle_account_commands(
                 (Some(name), Some(host)) => {
                     Some(parse_user_ref_input(name, host, ctx.strict_input)?)
                 }
+                _ if login_args.new => Some(read_user_ref(ctx.strict_input)?),
+                _ if login_args.existing => Some(select_saved_account(ctx)?),
                 _ if ctx.account.is_none() => Some(choose_login_account(ctx)?),
                 _ => None,
             };
@@ -549,20 +567,7 @@ pub async fn handle_account_commands(
                     .ok_or_else(|| CliError::account_not_found(&user_ref))?;
                 user_ref
             } else {
-                if ctx.config.accounts.is_empty() {
-                    return Err(CliError::InvalidArgument(
-                        "No accounts in local config.".into(),
-                    ));
-                }
-                let account = select_inline(
-                    &ctx.config.accounts,
-                    "Select account",
-                    "--name and --host",
-                    AccountConfig::to_string,
-                )?
-                .ok_or(CliError::Cancellation)?;
-                eprintln!();
-                account.user_ref.clone()
+                select_saved_account(ctx)?
             };
             ctx.config.active_account = Some(user_ref.clone());
             ctx.config.save()?;
