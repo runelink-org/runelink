@@ -252,7 +252,10 @@ pub async fn handle_account_commands(
                 })?
             };
             let user_display = format!("{name}@{host}");
-            let signup_req = SignupRequest { name, password };
+            let signup_req = SignupRequest {
+                name,
+                password: password.clone(),
+            };
             let user =
                 requests::auth::signup(ctx.client, &api_url, &signup_req)
                     .await
@@ -265,9 +268,25 @@ pub async fn handle_account_commands(
                         )),
                         error => error.into(),
                     })?;
-            ctx.config.get_or_create_account_config(user.as_ref());
+            let user_ref = user.as_ref();
+            ctx.config.get_or_create_account_config(user_ref.clone());
+            if ctx.config.accounts.len() == 1 {
+                ctx.config.active_account = Some(user_ref.clone());
+            }
             ctx.config.save()?;
-            ctx.output(&user, || println!("Created account: {user}"))?;
+            if let Err(error) =
+                ctx.login_with_password(&user_ref, Some(password)).await
+            {
+                eprintln!(
+                    "Created account: {user}, but logging in failed. Run \
+                     `rune login --name {} --host {}` to retry.",
+                    user_ref.name, user_ref.host
+                );
+                return Err(error);
+            }
+            ctx.output(&user, || {
+                println!("Created account and logged in: {user}")
+            })?;
         }
 
         AccountCommands::Login(login_args) => {
