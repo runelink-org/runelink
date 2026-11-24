@@ -18,14 +18,7 @@ use crate::{
     util::{self, parse_user_ref_input},
 };
 
-use super::{
-    config::{
-        self, ActiveAccountArgs, ActiveAccountCommands,
-        handle_active_account_commands,
-    },
-    context::CliContext,
-    select::select_inline,
-};
+use super::{context::CliContext, select::select_inline};
 
 #[derive(clap::Args, Debug)]
 pub struct AccountArgs {
@@ -43,14 +36,22 @@ pub enum AccountCommands {
     Login(LoginArgs),
     /// Logout from an account (remove authentication tokens)
     Logout(LogoutArgs),
-    /// Show authentication status for an account
+    /// Show the active account, or another one, and its login status
     Status(StatusArgs),
     /// Delete an account (deletes the underlying user)
     Delete(DeleteAccountArgs),
-    /// Manage the active account
-    Active(ActiveAccountArgs),
-    /// Switch the active account (alias for `account active set`)
-    Switch(config::NameAndHostArgs),
+    /// Switch the active account
+    Switch(SwitchArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct SwitchArgs {
+    /// The account's username
+    #[clap(long, requires = "host")]
+    pub name: Option<String>,
+    /// The host name of the account's host
+    #[clap(long, requires = "name")]
+    pub host: Option<String>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -78,6 +79,10 @@ pub struct LoginArgs {
     /// Read the password from the first line of stdin
     #[clap(long)]
     pub password_stdin: bool,
+    /// Make this the active account. A login always does when there is no
+    /// active account.
+    #[clap(long)]
+    pub switch: bool,
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -124,6 +129,7 @@ struct AccountListEntry<'a> {
 struct AccountStatus<'a> {
     #[serde(flatten)]
     user_ref: &'a UserRef,
+    active: bool,
     /// Whether a refresh token is stored locally. The host may still reject
     /// it.
     authenticated: bool,
@@ -134,9 +140,14 @@ struct AccountStatus<'a> {
 }
 
 impl<'a> AccountStatus<'a> {
-    fn new(user_ref: &'a UserRef, auth: Option<&'a AccountAuth>) -> Self {
+    fn new(
+        user_ref: &'a UserRef,
+        auth: Option<&'a AccountAuth>,
+        active: bool,
+    ) -> Self {
         Self {
             user_ref,
+            active,
             authenticated: auth.is_some(),
             access_token_expires_at: auth
                 .and_then(|auth| auth.expires_at)
@@ -197,12 +208,11 @@ pub async fn handle_account_commands(
     match command {
         AccountCommands::List => {
             let accounts = &ctx.config.accounts;
-            let active = ctx.config.active_account.as_ref();
             let entries: Vec<_> = accounts
                 .iter()
                 .map(|account| AccountListEntry {
                     user_ref: &account.user_ref,
-                    active: active == Some(&account.user_ref),
+                    active: ctx.config.is_active(&account.user_ref),
                 })
                 .collect();
             ctx.output(&entries, || {
@@ -212,7 +222,7 @@ pub async fn handle_account_commands(
                 for account in accounts {
                     let prefix = util::get_prefix(
                         &account.user_ref,
-                        active,
+                        ctx.config.active_account.as_ref(),
                         accounts.len(),
                     );
                     println!("{prefix}{account}");
@@ -328,12 +338,15 @@ pub async fn handle_account_commands(
                 };
                 ctx.login_with_password(&account_user_ref, password).await?;
             }
-            ctx.config.active_account = Some(account_user_ref.clone());
-            ctx.config.save()?;
+            if login_args.switch || ctx.config.get_active_account().is_none() {
+                ctx.config.active_account = Some(account_user_ref.clone());
+                ctx.config.save()?;
+            }
 
             let status = AccountStatus::new(
                 &account_user_ref,
                 ctx.auth_cache.get(&account_user_ref),
+                ctx.config.is_active(&account_user_ref),
             );
             let message = if already_logged_in {
                 "Already logged in"
@@ -363,7 +376,11 @@ pub async fn handle_account_commands(
             } else {
                 "Not logged in"
             };
-            let status = AccountStatus::new(&account.user_ref, None);
+            let status = AccountStatus::new(
+                &account.user_ref,
+                None,
+                ctx.config.is_active(&account.user_ref),
+            );
             ctx.output(&status, || println!("{message}: {account}"))?;
         }
 
@@ -383,9 +400,14 @@ pub async fn handle_account_commands(
             let status = AccountStatus::new(
                 &account.user_ref,
                 ctx.auth_cache.get(&account.user_ref),
+                ctx.config.is_active(&account.user_ref),
             );
             ctx.output(&status, || {
-                println!("Account: {account}");
+                if status.active {
+                    println!("Account: {account} (active)");
+                } else {
+                    println!("Account: {account}");
+                }
                 if !status.authenticated {
                     println!("  Authenticated: No");
                     return;
@@ -497,15 +519,42 @@ pub async fn handle_account_commands(
             ctx.message(format!("Deleted account/user: {user_ref}"));
         }
 
-        AccountCommands::Active(active_args) => {
-            handle_active_account_commands(ctx, active_args).await?;
-        }
-
         AccountCommands::Switch(switch_args) => {
-            let active_args = ActiveAccountArgs {
-                command: ActiveAccountCommands::Set(switch_args.clone()),
+            let user_ref = if let (Some(name), Some(host)) =
+                (&switch_args.name, &switch_args.host)
+            {
+                let user_ref =
+                    parse_user_ref_input(name, host, ctx.strict_input)?;
+                ctx.config
+                    .get_account_config(user_ref.clone())
+                    .ok_or_else(|| CliError::account_not_found(&user_ref))?;
+                user_ref
+            } else {
+                if ctx.config.accounts.is_empty() {
+                    return Err(CliError::InvalidArgument(
+                        "No accounts in local config.".into(),
+                    ));
+                }
+                let account = select_inline(
+                    &ctx.config.accounts,
+                    "Select account",
+                    "--name and --host",
+                    AccountConfig::to_string,
+                )?
+                .ok_or(CliError::Cancellation)?;
+                eprintln!();
+                account.user_ref.clone()
             };
-            handle_active_account_commands(ctx, &active_args).await?;
+            ctx.config.active_account = Some(user_ref.clone());
+            ctx.config.save()?;
+            let status = AccountStatus::new(
+                &user_ref,
+                ctx.auth_cache.get(&user_ref),
+                true,
+            );
+            ctx.output(&status, || {
+                println!("Switched to account: {user_ref}")
+            })?;
         }
     }
     Ok(())
@@ -531,11 +580,16 @@ mod tests {
             scope: None,
         };
         assert_eq!(
-            serde_json::to_value(AccountStatus::new(&user_ref, Some(&auth)))
-                .unwrap(),
+            serde_json::to_value(AccountStatus::new(
+                &user_ref,
+                Some(&auth),
+                true
+            ))
+            .unwrap(),
             json!({
                 "name": "alice",
                 "host": "localhost",
+                "active": true,
                 "authenticated": true,
                 "access_token_expires_at": "2027-01-15T08:00:00Z",
                 "client_id": "client",
@@ -543,10 +597,12 @@ mod tests {
             })
         );
         assert_eq!(
-            serde_json::to_value(AccountStatus::new(&user_ref, None)).unwrap(),
+            serde_json::to_value(AccountStatus::new(&user_ref, None, false))
+                .unwrap(),
             json!({
                 "name": "alice",
                 "host": "localhost",
+                "active": false,
                 "authenticated": false,
                 "access_token_expires_at": null,
                 "client_id": null,
