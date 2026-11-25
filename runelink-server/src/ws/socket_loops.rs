@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{pin::Pin, sync::Arc, time::Duration};
 
 use axum::{
     extract::{
@@ -147,6 +147,17 @@ impl FederationSocket {
     }
 }
 
+/// A received message being handled. A socket loop reads the next message
+/// only once it is done, which keeps a connection's requests in order (see
+/// [`crate::admission`]), but keeps sending meanwhile.
+type Handling<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+
+async fn finish(handling: &mut Option<Handling<'_>>) {
+    if let Some(handling) = handling {
+        handling.await;
+    }
+}
+
 pub async fn client_ws(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
@@ -190,8 +201,10 @@ async fn client_ws_loop(
     }
 
     let in_flight = Arc::new(Semaphore::new(MAX_IN_FLIGHT_CLIENT_REQUESTS));
+    let mut handling: Option<Handling<'_>> = None;
     loop {
         tokio::select! {
+            () = finish(&mut handling), if handling.is_some() => handling = None,
             outbound = outbound_rx.recv() => {
                 let Some(envelope) = outbound else {
                     break;
@@ -208,12 +221,12 @@ async fn client_ws_loop(
                     }
                 }
             }
-            incoming = socket.recv() => {
+            incoming = socket.recv(), if handling.is_none() => {
                 match incoming {
                     Some(Ok(AxumMessage::Text(payload))) => {
                         match serde_json::from_str::<ClientWsEnvelope>(&payload) {
                             Ok(message) => {
-                                handle_client_message(&state, conn_id, message, &in_flight).await;
+                                handling = Some(Box::pin(handle_client_message(&state, conn_id, message, &in_flight)));
                             }
                             Err(error) => {
                                 log::warn!("Failed to parse client websocket message: {error}");
@@ -229,6 +242,9 @@ async fn client_ws_loop(
                 }
             }
         }
+    }
+    if let Some(handling) = handling {
+        handling.await;
     }
 
     let _ = state.client_ws_manager.deregister_connection(conn_id).await;
@@ -449,8 +465,10 @@ pub async fn federation_socket_loop(
     mut socket: FederationSocket,
     mut outbound_rx: mpsc::UnboundedReceiver<FederationWsEnvelope>,
 ) {
+    let mut handling: Option<Handling<'_>> = None;
     loop {
         tokio::select! {
+            () = finish(&mut handling), if handling.is_some() => handling = None,
             outbound = outbound_rx.recv() => {
                 let Some(envelope) = outbound else {
                     break;
@@ -467,12 +485,12 @@ pub async fn federation_socket_loop(
                     }
                 }
             }
-            incoming = socket.recv_event() => {
+            incoming = socket.recv_event(), if handling.is_none() => {
                 match incoming {
                     FederationIncomingEvent::Text(payload) => {
                         match serde_json::from_str::<FederationWsEnvelope>(&payload) {
                             Ok(message) => {
-                                handle_federation_message(&state, conn_id, message).await;
+                                handling = Some(Box::pin(handle_federation_message(&state, conn_id, message)));
                             }
                             Err(error) => {
                                 log::warn!("Failed to parse federation websocket message: {error}");
@@ -488,6 +506,9 @@ pub async fn federation_socket_loop(
                 }
             }
         }
+    }
+    if let Some(handling) = handling {
+        handling.await;
     }
 
     let _ = state
