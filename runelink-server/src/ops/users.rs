@@ -17,15 +17,26 @@ use crate::{
     state::AppState,
 };
 
-/// Create a new user.
+/// Create a new user on this host, without an account. Signup creates users
+/// with accounts.
 pub async fn create(
     state: &AppState,
     _session: &Session,
     new_user: &NewUser,
 ) -> ApiResult<User> {
+    if state.config.locality(&new_user.host).is_remote() {
+        return Err(ApiError::BadRequest(
+            "Users can only be created for this host".into(),
+        ));
+    }
+    // Stored under this host's own name, however the request spelled it.
+    let new_user = NewUser {
+        host: state.config.public_host(),
+        ..new_user.clone()
+    };
     let user = queries::users::insert(
         &state.db_pool,
-        new_user,
+        &new_user,
         auth_service::NAME_REUSE_DELAY,
     )
     .await?;
@@ -221,7 +232,7 @@ pub mod auth {
     use crate::auth::Requirement as Req;
 
     pub fn create() -> Req {
-        Req::Client
+        Req::HostAdmin.client_only()
     }
 
     pub fn delete(user_ref: UserRef) -> Req {
