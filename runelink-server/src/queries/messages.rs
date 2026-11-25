@@ -70,6 +70,20 @@ impl TryFrom<DbMessage> for Message {
     }
 }
 
+/// The latest time stored on any of a text channel's messages.
+pub async fn latest_time(
+    conn: &mut PgConnection,
+    text_channel_id: TextChannelId,
+) -> ApiResult<Option<OffsetDateTime>> {
+    let time = sqlx::query_scalar!(
+        "SELECT max(updated_at) FROM messages WHERE text_channel_id = $1;",
+        text_channel_id.as_uuid(),
+    )
+    .fetch_one(conn)
+    .await?;
+    Ok(time)
+}
+
 /// Insert a message with an ID and creation time chosen by the caller.
 pub async fn insert(
     conn: &mut PgConnection,
@@ -255,19 +269,23 @@ pub async fn get_location(
     Ok((row.server_id.into(), row.text_channel_id.into()))
 }
 
-/// Retain identity and relationships, clear text, and preserve the first deletion time.
+/// Retain identity and relationships, clear text, and preserve the first
+/// deletion time. `now` is the deletion time, chosen by the caller.
 pub async fn delete(
     conn: &mut PgConnection,
     text_channel_id: TextChannelId,
     message_id: MessageId,
+    now: OffsetDateTime,
 ) -> ApiResult<Message> {
     sqlx::query!(
         r#"
-        UPDATE messages SET body = NULL, metadata = NULL, deleted_at = NOW()
+        UPDATE messages
+        SET body = NULL, metadata = NULL, deleted_at = $3, updated_at = $3
         WHERE id = $1 AND text_channel_id = $2 AND deleted_at IS NULL;
         "#,
         message_id.as_uuid(),
         text_channel_id.as_uuid(),
+        now,
     )
     .execute(&mut *conn)
     .await?;
@@ -278,11 +296,13 @@ pub async fn delete(
     Ok(message)
 }
 
+/// Edit a message. `now` is the edit time, chosen by the caller.
 pub async fn update(
     conn: &mut PgConnection,
     text_channel_id: TextChannelId,
     message_id: MessageId,
     update: &runelink_types::message::MessageUpdate,
+    now: OffsetDateTime,
 ) -> ApiResult<Message> {
     if update
         .body
@@ -324,23 +344,23 @@ pub async fn update(
         .map(|value| value.clone().map(serde_json::Value::Object))
         .unwrap_or_else(|| row.metadata.clone());
     if body != row.body.as_ref() || metadata != row.metadata {
-        let (updated_at, edited_at): (OffsetDateTime, OffsetDateTime) =
-            sqlx::query_as(
-                r#"
-            UPDATE messages SET body = $2, metadata = $3, edited_at = clock_timestamp()
+        sqlx::query(
+            r#"
+            UPDATE messages
+            SET body = $2, metadata = $3, edited_at = $4, updated_at = $4
             WHERE id = $1
-            RETURNING updated_at, edited_at
         "#,
-            )
-            .bind(message_id)
-            .bind(body)
-            .bind(&metadata)
-            .fetch_one(&mut *conn)
-            .await?;
+        )
+        .bind(message_id)
+        .bind(body)
+        .bind(&metadata)
+        .bind(now)
+        .execute(&mut *conn)
+        .await?;
         row.body = body.cloned();
         row.metadata = metadata;
-        row.updated_at = updated_at;
-        row.edited_at = Some(edited_at);
+        row.updated_at = now;
+        row.edited_at = Some(now);
     }
     row.try_into()
 }
@@ -382,14 +402,21 @@ mod tests {
             .bind(channel).bind(original).fetch_one(&pool).await.unwrap();
         let before = get_by_id(&pool, original.into()).await.unwrap();
         let mut conn = pool.acquire().await.unwrap();
-        let deleted = delete(&mut conn, channel.into(), original.into())
-            .await
-            .unwrap();
-        assert!(matches!(deleted.content, MessageContent::Deleted { .. }));
+        let deleted_at = before.created_at + time::Duration::seconds(1);
+        let deleted =
+            delete(&mut conn, channel.into(), original.into(), deleted_at)
+                .await
+                .unwrap();
+        assert!(matches!(
+            deleted.content,
+            MessageContent::Deleted { deleted_at: at, .. } if at == deleted_at
+        ));
         assert_eq!(before.id, deleted.id);
         assert_eq!(before.created_at, deleted.created_at);
+        // A later deletion keeps the first deletion time.
+        let later = deleted_at + time::Duration::seconds(1);
         assert_eq!(
-            delete(&mut conn, channel.into(), original.into())
+            delete(&mut conn, channel.into(), original.into(), later)
                 .await
                 .unwrap(),
             deleted

@@ -9,7 +9,7 @@ use runelink_types::{
     ws::{ClientWsUpdate, FederationWsUpdate},
 };
 use sqlx::PgConnection;
-use time::OffsetDateTime;
+use time::{Duration, OffsetDateTime};
 use tokio::sync::{Mutex, mpsc};
 
 use super::{
@@ -42,6 +42,7 @@ pub(super) fn spawn(
     let (mailbox, mut inbox) =
         mpsc::channel::<Envelope<ChannelOp, Message>>(MAILBOX_CAPACITY);
     tokio::spawn(async move {
+        let mut clock = Clock::default();
         while let Some(Envelope { op, auth, reply }) = inbox.recv().await {
             // Held until the message is fanned out, so that server operations
             // never interleave with it.
@@ -63,9 +64,16 @@ pub(super) fn spawn(
                 }
                 continue;
             }
-            let result =
-                execute(&ctx, server_id, text_channel_id, &state, op, auth)
-                    .await;
+            let result = execute(
+                &ctx,
+                server_id,
+                text_channel_id,
+                &state,
+                &mut clock,
+                op,
+                auth,
+            )
+            .await;
             let result = match result {
                 Ok(message) => {
                     let update = Update {
@@ -94,6 +102,7 @@ async fn execute(
     server_id: ServerId,
     text_channel_id: TextChannelId,
     state: &ServerState,
+    clock: &mut Clock,
     op: ChannelOp,
     auth: Authorization,
 ) -> ApiResult<Message> {
@@ -104,7 +113,8 @@ async fn execute(
         state,
     };
     auth.check(&ctx.config, &mut facts).await?;
-    let message = apply(&mut tx, text_channel_id, op).await?;
+    let now = clock.next(&mut tx, text_channel_id).await?;
+    let message = apply(&mut tx, text_channel_id, op, now).await?;
     tx.commit().await?;
     Ok(message)
 }
@@ -113,20 +123,21 @@ async fn apply(
     conn: &mut PgConnection,
     text_channel_id: TextChannelId,
     op: ChannelOp,
+    now: OffsetDateTime,
 ) -> ApiResult<Message> {
     match op {
         ChannelOp::Create(new_message) => {
             if let Some(reply_to) = new_message.reply_to {
                 check_reply_target(conn, text_channel_id, reply_to).await?;
             }
-            // The actor, not the database, assigns IDs and creation times.
+            // The actor, not the database, assigns IDs and times.
             let message_id = MessageId::new();
             queries::messages::insert(
                 conn,
                 message_id,
                 text_channel_id,
                 &new_message,
-                now(),
+                now,
             )
             .await
         }
@@ -136,11 +147,13 @@ async fn apply(
                 text_channel_id,
                 message_id,
                 &update,
+                now,
             )
             .await
         }
         ChannelOp::Delete(message_id) => {
-            queries::messages::delete(conn, text_channel_id, message_id).await
+            queries::messages::delete(conn, text_channel_id, message_id, now)
+                .await
         }
     }
 }
@@ -169,11 +182,37 @@ async fn check_reply_target(
     Ok(())
 }
 
-/// The current time at the database's microsecond precision, so that the
-/// actor knows the stored value without reading it back (the database would
-/// round it otherwise).
-fn now() -> OffsetDateTime {
-    let now = OffsetDateTime::now_utc();
-    now.replace_nanosecond(now.nanosecond() / 1_000 * 1_000)
-        .expect("truncating nanoseconds keeps them in range")
+/// Message times, which the actor chooses so that they only move forward
+/// within the channel, even if the system clock steps back.
+#[derive(Default)]
+struct Clock {
+    last: Option<OffsetDateTime>,
+}
+
+impl Clock {
+    /// A time later than any already stored on the channel's messages, at the
+    /// database's microsecond precision so that the actor knows the stored
+    /// value without reading it back.
+    async fn next(
+        &mut self,
+        conn: &mut PgConnection,
+        text_channel_id: TextChannelId,
+    ) -> ApiResult<OffsetDateTime> {
+        let last = match self.last {
+            Some(last) => Some(last),
+            None => {
+                queries::messages::latest_time(conn, text_channel_id).await?
+            }
+        };
+        let now = OffsetDateTime::now_utc();
+        let now = now
+            .replace_nanosecond(now.nanosecond() / 1_000 * 1_000)
+            .expect("truncating nanoseconds keeps them in range");
+        let next = match last {
+            Some(last) => now.max(last + Duration::microseconds(1)),
+            None => now,
+        };
+        self.last = Some(next);
+        Ok(next)
+    }
 }
