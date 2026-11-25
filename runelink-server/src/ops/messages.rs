@@ -2,6 +2,7 @@ use runelink_types::{
     channel::TextChannelId,
     message::{Message, MessageId, NewMessage},
     server::ServerId,
+    user::UserRef,
     ws::{
         ClientWsUpdate, FederationWsReply, FederationWsRequest,
         FederationWsUpdate,
@@ -377,12 +378,16 @@ pub mod auth {
         }
         Ok(update_base(state, message_id).await?.client_only())
     }
+    /// Members post as themselves only.
     pub async fn create(
         state: &AppState,
         text_channel_id: TextChannelId,
+        author: &UserRef,
         target_host: Option<&str>,
     ) -> ApiResult<Req> {
-        get_by_text_channel(state, text_channel_id, target_host).await
+        let base =
+            get_by_text_channel(state, text_channel_id, target_host).await?;
+        Ok(crate::and!(Req::User(author.clone()), base))
     }
 
     pub fn get_all() -> Req {
@@ -438,11 +443,14 @@ pub mod auth {
         ) -> ApiResult<Req> {
             Ok(update_base(state, message_id).await?.federated_only())
         }
+        /// Members post as themselves only.
         pub async fn create(
             state: &AppState,
             text_channel_id: TextChannelId,
+            author: &UserRef,
         ) -> ApiResult<Req> {
-            get_by_text_channel(state, text_channel_id).await
+            let base = get_by_text_channel(state, text_channel_id).await?;
+            Ok(crate::and!(Req::User(author.clone()), base))
         }
 
         pub fn get_all() -> Req {

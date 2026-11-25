@@ -502,6 +502,7 @@ pub(super) async fn handle_client_request(
             let requirement = ops::messages::auth::create(
                 state,
                 text_channel_id,
+                &new_message.author,
                 target_host,
             )
             .await?;

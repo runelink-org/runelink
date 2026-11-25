@@ -546,9 +546,12 @@ pub(super) async fn handle_federation_request(
             text_channel_id,
             new_message,
         } => {
-            let requirement =
-                ops::messages::auth::federated::create(state, text_channel_id)
-                    .await?;
+            let requirement = ops::messages::auth::federated::create(
+                state,
+                text_channel_id,
+                &new_message.author,
+            )
+            .await?;
             let session = authorize_federation(
                 state,
                 conn_id,

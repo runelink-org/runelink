@@ -39,8 +39,13 @@ pub async fn create(
     let session = authorize(
         &state,
         Principal::from_client_headers(&headers, &state)?,
-        ops::messages::auth::create(&state, text_channel_id, target_host)
-            .await?,
+        ops::messages::auth::create(
+            &state,
+            text_channel_id,
+            &new_message.author,
+            target_host,
+        )
+        .await?,
     )
     .await?;
     let message = ops::messages::create(
