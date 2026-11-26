@@ -123,9 +123,13 @@ impl<'a> CliContext<'a> {
         user_ref: &UserRef,
         api_url: &str,
     ) -> Result<Option<String>, CliError> {
-        let Some(auth) = self.auth_cache.get_mut(user_ref) else {
+        // Other commands may have refreshed and replaced tokens since this one
+        // loaded the cache, so it is reloaded before reading and saving them.
+        *self.auth_cache = AuthCache::load()?;
+        let Some(mut auth) = self.auth_cache.get(user_ref).cloned() else {
             return Ok(None);
         };
+        let sent_refresh_token = auth.refresh_token.clone();
         let token_response = match requests::auth::token_refresh(
             self.client,
             api_url,
@@ -151,7 +155,17 @@ impl<'a> CliContext<'a> {
             auth.refresh_token = token_response.refresh_token;
         }
 
-        self.auth_cache.save()?;
+        // Keep a logout, or a newer token from another command, made while
+        // this refresh was in flight.
+        *self.auth_cache = AuthCache::load()?;
+        if self
+            .auth_cache
+            .get(user_ref)
+            .is_some_and(|stored| stored.refresh_token == sent_refresh_token)
+        {
+            self.auth_cache.set(user_ref, auth);
+            self.auth_cache.save()?;
+        }
 
         Ok(Some(token_response.access_token))
     }
@@ -233,6 +247,7 @@ impl<'a> CliContext<'a> {
         })?;
 
         let access_token = token_response.access_token;
+        *self.auth_cache = AuthCache::load()?;
         self.auth_cache.set(
             user_ref,
             AccountAuth {
