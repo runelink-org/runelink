@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
+use axum::serve::ListenerExt;
 use clap::Parser;
 use sqlx::migrate::Migrator;
 use tokio::{net::TcpListener, sync::RwLock, task::JoinSet};
@@ -97,7 +98,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let app = api::router().with_state(app_state);
 
         let bind_addr = config.bind_addr();
-        let listener = TcpListener::bind(&bind_addr).await?;
+        // Nagle's algorithm can delay a small write while earlier data is
+        // unacknowledged, which stalls back-to-back WebSocket frames.
+        let listener =
+            TcpListener::bind(&bind_addr).await?.tap_io(|tcp_stream| {
+                if let Err(error) = tcp_stream.set_nodelay(true) {
+                    log::warn!("Failed setting TCP_NODELAY: {error}");
+                }
+            });
         let host = config.public_host_with_explicit_port();
 
         log::info!("Starting server {host} on {bind_addr}");
