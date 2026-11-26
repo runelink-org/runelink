@@ -118,11 +118,14 @@ pub async fn upsert_local(
     .await
 }
 
+/// Cache a local user's membership of a remote server. Returns whether it was
+/// not cached before.
 pub async fn insert_remote(
     pool: &DbPool,
     membership: &ServerMembership,
-) -> ApiResult<()> {
-    sqlx::query!(
+) -> ApiResult<bool> {
+    // Rows that a conflict updates have a nonzero `xmax`.
+    let inserted = sqlx::query_scalar!(
         r#"
         INSERT INTO user_remote_server_memberships (
             user_name, user_host, remote_server_id, role, remote_created_at,
@@ -134,6 +137,7 @@ pub async fn insert_remote(
                 remote_created_at = EXCLUDED.remote_created_at,
                 remote_updated_at = EXCLUDED.remote_updated_at,
                 synced_at = NOW()
+        RETURNING (xmax = 0) AS "inserted!"
         "#,
         membership.user_ref.name,
         membership.user_ref.host,
@@ -142,9 +146,9 @@ pub async fn insert_remote(
         membership.joined_at,
         membership.updated_at,
     )
-    .execute(pool)
+    .fetch_one(pool)
     .await?;
-    Ok(())
+    Ok(inserted)
 }
 
 pub async fn get_local_member_by_user_and_server(

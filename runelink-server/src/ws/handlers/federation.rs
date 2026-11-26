@@ -84,11 +84,24 @@ pub(super) async fn handle_federation_update(
             // Only local users' memberships are cached. Others may not even
             // have a user record here, but members still hear about them.
             if state.config.locality(&membership.user.host).is_local() {
-                queries::memberships::insert_remote(
+                let inserted = queries::memberships::insert_remote(
                     &state.db_pool,
                     &membership.clone().into(),
                 )
                 .await?;
+                // The server's own updates reach only members cached here, so
+                // a new member, such as its creator, may not have heard of it.
+                if inserted {
+                    let _ = state
+                        .client_ws_manager
+                        .send_update_to_users(
+                            [&membership.user.as_ref()],
+                            ClientWsUpdate::ServerUpserted(
+                                membership.server.clone(),
+                            ),
+                        )
+                        .await;
+                }
             }
             fanout_remote_server_update(
                 state,
