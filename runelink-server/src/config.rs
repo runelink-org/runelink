@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use runelink_client::util::{get_api_url, strip_default_port};
+use runelink_client::util::get_api_url;
 use runelink_client::validation::validate_config_host;
 use serde::Deserialize;
 
@@ -148,10 +148,7 @@ impl Locality<'_> {
     }
 }
 
-/// The canonical spelling of a host: lowercase, without the default port.
-pub fn canonical_host(host: &str) -> String {
-    strip_default_port(host).to_ascii_lowercase()
-}
+pub use runelink_types::user::canonical_host;
 
 /// Whether two host strings name the same host.
 pub fn hosts_match(a: &str, b: &str) -> bool {
