@@ -663,12 +663,14 @@ pub(super) async fn handle_federation_request(
             message_id,
             message_update,
         } => {
+            let location =
+                queries::messages::get_location(&state.db_pool, message_id)
+                    .await?;
             let session = authorize_federation(
                 state,
                 conn_id,
                 delegated_user_ref,
-                ops::messages::auth::federated::update(state, message_id)
-                    .await?,
+                ops::messages::auth::federated::update(&location),
             )
             .await?;
             let resource = ops::messages::update(
@@ -676,25 +678,29 @@ pub(super) async fn handle_federation_request(
                 &session,
                 message_id,
                 &message_update,
-                None,
+                ops::messages::MessageTarget::Local(location),
             )
             .await?;
             Ok(FederationWsReply::MessagesUpdate(resource))
         }
         FederationWsRequest::MessagesDelete { message_id } => {
-            let requirement =
-                ops::messages::auth::federated::delete(state, message_id)
+            let location =
+                queries::messages::get_location(&state.db_pool, message_id)
                     .await?;
             let session = authorize_federation(
                 state,
                 conn_id,
                 delegated_user_ref,
-                requirement,
+                ops::messages::auth::federated::delete(&location),
             )
             .await?;
-            let message =
-                ops::messages::delete(state, &session, message_id, None)
-                    .await?;
+            let message = ops::messages::delete(
+                state,
+                &session,
+                message_id,
+                ops::messages::MessageTarget::Local(location),
+            )
+            .await?;
             Ok(FederationWsReply::MessagesDelete(message))
         }
     }

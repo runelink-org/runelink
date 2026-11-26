@@ -173,16 +173,18 @@ pub async fn delete(
         "DELETE /messages/{message_id}?target_host={:?}",
         params.target_host
     );
-    let target_host = params.target_host.as_deref();
-    let session = authorize(
+    let principal = Principal::from_client_headers(&headers, &state)?;
+    let target = ops::messages::locate(
         &state,
-        Principal::from_client_headers(&headers, &state)?,
-        ops::messages::auth::delete(&state, message_id, target_host).await?,
+        message_id,
+        params.target_host.as_deref(),
     )
     .await?;
-    let message =
-        ops::messages::delete(&state, &session, message_id, target_host)
+    let session =
+        authorize(&state, principal, ops::messages::auth::delete(&target))
             .await?;
+    let message =
+        ops::messages::delete(&state, &session, message_id, target).await?;
     Ok((StatusCode::OK, Json(message)))
 }
 
@@ -194,20 +196,18 @@ pub async fn update(
     Query(params): Query<MessageQueryParams>,
     Json(update): Json<runelink_types::message::MessageUpdate>,
 ) -> ApiResult<impl IntoResponse> {
-    let target_host = params.target_host.as_deref();
-    let session = authorize(
+    let principal = Principal::from_client_headers(&headers, &state)?;
+    let target = ops::messages::locate(
         &state,
-        Principal::from_client_headers(&headers, &state)?,
-        ops::messages::auth::update(&state, message_id, target_host).await?,
-    )
-    .await?;
-    let resource = ops::messages::update(
-        &state,
-        &session,
         message_id,
-        &update,
-        target_host,
+        params.target_host.as_deref(),
     )
     .await?;
+    let session =
+        authorize(&state, principal, ops::messages::auth::update(&target))
+            .await?;
+    let resource =
+        ops::messages::update(&state, &session, message_id, &update, target)
+            .await?;
     Ok((StatusCode::OK, Json(resource)))
 }
