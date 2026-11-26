@@ -4,7 +4,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use log::info;
+use log::debug;
 use reqwest::StatusCode;
 use runelink_types::{
     JwksResponse, OidcDiscoveryDocument, SignupRequest, TokenRequest,
@@ -39,7 +39,7 @@ pub fn router() -> Router<AppState> {
 pub async fn discovery(
     State(state): State<AppState>,
 ) -> Json<OidcDiscoveryDocument> {
-    info!("GET /.well-known/openid-configuration");
+    debug!("GET /.well-known/openid-configuration");
     let issuer = state.config.api_url();
     Json(OidcDiscoveryDocument {
         issuer: issuer.clone(),
@@ -55,7 +55,7 @@ pub async fn discovery(
 
 /// JWKS endpoint publishing public keys
 pub async fn jwks(State(state): State<AppState>) -> Json<JwksResponse> {
-    info!("GET /.well-known/jwks.json");
+    debug!("GET /.well-known/jwks.json");
     Json(JwksResponse {
         keys: vec![state.key_manager.public_jwk.clone()],
     })
@@ -65,7 +65,7 @@ pub async fn token(
     State(state): State<AppState>,
     Form(req): Form<TokenRequest>,
 ) -> ApiResult<impl IntoResponse> {
-    info!("POST /auth/token?grant_type={}", req.grant_type);
+    debug!("POST /auth/token?grant_type={}", req.grant_type);
     // TODO: check dynamic client IDs for validity
     let client_id = req.client_id.unwrap_or_else(|| "default".into());
     // TODO: check requested scopes for validity
@@ -113,7 +113,7 @@ pub async fn token(
 
 /// Protected endpoint returning user claims (stubbed for now)
 pub async fn userinfo() -> Json<serde_json::Value> {
-    info!("GET /auth/userinfo");
+    debug!("GET /auth/userinfo");
     // TODO: Implement userinfo endpoint with actual user data
     Json(json!({
         "error": "not_implemented",
@@ -123,7 +123,7 @@ pub async fn userinfo() -> Json<serde_json::Value> {
 
 /// Dynamic Client Registration endpoint (stubbed for now)
 pub async fn register_client() -> Json<serde_json::Value> {
-    info!("POST /auth/register");
+    debug!("POST /auth/register");
     // TODO: Implement client registration, generating client_id
     Json(json!({
         "error": "not_implemented",
@@ -136,7 +136,7 @@ pub async fn signup(
     State(state): State<AppState>,
     Json(req): Json<SignupRequest>,
 ) -> ApiResult<impl IntoResponse> {
-    info!("POST /auth/signup\nsignup_request = {:#?}", req);
+    debug!("POST /auth/signup\nsignup_request = {:#?}", req);
     let user = auth_service::signup(&state, req).await?;
 
     Ok((StatusCode::CREATED, Json(user)))

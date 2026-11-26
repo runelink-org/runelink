@@ -1,4 +1,4 @@
-use log::info;
+use log::debug;
 use runelink_types::{
     auth::{JwksResponse, OidcDiscoveryDocument},
     user::UserRef,
@@ -23,7 +23,7 @@ pub(super) async fn handle_client_request(
     conn_id: ConnId,
     request: ClientWsRequest,
 ) -> ApiResult<ClientWsReply> {
-    info!("WS client: request={:#?}", request);
+    debug!("WS client: request={:#?}", request);
     match request {
         ClientWsRequest::Ping => Ok(ClientWsReply::Pong),
 

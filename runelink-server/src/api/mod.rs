@@ -6,7 +6,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use log::info;
+use log::debug;
 use serde::Deserialize;
 use tower_http::cors;
 
@@ -105,7 +105,7 @@ pub struct PingParams {
 }
 
 pub async fn ping(Query(params): Query<PingParams>) -> impl IntoResponse {
-    info!("GET /ping?id={:?}&msg={:?}", params.id, params.msg);
+    debug!("GET /ping?id={:?}&msg={:?}", params.id, params.msg);
     let msg_part = match params.msg {
         Some(msg) => format!(": \"{msg}\""),
         None => "".to_string(),
@@ -114,7 +114,5 @@ pub async fn ping(Query(params): Query<PingParams>) -> impl IntoResponse {
         Some(id) => format!(" ({id})"),
         None => "".to_string(),
     };
-    let message = format!("pong{id_part}{msg_part}");
-    println!("{message}");
-    message
+    format!("pong{id_part}{msg_part}")
 }

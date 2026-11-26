@@ -14,7 +14,7 @@ use futures_util::{
     future::{BoxFuture, Shared},
 };
 use jsonwebtoken::{Algorithm, Header};
-use log::{info, warn};
+use log::{debug, info, warn};
 use runelink_client::util::{get_api_url, get_federation_ws_url, pad_host};
 use runelink_types::{
     FederationClaims,
@@ -405,7 +405,7 @@ impl FederationWsManager {
         &self,
         envelope: FederationWsEnvelope,
     ) -> bool {
-        info!(
+        debug!(
             "Resolving federation websocket response envelope: {:#?}",
             envelope
         );

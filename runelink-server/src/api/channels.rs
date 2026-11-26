@@ -3,7 +3,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
-use log::info;
+use log::debug;
 use runelink_types::{
     channel::{NewServerChannel, ServerChannelId, ServerChannelMove},
     server::ServerId,
@@ -30,7 +30,7 @@ pub async fn create(
     Query(params): Query<ChannelQueryParams>,
     Json(new_channel): Json<NewServerChannel>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "POST /servers/{server_id}/channels?target_host={:?}\nnew_channel = {:#?}",
         params.target_host, new_channel,
     );
@@ -57,7 +57,7 @@ pub async fn get_all(
     headers: HeaderMap,
     Query(params): Query<ChannelQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!("GET /channels?target_host={:?}", params.target_host);
+    debug!("GET /channels?target_host={:?}", params.target_host);
     let session = authorize(
         &state,
         Principal::from_client_headers(&headers, &state)?,
@@ -77,7 +77,7 @@ pub async fn get_by_server(
     Path(server_id): Path<ServerId>,
     Query(params): Query<ChannelQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "GET /servers/{server_id}/channels?target_host={:?}",
         params.target_host
     );
@@ -104,7 +104,7 @@ pub async fn get_by_id(
     Path(channel_id): Path<ServerChannelId>,
     Query(params): Query<ChannelQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "GET /channels/{channel_id}?target_host={:?}",
         params.target_host
     );
@@ -128,7 +128,7 @@ pub async fn delete(
     Path(channel_id): Path<ServerChannelId>,
     Query(params): Query<ChannelQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "DELETE /channels/{channel_id}?target_host={:?}",
         params.target_host
     );
@@ -151,7 +151,7 @@ pub async fn move_channel(
     Query(params): Query<ChannelQueryParams>,
     Json(channel_move): Json<ServerChannelMove>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "POST /channels/{channel_id}/move?target_host={:?}\nchannel_move = {:#?}",
         params.target_host, channel_move,
     );
