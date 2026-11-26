@@ -89,7 +89,40 @@ impl<'a> CliContext<'a> {
             }
         }
 
-        let auth = self.auth_cache.get_mut(user_ref).unwrap();
+        match self.refresh_access_token(user_ref, api_url).await? {
+            Some(access_token) => Ok(access_token),
+            None => {
+                eprintln!("Session expired: {user_ref}");
+                self.login_with_password(user_ref, None).await
+            }
+        }
+    }
+
+    /// Returns whether the home host still accepts the stored credentials
+    /// for `user_ref`, refreshing its cached access token if so.
+    pub async fn check_session(
+        &mut self,
+        user_ref: &UserRef,
+    ) -> Result<bool, CliError> {
+        if !self.auth_cache.has_auth(user_ref) {
+            return Ok(false);
+        }
+        let api_url =
+            resolve_api_url(self.client, self.config, &user_ref.host).await?;
+        Ok(self.refresh_access_token(user_ref, &api_url).await?.is_some())
+    }
+
+    /// Asks the home host for a new access token with the stored refresh
+    /// token and caches it. Returns `None` when there are no stored
+    /// credentials or the host rejects them.
+    pub async fn refresh_access_token(
+        &mut self,
+        user_ref: &UserRef,
+        api_url: &str,
+    ) -> Result<Option<String>, CliError> {
+        let Some(auth) = self.auth_cache.get_mut(user_ref) else {
+            return Ok(None);
+        };
         let token_response = match requests::auth::token_refresh(
             self.client,
             api_url,
@@ -104,10 +137,7 @@ impl<'a> CliContext<'a> {
             Err(runelink_client::Error::Status(
                 StatusCode::UNAUTHORIZED | StatusCode::NOT_FOUND,
                 _,
-            )) => {
-                eprintln!("Session expired: {user_ref}");
-                return self.login_with_password(user_ref, None).await;
-            }
+            )) => return Ok(None),
             Err(e) => return Err(e.into()),
         };
 
@@ -120,7 +150,7 @@ impl<'a> CliContext<'a> {
 
         self.auth_cache.save()?;
 
-        Ok(token_response.access_token)
+        Ok(Some(token_response.access_token))
     }
 
     /// Logs in with `password`, or prompts for it (re-prompting on empty or

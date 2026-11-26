@@ -364,7 +364,7 @@ pub async fn handle_account_commands(
 
             // An explicit password replaces credentials that may be stale
             let already_logged_in = !login_args.password_stdin
-                && ctx.auth_cache.has_auth(&account_user_ref);
+                && ctx.check_session(&account_user_ref).await?;
             if !already_logged_in {
                 if explicit_account {
                     eprintln!("Logging in to {account_display}");
@@ -576,7 +576,7 @@ pub async fn handle_account_commands(
                 select_saved_account(ctx)?
             };
             let login = switch_args.login || !switch_args.no_login;
-            if login && !ctx.auth_cache.has_auth(&user_ref) {
+            if login && !ctx.check_session(&user_ref).await? {
                 eprintln!("Logging in to {user_ref}");
                 ctx.login_with_password(&user_ref, None).await?;
             }
