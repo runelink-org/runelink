@@ -879,21 +879,35 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires DATABASE_URL pointing to a migrated PostgreSQL database"]
     async fn actors_check_authorization_against_their_own_state() {
-        let f = fixture().await;
+        let mut f = fixture().await;
         let server = f
             .actors
             .create_server(
                 NewServer {
                     title: "actors test".into(),
                     description: None,
-                    default_channels: false,
+                    default_channels: true,
                 },
                 f.user.clone(),
                 Authorization::host(),
             )
             .await
             .unwrap();
-        let (_, text_channel_id) = f.text_channel(server.id, "general").await;
+        // The default channel is usable right away.
+        let received = f.received();
+        let [
+            ClientWsUpdate::ServerUpserted(_),
+            ClientWsUpdate::MembershipUpserted(_),
+            ClientWsUpdate::ChannelUpserted(channel),
+        ] = received.as_slice()
+        else {
+            panic!("expected the default channel");
+        };
+        assert_eq!(channel.title, "general");
+        let ServerChannelContent::Text { text_channel_id } = channel.content
+        else {
+            panic!("expected a text channel");
+        };
         let as_member = || {
             Authorization::for_test_user(
                 f.user.clone(),
