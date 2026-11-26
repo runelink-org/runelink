@@ -109,7 +109,10 @@ impl<'a> CliContext<'a> {
         }
         let api_url =
             resolve_api_url(self.client, self.config, &user_ref.host).await?;
-        Ok(self.refresh_access_token(user_ref, &api_url).await?.is_some())
+        Ok(self
+            .refresh_access_token(user_ref, &api_url)
+            .await?
+            .is_some())
     }
 
     /// Asks the home host for a new access token with the stored refresh
