@@ -18,6 +18,7 @@ pub enum UserRole {
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
 pub struct User {
     pub name: String,
+    #[serde(deserialize_with = "deserialize_canonical_host")]
     pub host: String,
     pub role: UserRole,
     #[serde(with = "time::serde::rfc3339")]
@@ -31,7 +32,8 @@ pub struct User {
 /// User identity: (name, host) pair used for identification and authorization.
 ///
 /// The host is canonicalized when a ref is created with [`UserRef::new`] or
-/// deserialized, so refs can be compared exactly.
+/// deserialized, as is a deserialized [`User`]'s, so refs can be compared
+/// exactly.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct UserRef {
     pub name: String,
