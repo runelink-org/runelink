@@ -29,7 +29,7 @@ use runelink_types::{
 use time::Duration;
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_tungstenite::{
-    connect_async, tungstenite::client::IntoClientRequest,
+    connect_async_with_config, tungstenite::client::IntoClientRequest,
 };
 
 use super::{
@@ -446,7 +446,7 @@ impl FederationWsManager {
 
             let stream = match tokio::time::timeout(
                 StdDuration::from_secs(5),
-                connect_async(request),
+                connect_async_with_config(request, None, true),
             )
             .await
             {
