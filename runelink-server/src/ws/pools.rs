@@ -283,6 +283,15 @@ impl ClientWsPool {
     }
 }
 
+/// What happened to an envelope sent to a host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostSend {
+    Sent,
+    /// The host's connection doesn't support the envelope.
+    Unsupported,
+    NotConnected,
+}
+
 /// Tracks active federation websocket connections and provides safe send
 /// helpers.
 ///
@@ -474,68 +483,36 @@ impl FederationWsPool {
             .is_some_and(|conn| supports(&conn.capabilities, capability))
     }
 
-    /// Sends an envelope to the active connection for the given host.
+    /// Sends an envelope to the active connection for the given host, or to
+    /// the next one while that has closed.
     pub async fn send_to_host(
         &self,
         host: &str,
-        envelope: FederationWsEnvelope,
-    ) -> bool {
-        let target = {
-            let state = self.inner.read().await;
-            let Some(conn_id) =
-                state.by_host.get(&canonical_host(host)).copied()
-            else {
-                return false;
-            };
-            state
-                .connections
-                .get(&conn_id)
-                .filter(|conn| federation_supports_envelope(conn, &envelope))
-                .map(|conn| (conn_id, conn.sender.clone()))
-        };
-        let Some((conn_id, sender)) = target else {
-            return false;
-        };
-        if sender.send(envelope).is_ok() {
-            return true;
-        }
-        let _ = self.deregister_connection(conn_id).await;
-        false
-    }
-
-    /// Sends an envelope to the active connection for the given hosts.
-    pub async fn send_to_hosts<I, S>(
-        &self,
-        hosts: I,
-        envelope: FederationWsEnvelope,
-    ) -> usize
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
-        let hosts = hosts
-            .into_iter()
-            .map(|host| canonical_host(host.as_ref()))
-            .collect::<HashSet<String>>();
-        let targets = {
-            let state = self.inner.read().await;
-            let mut out = Vec::new();
-            for host in hosts {
-                let Some(conn_id) = state.by_host.get(&host).copied() else {
-                    continue;
+        mut envelope: FederationWsEnvelope,
+    ) -> HostSend {
+        loop {
+            let (conn_id, sender) = {
+                let state = self.inner.read().await;
+                let Some(&conn_id) = state.by_host.get(&canonical_host(host))
+                else {
+                    return HostSend::NotConnected;
                 };
-                if let Some(conn) =
-                    state.connections.get(&conn_id).filter(|conn| {
-                        federation_supports_envelope(conn, &envelope)
-                    })
+                let Some(conn) = state.connections.get(&conn_id) else {
+                    return HostSend::NotConnected;
+                };
+                if !conn.sender.is_closed()
+                    && !federation_supports_envelope(conn, &envelope)
                 {
-                    let sender = conn.sender.clone();
-                    out.push((conn_id, sender));
+                    return HostSend::Unsupported;
                 }
+                (conn_id, conn.sender.clone())
+            };
+            match sender.send(envelope) {
+                Ok(()) => return HostSend::Sent,
+                Err(error) => envelope = error.0,
             }
-            out
-        };
-        Self::send_to_many_federation(targets, envelope, self).await
+            let _ = self.deregister_connection(conn_id).await;
+        }
     }
 
     /// Sends an envelope to every authenticated host, on the connection each
@@ -658,11 +635,11 @@ mod tests {
     use runelink_types::{
         capability::{Capability, versions::messages},
         ids::{MessageId, TextChannelId},
-        ws::{ClientWsEnvelope, ClientWsUpdate},
+        ws::{ClientWsEnvelope, ClientWsUpdate, FederationWsEnvelope, WsError},
     };
     use tokio::sync::mpsc;
 
-    use super::{ClientWsPool, FederationWsPool};
+    use super::{ClientWsPool, FederationWsPool, HostSend};
     use crate::ids::ConnId;
 
     #[tokio::test]
@@ -697,6 +674,47 @@ mod tests {
         pool.deregister_connection(*newer).await;
         assert_eq!(sending().await, Some(*older));
         pool.deregister_connection(*older).await;
+        assert!(!pool.has_host("example.com").await);
+    }
+
+    #[tokio::test]
+    async fn federation_sends_skip_closed_connections() {
+        let pool = FederationWsPool::new();
+        let mut receivers = Vec::new();
+        for _ in 0..2 {
+            let (sender, receiver) = mpsc::unbounded_channel();
+            let conn_id = ConnId::new();
+            pool.register_connection(conn_id, sender, BTreeMap::new())
+                .await;
+            pool.authenticate_connection(
+                conn_id,
+                "example.com".into(),
+                "issuer".into(),
+            )
+            .await;
+            receivers.push(receiver);
+        }
+        let envelope = FederationWsEnvelope::Error {
+            request_id: None,
+            event_id: runelink_types::EventId::new(),
+            error: WsError {
+                code: "test".into(),
+                message: "test".into(),
+                details: None,
+            },
+        };
+        // The newer connection sends, but has closed.
+        drop(receivers.pop());
+        assert_eq!(
+            pool.send_to_host("example.com", envelope.clone()).await,
+            HostSend::Sent
+        );
+        assert_eq!(receivers[0].try_recv(), Ok(envelope.clone()));
+        drop(receivers.pop());
+        assert_eq!(
+            pool.send_to_host("example.com", envelope).await,
+            HostSend::NotConnected
+        );
         assert!(!pool.has_host("example.com").await);
     }
 

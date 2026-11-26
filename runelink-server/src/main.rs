@@ -88,6 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             jwks_cache: Arc::new(RwLock::new(HashMap::new())),
             actors,
         };
+        app_state.federation_ws_manager.set_state(app_state.clone());
 
         MIGRATOR.run(db_pool.as_ref()).await?;
         log::info!(
