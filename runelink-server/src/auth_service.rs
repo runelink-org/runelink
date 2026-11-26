@@ -22,6 +22,16 @@ use crate::{
 /// How long issued client access tokens are valid.
 const ACCESS_TOKEN_LIFETIME: Duration = Duration::hours(1);
 
+/// How long issued refresh tokens are valid. Each refresh replaces the token,
+/// so a session ends after this long without one.
+const REFRESH_TOKEN_LIFETIME: Duration = Duration::days(30);
+
+/// How long a refresh token still works after it is used. Clients that share
+/// stored credentials, like browser tabs or overlapping CLI commands, can
+/// refresh with the same token at about the same time, and each gets its own
+/// replacement instead of all but one being logged out.
+const REFRESH_TOKEN_REUSE_GRACE: Duration = Duration::minutes(2);
+
 /// How long a deleted user's name stays reserved: longer than any token
 /// issued to the deleted user stays valid, plus validator leeway and skew.
 pub const NAME_REUSE_DELAY: Duration =
@@ -142,7 +152,7 @@ pub async fn issue_password_token(
         .verify_password(request.password.as_bytes(), &parsed_hash)
         .map_err(|_| ApiError::AuthError("invalid credentials".into()))?;
 
-    issue_client_token_response(state, user_ref, client_id, scope, None).await
+    issue_client_token_response(state, user_ref, client_id, scope).await
 }
 
 pub async fn issue_refresh_token(
@@ -168,14 +178,15 @@ pub async fn issue_refresh_token(
         request.client_id.unwrap_or(refresh_token.client_id.clone());
     let scope = request.scope.unwrap_or_else(|| "openid".into());
 
-    issue_client_token_response(
-        state,
-        user_ref,
-        client_id,
-        scope,
-        Some(refresh_token.token),
+    let issued =
+        issue_client_token_response(state, user_ref, client_id, scope).await?;
+    queries::tokens::expire_refresh_by(
+        &state.db_pool,
+        &refresh_token.token,
+        now + REFRESH_TOKEN_REUSE_GRACE,
     )
-    .await
+    .await?;
+    Ok(issued)
 }
 
 async fn issue_client_token_response(
@@ -183,7 +194,6 @@ async fn issue_client_token_response(
     user_ref: UserRef,
     client_id: String,
     scope: String,
-    refresh_token: Option<String>,
 ) -> ApiResult<IssuedClientToken> {
     let lifetime = ACCESS_TOKEN_LIFETIME;
     let claims = ClientAccessClaims::new(
@@ -200,18 +210,16 @@ async fn issue_client_token_response(
     )
     .map_err(|error| ApiError::Internal(format!("jwt error: {error}")))?;
 
-    let refresh_token = match refresh_token {
-        Some(refresh_token) => refresh_token,
-        None => {
-            let token = RefreshToken::new(
-                user_ref.clone(),
-                client_id,
-                Duration::days(30),
-            );
-            queries::tokens::insert_refresh(&state.db_pool, &token).await?;
-            token.token
-        }
-    };
+    let refresh_token =
+        RefreshToken::new(user_ref.clone(), client_id, REFRESH_TOKEN_LIFETIME);
+    // Issuing is when a user's tokens grow, so their stale ones go then.
+    queries::tokens::delete_stale_refresh(
+        &state.db_pool,
+        &user_ref,
+        refresh_token.issued_at,
+    )
+    .await?;
+    queries::tokens::insert_refresh(&state.db_pool, &refresh_token).await?;
 
     Ok(IssuedClientToken {
         user_ref,
@@ -219,7 +227,7 @@ async fn issue_client_token_response(
             access_token,
             token_type: "Bearer".into(),
             expires_in: lifetime.whole_seconds(),
-            refresh_token,
+            refresh_token: refresh_token.token,
             scope: claims.scope,
         },
     })

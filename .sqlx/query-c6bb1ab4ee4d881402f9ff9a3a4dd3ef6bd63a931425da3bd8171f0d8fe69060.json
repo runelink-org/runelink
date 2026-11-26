@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE refresh_tokens\n        SET expires_at = LEAST(expires_at, $2)\n        WHERE token = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c6bb1ab4ee4d881402f9ff9a3a4dd3ef6bd63a931425da3bd8171f0d8fe69060"
+}
