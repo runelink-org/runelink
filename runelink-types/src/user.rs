@@ -122,16 +122,15 @@ impl UserRef {
     /// Parse "name@host" string into UserRef. Returns None if format is invalid.
     pub fn parse_subject(s: &str) -> Option<Self> {
         let (name, host) = s.split_once('@')?;
-        if name.is_empty() || host.is_empty() {
-            return None;
-        }
-        Some(Self::new(name.to_string(), host.to_string()))
+        let user_ref = Self::new(name.to_string(), host.to_string());
+        (!user_ref.name.is_empty() && !user_ref.host.is_empty())
+            .then_some(user_ref)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::UserRef;
+    use super::{User, UserRef};
 
     #[test]
     fn user_ref_hosts_are_canonical() {
@@ -148,5 +147,17 @@ mod tests {
         )
         .unwrap();
         assert_eq!(parsed, expected);
+        let user: User = serde_json::from_str(
+            r#"{"name":"alice","host":"Example.com:7000","role":"user",
+            "created_at":"2026-01-01T00:00:00Z",
+            "updated_at":"2026-01-01T00:00:00Z","synced_at":null}"#,
+        )
+        .unwrap();
+        assert_eq!(user.as_ref(), expected);
+        assert_eq!(
+            UserRef::new("alice".into(), "Example.com:7001".into()).host,
+            "example.com:7001"
+        );
+        assert_eq!(UserRef::parse_subject("alice@:7000"), None);
     }
 }
