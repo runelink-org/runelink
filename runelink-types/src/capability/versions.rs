@@ -99,7 +99,7 @@ pub mod servers {
     pub const UPDATE_VERSIONS: &[CapabilityVersion] = &[UPDATE_VERSION];
 
     pub const CREATE_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 11, 13);
+        CapabilityVersion::new(2026, 11, 26);
     pub const DELETE_VERSION: CapabilityVersion =
         CapabilityVersion::new(2026, 10, 16);
     pub const EVENTS_VERSION: CapabilityVersion =
