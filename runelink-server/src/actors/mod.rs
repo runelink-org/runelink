@@ -986,4 +986,70 @@ mod tests {
             .unwrap();
         f.cleanup().await;
     }
+
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL pointing to a migrated PostgreSQL database"]
+    async fn channel_actors_that_see_a_panicked_server_stop_for_good() {
+        let f = fixture().await;
+        let server = f
+            .actors
+            .create_server(
+                NewServer {
+                    title: "actors test".into(),
+                    description: None,
+                },
+                f.user.clone(),
+                Authorization::host(),
+            )
+            .await
+            .unwrap();
+        let (_, text_channel_id) = f.text_channel(server.id, "general").await;
+        let old_channel = f.actors.channel(text_channel_id).await.unwrap();
+
+        // Leave the state as a panic in the server actor would, holding the
+        // registry so that the channel actor stops before it is reloaded.
+        let registry = f.actors.registry.lock().await;
+        let state = registry.servers[&server.id].state.clone();
+        let live = std::mem::replace(
+            &mut *state.write().await,
+            ServerState {
+                stopped: true,
+                ..Default::default()
+            },
+        );
+        let queue = |body: &str| {
+            let (reply, result) = oneshot::channel();
+            old_channel
+                .try_send(Envelope {
+                    op: ChannelOp::Create(f.message(body.into())),
+                    auth: Authorization::host(),
+                    reply,
+                })
+                .unwrap();
+            result
+        };
+        let refused = queue("refused");
+        let queued = queue("queued");
+        assert!(matches!(refused.await.unwrap(), Err(ApiError::NotFound)));
+        *state.write().await = live;
+        drop(registry);
+
+        // What it had queued is refused even though the state is back, while
+        // a new actor takes over the channel.
+        assert!(matches!(queued.await.unwrap(), Err(ApiError::NotFound)));
+        f.actors
+            .create_message(
+                text_channel_id,
+                f.message("new actor".into()),
+                Authorization::host(),
+            )
+            .await
+            .unwrap();
+
+        f.actors
+            .delete_server(server.id, Authorization::host())
+            .await
+            .unwrap();
+        f.cleanup().await;
+    }
 }
