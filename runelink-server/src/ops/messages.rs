@@ -11,7 +11,7 @@ use crate::{
     auth::Session,
     config::Locality,
     error::{ApiError, ApiResult},
-    queries,
+    queries::{self, messages::MessageLocation},
     state::AppState,
 };
 
@@ -215,30 +215,49 @@ pub async fn get_by_id(
     }
 }
 
+/// Where an edit or delete of a message goes.
+#[derive(Debug)]
+pub enum MessageTarget<'a> {
+    /// A message on this host.
+    Local(MessageLocation),
+    /// A message on another host, which authorizes the request itself.
+    Remote(&'a str),
+}
+
+/// Find where an edit or delete goes. A local message's location serves both
+/// its permission check and its routing, so it is looked up once.
+pub async fn locate<'a>(
+    state: &AppState,
+    message_id: MessageId,
+    target_host: Option<&'a str>,
+) -> ApiResult<MessageTarget<'a>> {
+    Ok(match state.config.target_locality(target_host) {
+        Locality::Local => MessageTarget::Local(
+            queries::messages::get_location(&state.db_pool, message_id).await?,
+        ),
+        Locality::Remote(host) => MessageTarget::Remote(host),
+    })
+}
+
 /// Delete a message by ID.
 pub async fn delete(
     state: &AppState,
     session: &Session,
     message_id: MessageId,
-    target_host: Option<&str>,
+    target: MessageTarget<'_>,
 ) -> ApiResult<Message> {
-    match state.config.target_locality(target_host) {
-        Locality::Local => {
-            let text_channel_id = queries::messages::get_text_channel_id(
-                &state.db_pool,
-                message_id,
-            )
-            .await?;
+    match target {
+        MessageTarget::Local(location) => {
             state
                 .actors
                 .delete_message(
-                    text_channel_id,
+                    location.text_channel_id,
                     message_id,
                     session.authorization(),
                 )
                 .await
         }
-        Locality::Remote(host) => {
+        MessageTarget::Remote(host) => {
             let user_ref = session.user_ref.as_ref().ok_or_else(|| {
                 ApiError::Internal(
                     "User reference required for federated message deletion"
@@ -287,50 +306,40 @@ pub mod auth {
         state: &AppState,
         message_id: MessageId,
     ) -> ApiResult<Req> {
-        let message =
-            queries::messages::get_by_id(&*state.db_pool, message_id).await?;
-        text_channel_member(state, message.text_channel_id).await
+        let location =
+            queries::messages::get_location(&state.db_pool, message_id).await?;
+        Ok(Req::ServerMember(location.server_id))
     }
 
-    async fn delete_base(
-        state: &AppState,
-        message_id: MessageId,
-    ) -> ApiResult<Req> {
-        let message =
-            queries::messages::get_by_id(&*state.db_pool, message_id).await?;
-        let server_id = queries::channels::get_server_id_by_text_channel(
-            &state.db_pool,
-            message.text_channel_id,
-        )
-        .await?;
-        if let Some(author) = message.author {
-            Ok(or!(Req::User(author.into()), Req::ServerAdmin(server_id)))
-        } else {
-            Ok(Req::ServerAdmin(server_id))
+    fn delete_base(location: &MessageLocation) -> Req {
+        match &location.author {
+            Some(author) => {
+                or!(
+                    Req::User(author.clone()),
+                    Req::ServerAdmin(location.server_id)
+                )
+            }
+            None => Req::ServerAdmin(location.server_id),
         }
     }
 
-    async fn update_base(
-        state: &AppState,
-        message_id: MessageId,
-    ) -> ApiResult<Req> {
-        let message =
-            queries::messages::get_by_id(&*state.db_pool, message_id).await?;
-        let Some(author) = message.author else {
-            return Ok(Req::Never);
-        };
-        let membership = message_member(state, message_id).await?;
-        Ok(crate::and!(Req::User(author.into()), membership))
-    }
-    pub async fn update(
-        state: &AppState,
-        message_id: MessageId,
-        target_host: Option<&str>,
-    ) -> ApiResult<Req> {
-        if state.config.target_locality(target_host).is_remote() {
-            return Ok(Req::Client);
+    fn update_base(location: &MessageLocation) -> Req {
+        match &location.author {
+            Some(author) => crate::and!(
+                Req::User(author.clone()),
+                Req::ServerMember(location.server_id)
+            ),
+            None => Req::Never,
         }
-        Ok(update_base(state, message_id).await?.client_only())
+    }
+
+    pub fn update(target: &MessageTarget) -> Req {
+        match target {
+            MessageTarget::Local(location) => {
+                update_base(location).client_only()
+            }
+            MessageTarget::Remote(_) => Req::Client,
+        }
     }
     /// Members post as themselves only.
     pub async fn create(
@@ -376,26 +385,20 @@ pub mod auth {
         Ok(base.or_admin().client_only())
     }
 
-    pub async fn delete(
-        state: &AppState,
-        message_id: MessageId,
-        target_host: Option<&str>,
-    ) -> ApiResult<Req> {
-        if state.config.target_locality(target_host).is_remote() {
-            return Ok(Req::Client);
+    pub fn delete(target: &MessageTarget) -> Req {
+        match target {
+            MessageTarget::Local(location) => {
+                delete_base(location).or_admin().client_only()
+            }
+            MessageTarget::Remote(_) => Req::Client,
         }
-        let base = delete_base(state, message_id).await?;
-        Ok(base.or_admin().client_only())
     }
 
     pub mod federated {
         use super::*;
 
-        pub async fn update(
-            state: &AppState,
-            message_id: MessageId,
-        ) -> ApiResult<Req> {
-            Ok(update_base(state, message_id).await?.federated_only())
+        pub fn update(location: &MessageLocation) -> Req {
+            update_base(location).federated_only()
         }
         /// Members post as themselves only.
         pub async fn create(
@@ -431,53 +434,51 @@ pub mod auth {
             Ok(base.federated_only())
         }
 
-        pub async fn delete(
-            state: &AppState,
-            message_id: MessageId,
-        ) -> ApiResult<Req> {
+        pub fn delete(location: &MessageLocation) -> Req {
             // TODO: Check if the author is from the same host as the server
-            let base = delete_base(state, message_id).await?;
-            Ok(base.federated_only())
+            delete_base(location).federated_only()
         }
     }
 }
 
+/// Edit a message by ID.
 pub async fn update(
     state: &AppState,
     session: &Session,
     message_id: MessageId,
     message_update: &runelink_types::message::MessageUpdate,
-    target_host: Option<&str>,
+    target: MessageTarget<'_>,
 ) -> ApiResult<Message> {
-    if let Locality::Remote(host) = state.config.target_locality(target_host) {
-        let user_ref = session.user_ref.clone().ok_or_else(|| {
-            ApiError::AuthError("User identity required".into())
-        })?;
-        let reply = federation::request(
-            state,
-            host,
-            Some(user_ref),
-            FederationWsRequest::MessagesUpdate {
-                message_id,
-                message_update: message_update.clone(),
-            },
-        )
-        .await?;
-        let FederationWsReply::MessagesUpdate(resource) = reply else {
-            return Err(ApiError::Internal("Unexpected edit reply".into()));
-        };
-        return Ok(resource);
-    }
-    let text_channel_id =
-        queries::messages::get_text_channel_id(&state.db_pool, message_id)
+    match target {
+        MessageTarget::Local(location) => {
+            state
+                .actors
+                .update_message(
+                    location.text_channel_id,
+                    message_id,
+                    message_update.clone(),
+                    session.authorization(),
+                )
+                .await
+        }
+        MessageTarget::Remote(host) => {
+            let user_ref = session.user_ref.clone().ok_or_else(|| {
+                ApiError::AuthError("User identity required".into())
+            })?;
+            let reply = federation::request(
+                state,
+                host,
+                Some(user_ref),
+                FederationWsRequest::MessagesUpdate {
+                    message_id,
+                    message_update: message_update.clone(),
+                },
+            )
             .await?;
-    state
-        .actors
-        .update_message(
-            text_channel_id,
-            message_id,
-            message_update.clone(),
-            session.authorization(),
-        )
-        .await
+            let FederationWsReply::MessagesUpdate(resource) = reply else {
+                return Err(ApiError::Internal("Unexpected edit reply".into()));
+            };
+            Ok(resource)
+        }
+    }
 }

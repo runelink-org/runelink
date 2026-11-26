@@ -2,7 +2,7 @@ use runelink_types::{
     channel::TextChannelId,
     message::{Message, MessageContent, MessageId, NewMessage},
     server::ServerId,
-    user::User,
+    user::{User, UserRef},
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{PgConnection, PgExecutor, types::Json};
@@ -250,18 +250,39 @@ pub async fn get_by_id(
     db_message.try_into()
 }
 
-/// Get the text channel that holds a message.
-pub async fn get_text_channel_id(
+/// Where a message lives, and its author if they still exist.
+#[derive(Debug)]
+pub struct MessageLocation {
+    pub server_id: ServerId,
+    pub text_channel_id: TextChannelId,
+    pub author: Option<UserRef>,
+}
+
+/// Get where a message lives and who wrote it.
+pub async fn get_location(
     pool: &DbPool,
     message_id: MessageId,
-) -> ApiResult<TextChannelId> {
-    let text_channel_id = sqlx::query_scalar!(
-        "SELECT text_channel_id FROM messages WHERE id = $1;",
+) -> ApiResult<MessageLocation> {
+    let row = sqlx::query!(
+        r#"
+        SELECT c.server_id, m.text_channel_id, m.author_name, m.author_host
+        FROM messages m
+        JOIN server_channels c ON c.text_channel_id = m.text_channel_id
+        WHERE m.id = $1
+        "#,
         message_id.as_uuid(),
     )
     .fetch_one(pool)
     .await?;
-    Ok(text_channel_id.into())
+    let author = row
+        .author_name
+        .zip(row.author_host)
+        .map(|(name, host)| UserRef::new(name, host));
+    Ok(MessageLocation {
+        server_id: row.server_id.into(),
+        text_channel_id: row.text_channel_id.into(),
+        author,
+    })
 }
 
 /// Retain identity and relationships, clear text, and preserve the first

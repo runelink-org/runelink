@@ -597,15 +597,16 @@ pub(super) async fn handle_client_request(
             message_update,
             target_host,
         } => {
+            let target = ops::messages::locate(
+                state,
+                message_id,
+                target_host.as_deref(),
+            )
+            .await?;
             let session = authorize_client(
                 state,
                 conn_id,
-                ops::messages::auth::update(
-                    state,
-                    message_id,
-                    target_host.as_deref(),
-                )
-                .await?,
+                ops::messages::auth::update(&target),
             )
             .await?;
             let resource = ops::messages::update(
@@ -613,7 +614,7 @@ pub(super) async fn handle_client_request(
                 &session,
                 message_id,
                 &message_update,
-                target_host.as_deref(),
+                target,
             )
             .await?;
             Ok(ClientWsReply::MessagesUpdate(resource))
@@ -622,13 +623,20 @@ pub(super) async fn handle_client_request(
             message_id,
             target_host,
         } => {
-            let target_host = target_host.as_deref();
-            let requirement =
-                ops::messages::auth::delete(state, message_id, target_host)
-                    .await?;
-            let session = authorize_client(state, conn_id, requirement).await?;
+            let target = ops::messages::locate(
+                state,
+                message_id,
+                target_host.as_deref(),
+            )
+            .await?;
+            let session = authorize_client(
+                state,
+                conn_id,
+                ops::messages::auth::delete(&target),
+            )
+            .await?;
             let message =
-                ops::messages::delete(state, &session, message_id, target_host)
+                ops::messages::delete(state, &session, message_id, target)
                     .await?;
             Ok(ClientWsReply::MessagesDelete(message))
         }
