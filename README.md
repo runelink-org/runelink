@@ -56,7 +56,7 @@ Capabilities describe protocol compatibility, not authorization. Permissions rem
 Authentication is local to your home host. The current server exposes OIDC-style discovery endpoints and a token endpoint supporting:
 
 - `password` grant (username/password) to get an access token + refresh token
-- `refresh_token` grant to mint new access tokens
+- `refresh_token` grant to mint a new access token + refresh token. The old refresh token keeps working for up to 2 minutes, for clients that refresh with it at the same time
 
 This is intentionally *not* federated: your end-user credentials are never shared with remote hosts.
 
