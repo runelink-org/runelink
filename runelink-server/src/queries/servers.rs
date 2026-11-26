@@ -187,7 +187,7 @@ pub async fn update(
         return Err(ApiError::BadRequest("Title cannot be empty".into()));
     }
     let mut row = sqlx::query_as::<_, LocalServerRow>(
-        "SELECT * FROM servers WHERE id = $1 FOR UPDATE",
+        "SELECT * FROM servers WHERE id = $1",
     )
     .bind(server_id)
     .fetch_one(&mut *conn)

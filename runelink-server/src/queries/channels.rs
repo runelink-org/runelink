@@ -68,23 +68,6 @@ impl TryFrom<ServerChannelRow> for ServerChannel {
     }
 }
 
-/// Lock a server's channel tree until the transaction ends, serializing
-/// changes to it. Fails with `NotFound` if the server does not exist. The
-/// server's actor already serializes these changes, so this is only a second
-/// layer of protection.
-pub async fn lock_tree(
-    conn: &mut PgConnection,
-    server_id: ServerId,
-) -> ApiResult<()> {
-    sqlx::query_scalar!(
-        "SELECT id FROM servers WHERE id = $1 FOR NO KEY UPDATE;",
-        server_id.as_uuid(),
-    )
-    .fetch_one(conn)
-    .await?;
-    Ok(())
-}
-
 /// Insert a server channel after its siblings, along with the text channel
 /// it owns if it is a text channel.
 pub async fn insert(
@@ -303,7 +286,7 @@ pub async fn update(
             .map_err(ApiError::BadRequest)?;
     }
     let mut row = sqlx::query_as::<_, ServerChannelRow>(
-        "SELECT * FROM server_channels WHERE id = $1 AND server_id = $2 FOR UPDATE",
+        "SELECT * FROM server_channels WHERE id = $1 AND server_id = $2",
     )
     .bind(channel_id)
     .bind(server_id)

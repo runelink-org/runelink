@@ -322,7 +322,6 @@ pub async fn update(
         FROM messages m
         LEFT JOIN users a ON a.name = m.author_name AND a.host = m.author_host
         WHERE m.id = $1 AND m.text_channel_id = $2
-        FOR UPDATE OF m
     "#,
     )
     .bind(message_id)

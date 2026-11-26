@@ -21,6 +21,9 @@
 //!
 //! Lock order: the registry, then a server's state. An actor never takes the
 //! registry while it holds its server's state.
+//!
+//! Actors serialize changes within one process only, and no database locks
+//! back them up, so only one process may serve a database at a time.
 
 mod channel;
 mod server;
