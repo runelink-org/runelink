@@ -161,6 +161,8 @@ cargo run
 
 If your config contains multiple `[[servers]]` entries, `runelink-server` will infer cluster mode and start multiple server instances in one process.
 
+Only one `runelink-server` process may use a database at a time. When upgrading, stop the old process before starting the new one.
+
 You can verify it's up with:
 
 ```bash

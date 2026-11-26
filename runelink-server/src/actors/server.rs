@@ -255,7 +255,6 @@ async fn apply(
         }
 
         ServerOp::CreateChannel(new_channel) => {
-            queries::channels::lock_tree(conn, server_id).await?;
             if let Some(parent_id) = new_channel.parent_channel_id {
                 let parent =
                     queries::channels::get_by_id(&mut *conn, parent_id)
@@ -299,7 +298,6 @@ async fn apply(
             channel_id,
             channel_move,
         } => {
-            queries::channels::lock_tree(conn, server_id).await?;
             let channels =
                 queries::channels::list(&mut *conn, Some(server_id)).await?;
             let planned =
@@ -316,7 +314,6 @@ async fn apply(
         }
 
         ServerOp::DeleteChannel(channel_id) => {
-            queries::channels::lock_tree(conn, server_id).await?;
             if queries::channels::has_children(
                 &mut *conn, server_id, channel_id,
             )
