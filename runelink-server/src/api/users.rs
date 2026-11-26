@@ -56,7 +56,7 @@ pub async fn get_by_ref(
         "GET /users/{host}/{name}?target_host={:?}",
         params.target_host
     );
-    let user_ref = UserRef::new(name, host);
+    let user_ref = UserRef::new(name, host)?;
     let user =
         ops::users::get_by_ref(&state, user_ref, params.target_host.as_deref())
             .await?;
@@ -73,7 +73,7 @@ pub async fn get_associated_hosts(
         "GET /users/{host}/{name}/hosts?target_host={:?}",
         params.target_host
     );
-    let user_ref = UserRef::new(name, host);
+    let user_ref = UserRef::new(name, host)?;
     let hosts = ops::users::get_associated_hosts(
         &state,
         user_ref,
@@ -89,7 +89,7 @@ pub async fn delete(
     headers: HeaderMap,
     Path((host, name)): Path<(String, String)>,
 ) -> ApiResult<impl IntoResponse> {
-    let user_ref = UserRef::new(name.clone(), host.clone());
+    let user_ref = UserRef::new(name.clone(), host.clone())?;
     info!("DELETE /users/{host}/{name}");
     let session = authorize(
         &state,

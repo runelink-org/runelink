@@ -12,16 +12,13 @@ use axum::{
     response::IntoResponse,
 };
 use futures_util::{SinkExt, StreamExt};
-use runelink_client::{
-    util::{get_api_url, host_from_issuer},
-    validation::validate_host,
-};
+use runelink_client::util::{get_api_url, host_from_issuer};
 use runelink_types::{
     capability::{
         CapabilityWelcome, NegotiatedCapabilities, negotiate_capabilities,
         supported_capabilities, versions::NEGOTIATION_VERSION,
     },
-    user::UserRef,
+    user::{UserRef, canonical_host},
     ws::{ClientWsEnvelope, FederationWsEnvelope},
 };
 use tokio::{
@@ -253,7 +250,7 @@ async fn client_ws_loop(
 /// The host named by a federation issuer, which must be that host's exact
 /// canonical API URL.
 fn issuer_host(iss: &str, secure: bool) -> Option<String> {
-    let host = validate_host(&host_from_issuer(iss)).ok()?;
+    let host = canonical_host(&host_from_issuer(iss)).ok()?;
     (iss == get_api_url(&host, secure)).then_some(host)
 }
 

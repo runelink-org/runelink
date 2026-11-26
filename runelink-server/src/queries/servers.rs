@@ -63,8 +63,8 @@ pub async fn upsert_remote(
     server: &Server,
     source_host: &str,
 ) -> ApiResult<()> {
-    let host = canonical_host(&server.host);
-    if host != canonical_host(source_host) {
+    let host = canonical_host(&server.host)?;
+    if host != canonical_host(source_host)? {
         return Err(ApiError::Conflict(format!(
             "{source_host} cannot report servers on {}",
             server.host
@@ -123,7 +123,7 @@ pub async fn delete_remote(
     sqlx::query!(
         "DELETE FROM cached_remote_servers WHERE id = $1 AND host = $2",
         server_id.as_uuid(),
-        canonical_host(source_host),
+        canonical_host(source_host)?,
     )
     .execute(pool)
     .await?;

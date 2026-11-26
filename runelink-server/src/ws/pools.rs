@@ -321,6 +321,13 @@ struct FederationPoolState {
     authentications: u64,
 }
 
+impl FederationPoolState {
+    /// The connection that a host is sent messages on, if any.
+    fn host_conn(&self, host: &str) -> Option<ConnId> {
+        self.by_host.get(&canonical_host(host).ok()?).copied()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct FederationConn {
     pub sender: mpsc::UnboundedSender<FederationWsEnvelope>,
@@ -365,7 +372,9 @@ impl FederationWsPool {
         host: String,
         issuer: String,
     ) -> bool {
-        let host = canonical_host(&host);
+        let Ok(host) = canonical_host(&host) else {
+            return false;
+        };
         let mut state = self.inner.write().await;
         let previous_host_for_conn = match state.connections.get(&conn_id) {
             Some(conn) => conn.host.clone(),
@@ -405,8 +414,7 @@ impl FederationWsPool {
         let target = {
             let state = self.inner.read().await;
             let conn_id = host
-                .and_then(|host| state.by_host.get(&canonical_host(host)))
-                .copied()
+                .and_then(|host| state.host_conn(host))
                 .unwrap_or(conn_id);
             state
                 .connections
@@ -461,8 +469,7 @@ impl FederationWsPool {
     /// Returns whether the given host currently has an authenticated connection.
     pub async fn has_host(&self, host: &str) -> bool {
         let state = self.inner.read().await;
-        let Some(conn_id) = state.by_host.get(&canonical_host(host)).copied()
-        else {
+        let Some(conn_id) = state.host_conn(host) else {
             return false;
         };
         state.connections.contains_key(&conn_id)
@@ -474,12 +481,12 @@ impl FederationWsPool {
         capability: &VersionedCapability,
     ) -> bool {
         let state = self.inner.read().await;
-        let Some(conn_id) = state.by_host.get(&canonical_host(host)) else {
+        let Some(conn_id) = state.host_conn(host) else {
             return false;
         };
         state
             .connections
-            .get(conn_id)
+            .get(&conn_id)
             .is_some_and(|conn| supports(&conn.capabilities, capability))
     }
 
@@ -493,8 +500,7 @@ impl FederationWsPool {
         loop {
             let (conn_id, sender) = {
                 let state = self.inner.read().await;
-                let Some(&conn_id) = state.by_host.get(&canonical_host(host))
-                else {
+                let Some(conn_id) = state.host_conn(host) else {
                     return HostSend::NotConnected;
                 };
                 let Some(conn) = state.connections.get(&conn_id) else {

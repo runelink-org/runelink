@@ -423,7 +423,7 @@ impl Actors {
         auth: Authorization,
     ) -> ApiResult<User> {
         let user_ref =
-            UserRef::new(new_user.name.clone(), new_user.host.clone());
+            UserRef::new(new_user.name.clone(), new_user.host.clone())?;
         let op = UserOp::Create {
             new_user,
             password_hash,
@@ -656,7 +656,8 @@ mod tests {
         let user = UserRef::new(
             format!("actors-test-{}", ServerId::new().as_uuid().simple()),
             config.public_host(),
-        );
+        )
+        .unwrap();
         sqlx::query(
             "INSERT INTO users (name, host, role) VALUES ($1, $2, 'user')",
         )

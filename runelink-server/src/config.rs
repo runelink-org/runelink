@@ -152,7 +152,10 @@ pub use runelink_types::user::canonical_host;
 
 /// Whether two host strings name the same host.
 pub fn hosts_match(a: &str, b: &str) -> bool {
-    canonical_host(a) == canonical_host(b)
+    matches!(
+        (canonical_host(a), canonical_host(b)),
+        (Ok(a), Ok(b)) if a == b
+    )
 }
 
 #[derive(Deserialize, Debug)]
@@ -177,13 +180,13 @@ struct RawServerConfig {
 
 impl RawServerConfig {
     fn resolve(self, index: usize) -> ConfigResult<ServerConfig> {
-        let public_host =
-            validate_config_host(&self.public_host).map_err(|error| {
-                ConfigError::InvalidServerEntry {
-                    index,
-                    reason: error.to_string(),
-                }
-            })?;
+        let invalid =
+            |reason: String| ConfigError::InvalidServerEntry { index, reason };
+        let public_host = validate_config_host(&self.public_host)
+            .map_err(|error| invalid(error.to_string()))?;
+        // In the spelling that hosts in requests are canonicalized to.
+        let public_host = canonical_host(&public_host)
+            .map_err(|error| invalid(error.to_string()))?;
         let database_url = self.database_url.trim().to_string();
         if database_url.is_empty() {
             return Err(ConfigError::InvalidServerEntry {
