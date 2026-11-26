@@ -3,7 +3,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
-use log::info;
+use log::debug;
 use runelink_types::{
     server::{NewServerMembership, ServerId},
     user::UserRef,
@@ -28,7 +28,7 @@ pub async fn get_members_by_server(
     Path(server_id): Path<ServerId>,
     Query(params): Query<MembershipQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "GET /servers/{server_id}/users?target_host={:?}",
         params.target_host
     );
@@ -47,7 +47,7 @@ pub async fn get_by_user_and_server(
     Path((server_id, host, name)): Path<(ServerId, String, String)>,
     Query(params): Query<MembershipQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "GET /servers/{server_id}/users/{host}/{name}?target_host={:?}",
         params.target_host
     );
@@ -68,7 +68,7 @@ pub async fn create(
     Path(server_id): Path<ServerId>,
     Json(new_membership): Json<NewServerMembership>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "POST /servers/{server_id}/users\nnew_membership = {:#?}",
         new_membership
     );
@@ -94,7 +94,7 @@ pub async fn get_by_user(
     State(state): State<AppState>,
     Path((host, name)): Path<(String, String)>,
 ) -> ApiResult<impl IntoResponse> {
-    info!("GET /users/{host}/{name}/servers");
+    debug!("GET /users/{host}/{name}/servers");
     let user_ref = UserRef::new(name, host)?;
     let memberships = ops::memberships::get_by_user(&state, user_ref).await?;
     Ok((StatusCode::OK, Json(memberships)))
@@ -107,7 +107,7 @@ pub async fn delete(
     Path((server_id, host, name)): Path<(ServerId, String, String)>,
     Query(params): Query<MembershipQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "DELETE /servers/{server_id}/users/{host}/{name}?target_host={:?}",
         params.target_host
     );

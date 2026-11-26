@@ -1,4 +1,4 @@
-use log::info;
+use log::debug;
 use runelink_types::{
     server::ServerId,
     user::UserRef,
@@ -67,7 +67,7 @@ pub(super) async fn handle_federation_update(
     sender: &str,
     update: FederationWsUpdate,
 ) -> ApiResult<()> {
-    info!("WS federation: update from {sender}: {update:#?}");
+    debug!("WS federation: update from {sender}: {update:#?}");
     if state.config.locality(sender).is_local() {
         return Err(ApiError::AuthError(
             "Federation updates cannot come from the local host".into(),
@@ -234,7 +234,7 @@ pub(super) async fn handle_federation_request(
     delegated_user_ref: Option<UserRef>,
     request: FederationWsRequest,
 ) -> ApiResult<FederationWsReply> {
-    info!("WS federation: request={:#?}", request);
+    debug!("WS federation: request={:#?}", request);
     match request {
         FederationWsRequest::ConnectionState => {
             let state = match state

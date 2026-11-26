@@ -3,7 +3,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
-use log::info;
+use log::debug;
 use runelink_types::{
     channel::TextChannelId,
     message::{MessageId, NewMessage},
@@ -31,7 +31,7 @@ pub async fn create(
     Query(params): Query<MessageQueryParams>,
     Json(new_message): Json<NewMessage>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "POST /text_channels/{text_channel_id}/messages?target_host={:?}\nnew_message = {:#?}",
         params.target_host, new_message
     );
@@ -65,7 +65,7 @@ pub async fn get_all(
     headers: HeaderMap,
     Query(params): Query<MessageQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!("GET /messages?target_host={:?}", params.target_host);
+    debug!("GET /messages?target_host={:?}", params.target_host);
     let session = authorize(
         &state,
         Principal::from_client_headers(&headers, &state)?,
@@ -85,7 +85,7 @@ pub async fn get_by_server(
     Path(server_id): Path<ServerId>,
     Query(params): Query<MessageQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "GET /servers/{server_id}/messages?target_host={:?}",
         params.target_host
     );
@@ -112,7 +112,7 @@ pub async fn get_by_text_channel(
     Path(text_channel_id): Path<TextChannelId>,
     Query(params): Query<MessageQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "GET /text_channels/{text_channel_id}/messages?target_host={:?}",
         params.target_host
     );
@@ -145,7 +145,7 @@ pub async fn get_by_id(
     Path(message_id): Path<MessageId>,
     Query(params): Query<MessageQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "GET /messages/{message_id}?target_host={:?}",
         params.target_host
     );
@@ -169,7 +169,7 @@ pub async fn delete(
     Path(message_id): Path<MessageId>,
     Query(params): Query<MessageQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "DELETE /messages/{message_id}?target_host={:?}",
         params.target_host
     );

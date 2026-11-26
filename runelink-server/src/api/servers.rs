@@ -3,7 +3,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
-use log::info;
+use log::debug;
 use runelink_types::server::{NewServer, ServerId};
 use serde::Deserialize;
 
@@ -26,7 +26,7 @@ pub async fn create(
     Query(params): Query<ServerQueryParams>,
     Json(new_server): Json<NewServer>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "POST /servers?target_host={:?}\nnew_server = {:#?}",
         params.target_host, new_server
     );
@@ -51,7 +51,7 @@ pub async fn get_all(
     State(state): State<AppState>,
     Query(params): Query<ServerQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!("GET /servers?target_host={:?}", params.target_host);
+    debug!("GET /servers?target_host={:?}", params.target_host);
     let servers =
         ops::servers::get_all(&state, params.target_host.as_deref()).await?;
     Ok((StatusCode::OK, Json(servers)))
@@ -63,7 +63,7 @@ pub async fn get_by_id(
     Path(server_id): Path<ServerId>,
     Query(params): Query<ServerQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "GET /servers/{server_id}?target_host={:?}",
         params.target_host
     );
@@ -83,7 +83,7 @@ pub async fn get_with_channels(
     Path(server_id): Path<ServerId>,
     Query(params): Query<ServerQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "GET /servers/{server_id}/with_channels?target_host={:?}",
         params.target_host
     );
@@ -110,7 +110,7 @@ pub async fn delete(
     Path(server_id): Path<ServerId>,
     Query(params): Query<ServerQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "DELETE /servers/{server_id}?target_host={:?}",
         params.target_host
     );

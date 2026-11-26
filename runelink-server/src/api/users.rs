@@ -9,7 +9,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
-use log::info;
+use log::debug;
 use runelink_types::{NewUser, UserRef};
 use serde::Deserialize;
 
@@ -24,7 +24,7 @@ pub async fn create(
     headers: HeaderMap,
     Json(new_user): Json<NewUser>,
 ) -> ApiResult<impl IntoResponse> {
-    info!("POST /users\nnew_user = {:#?}", new_user);
+    debug!("POST /users\nnew_user = {:#?}", new_user);
     let session = authorize(
         &state,
         Principal::from_client_headers(&headers, &state)?,
@@ -40,7 +40,7 @@ pub async fn get_all(
     State(state): State<AppState>,
     Query(params): Query<UserQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!("GET /users?target_host={:?}", params.target_host);
+    debug!("GET /users?target_host={:?}", params.target_host);
     let users =
         ops::users::get_all(&state, params.target_host.as_deref()).await?;
     Ok((StatusCode::OK, Json(users)))
@@ -52,7 +52,7 @@ pub async fn get_by_ref(
     Path((host, name)): Path<(String, String)>,
     Query(params): Query<UserQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "GET /users/{host}/{name}?target_host={:?}",
         params.target_host
     );
@@ -69,7 +69,7 @@ pub async fn get_associated_hosts(
     Path((host, name)): Path<(String, String)>,
     Query(params): Query<UserQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
-    info!(
+    debug!(
         "GET /users/{host}/{name}/hosts?target_host={:?}",
         params.target_host
     );
@@ -90,7 +90,7 @@ pub async fn delete(
     Path((host, name)): Path<(String, String)>,
 ) -> ApiResult<impl IntoResponse> {
     let user_ref = UserRef::new(name.clone(), host.clone())?;
-    info!("DELETE /users/{host}/{name}");
+    debug!("DELETE /users/{host}/{name}");
     let session = authorize(
         &state,
         Principal::from_client_headers(&headers, &state)?,
