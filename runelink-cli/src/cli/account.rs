@@ -14,7 +14,7 @@ use crate::{
     },
     error::CliError,
     storage::{AccountConfig, resolve_api_url},
-    storage_auth::AccountAuth,
+    storage_auth::{AccountAuth, AuthCache},
     util::{self, parse_user_ref_input},
 };
 
@@ -412,6 +412,7 @@ pub async fn handle_account_commands(
                 ctx.account.ok_or(CliError::MissingAccount)?
             };
 
+            *ctx.auth_cache = AuthCache::load()?;
             let message = if ctx.auth_cache.remove(&account.user_ref).is_some()
             {
                 ctx.auth_cache.save()?;
@@ -551,6 +552,7 @@ pub async fn handle_account_commands(
             )
             .await?;
 
+            *ctx.auth_cache = AuthCache::load()?;
             ctx.auth_cache.remove(&user_ref);
             ctx.config.accounts.retain(|a| a.user_ref != user_ref);
             if ctx.config.active_account.as_ref() == Some(&user_ref) {

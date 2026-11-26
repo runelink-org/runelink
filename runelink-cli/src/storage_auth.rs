@@ -45,11 +45,6 @@ impl AuthCache {
         self.accounts.get(&user_ref.as_subject())
     }
 
-    /// Get mutable auth data for a user.
-    pub fn get_mut(&mut self, user_ref: &UserRef) -> Option<&mut AccountAuth> {
-        self.accounts.get_mut(&user_ref.as_subject())
-    }
-
     /// Set auth data for a user.
     pub fn set(&mut self, user_ref: &UserRef, auth: AccountAuth) {
         self.accounts.insert(user_ref.as_subject(), auth);
