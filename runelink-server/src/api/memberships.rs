@@ -54,7 +54,7 @@ pub async fn get_by_user_and_server(
     let member = ops::memberships::get_member_by_user_and_server(
         &state,
         server_id,
-        UserRef::new(name, host),
+        UserRef::new(name, host)?,
         params.target_host.as_deref(),
     )
     .await?;
@@ -95,7 +95,7 @@ pub async fn get_by_user(
     Path((host, name)): Path<(String, String)>,
 ) -> ApiResult<impl IntoResponse> {
     info!("GET /users/{host}/{name}/servers");
-    let user_ref = UserRef::new(name, host);
+    let user_ref = UserRef::new(name, host)?;
     let memberships = ops::memberships::get_by_user(&state, user_ref).await?;
     Ok((StatusCode::OK, Json(memberships)))
 }
@@ -111,7 +111,7 @@ pub async fn delete(
         "DELETE /servers/{server_id}/users/{host}/{name}?target_host={:?}",
         params.target_host
     );
-    let user_ref = UserRef::new(name, host);
+    let user_ref = UserRef::new(name, host)?;
     let mut session = authorize(
         &state,
         Principal::from_client_headers(&headers, &state)?,

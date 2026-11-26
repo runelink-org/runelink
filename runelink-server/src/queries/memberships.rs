@@ -82,7 +82,7 @@ impl ServerMembershipRow {
             user_ref: UserRef::new(
                 self.user_name.ok_or_else(get_error)?,
                 self.user_host.ok_or_else(get_error)?,
-            ),
+            )?,
             role: self.role.ok_or_else(get_error)?,
             joined_at: self.created_at.ok_or_else(get_error)?,
             updated_at: self.updated_at.ok_or_else(get_error)?,
@@ -219,10 +219,9 @@ pub async fn get_local_roles(
     )
     .fetch_all(executor)
     .await?;
-    Ok(rows
-        .into_iter()
-        .map(|row| (UserRef::new(row.user_name, row.user_host), row.role))
-        .collect())
+    rows.into_iter()
+        .map(|row| Ok((UserRef::new(row.user_name, row.user_host)?, row.role)))
+        .collect()
 }
 
 /// The local servers a user belongs to.
@@ -272,7 +271,7 @@ pub async fn get_remote_server_members(
     let users = rows
         .into_iter()
         .filter_map(|row| Some(UserRef::new(row.user_name?, row.user_host?)))
-        .collect();
+        .collect::<Result<_, _>>()?;
     Ok(Some(RemoteServerMembers { host, users }))
 }
 

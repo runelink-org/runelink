@@ -308,7 +308,7 @@ pub mod auth {
         use super::*;
 
         fn user() -> UserRef {
-            UserRef::new("alice".into(), "example.com".into())
+            UserRef::new("alice".into(), "example.com".into()).unwrap()
         }
 
         #[test]

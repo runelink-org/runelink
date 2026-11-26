@@ -603,7 +603,7 @@ mod tests {
     use serde_json::json;
 
     fn alice() -> UserRef {
-        UserRef::new("alice".into(), "localhost".into())
+        UserRef::new("alice".into(), "localhost".into()).unwrap()
     }
 
     #[test]

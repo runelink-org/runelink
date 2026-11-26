@@ -149,7 +149,9 @@ impl FederationWsManager {
         host: String,
         issuer: String,
     ) -> bool {
-        let host = canonical_host(&host);
+        let Ok(host) = canonical_host(&host) else {
+            return false;
+        };
         let mut waiting = self.waiting.lock().await;
         if !self
             .pool
@@ -306,7 +308,7 @@ impl FederationWsManager {
         };
         let hosts = hosts
             .into_iter()
-            .map(|host| canonical_host(host.as_ref()))
+            .filter_map(|host| canonical_host(host.as_ref()).ok())
             .collect::<HashSet<_>>();
         if hosts.is_empty() {
             return;
@@ -390,7 +392,7 @@ impl FederationWsManager {
     ) -> bool {
         let mut waiting = self.waiting.lock().await;
         if let Some(queue) =
-            host.and_then(|host| waiting.get_mut(&canonical_host(host)))
+            host.and_then(|host| waiting.get_mut(&canonical_host(host).ok()?))
         {
             queue.push(envelope);
             return true;
@@ -446,7 +448,9 @@ impl FederationWsManager {
         if self.pool.has_host(host).await {
             return true;
         }
-        let key = canonical_host(host);
+        let Ok(key) = canonical_host(host) else {
+            return false;
+        };
         let attempt = {
             let mut connecting = self.connecting.lock().await;
             match connecting.get(&key) {

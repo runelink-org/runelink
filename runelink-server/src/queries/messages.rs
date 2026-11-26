@@ -277,7 +277,8 @@ pub async fn get_location(
     let author = row
         .author_name
         .zip(row.author_host)
-        .map(|(name, host)| UserRef::new(name, host));
+        .map(|(name, host)| UserRef::new(name, host))
+        .transpose()?;
     Ok(MessageLocation {
         server_id: row.server_id.into(),
         text_channel_id: row.text_channel_id.into(),

@@ -5,7 +5,7 @@ use runelink_types::{
     ws::{FederationWsReply, FederationWsRequest},
 };
 
-use crate::{error::ApiResult, state::AppState};
+use crate::{config::canonical_host, error::ApiResult, state::AppState};
 
 // Leave room for the peer's database acquisition timeout and query execution.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -16,15 +16,17 @@ pub(super) async fn request(
     delegated_user_ref: Option<UserRef>,
     request: FederationWsRequest,
 ) -> ApiResult<FederationWsReply> {
+    // Connecting to the host builds its URL from this spelling.
+    let host = canonical_host(host)?;
     let request_future =
         Box::pin(state.federation_ws_manager.send_request_to_host(
             state,
-            host,
+            &host,
             delegated_user_ref,
             request,
             REQUEST_TIMEOUT,
         ));
     request_future
         .await
-        .map_err(|error| error.into_api_error(host))
+        .map_err(|error| error.into_api_error(&host))
 }
