@@ -35,8 +35,9 @@ async fn main() -> ExitCode {
         let cli = Cli::parse();
         let client = transport::build_client()?;
         handle_cli(&client, &cli, &mut config, &mut auth_cache).await?;
+        // Changes to the auth cache are saved as they are made. Saving it
+        // here would overwrite tokens that other commands refreshed meanwhile.
         config.save()?;
-        auth_cache.save()?;
         Ok(())
     }
 
