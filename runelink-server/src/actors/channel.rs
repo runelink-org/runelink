@@ -50,9 +50,11 @@ pub(super) fn spawn(
             if !state.text_channels.contains(&text_channel_id) {
                 let _ = reply.send(Err(ApiError::NotFound));
                 drop(state);
-                // The channel is gone for good. Its server actor clears it
-                // from the registry, unless it was deleted before this actor
-                // was registered.
+                // The channel is gone, or its server actor panicked and a
+                // reload can restore it. Either way, this actor refuses what
+                // it has queued without checking the state again, and stops.
+                // It leaves the registry here if its server actor didn't
+                // clear it.
                 inbox.close();
                 let mut registry = registry.lock().await;
                 if registry
@@ -62,7 +64,11 @@ pub(super) fn spawn(
                 {
                     registry.channels.remove(&text_channel_id);
                 }
-                continue;
+                drop(registry);
+                while let Some(Envelope { reply, .. }) = inbox.recv().await {
+                    let _ = reply.send(Err(ApiError::NotFound));
+                }
+                break;
             }
             let result = execute(
                 &ctx,

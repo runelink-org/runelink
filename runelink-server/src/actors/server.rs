@@ -15,7 +15,7 @@ use runelink_types::{
     ws::{ClientWsUpdate, FederationWsUpdate},
 };
 use sqlx::{PgConnection, Postgres, Transaction};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, RwLockWriteGuard, mpsc};
 
 use super::{
     ActorCtx, ActorFacts, Envelope, MAILBOX_CAPACITY, Registry, ServerMailbox,
@@ -114,14 +114,15 @@ async fn run(
     mut inbox: mpsc::Receiver<Envelope<ServerOp, ServerOutput>>,
 ) {
     while let Some(Envelope { op, auth, reply }) = inbox.recv().await {
-        let mut state = state.write().await;
+        let mut guard = StopOnPanic(state.write().await);
+        let state = &mut *guard.0;
         if state.stopped {
             let _ = reply.send(Err(ApiError::NotFound));
             continue;
         }
         let creating = matches!(op, ServerOp::Create { .. });
         let mut untrusted = false;
-        let result = match execute(&ctx, server_id, &state, op, auth).await {
+        let result = match execute(&ctx, server_id, state, op, auth).await {
             Ok((tx, outcome)) => match tx.commit().await {
                 Ok(()) => Ok(outcome),
                 Err(error) => {
@@ -184,7 +185,7 @@ async fn run(
             state.stopped = true;
             removed_channels.extend(state.text_channels.drain());
         }
-        drop(state);
+        drop(guard);
 
         if stop || !removed_channels.is_empty() {
             let mut registry = registry.lock().await;
@@ -197,6 +198,21 @@ async fn run(
                 // Operations already queued find the server gone.
                 inbox.close();
             }
+        }
+    }
+}
+
+/// The server actor's hold on its state. If the actor panics, possibly after a
+/// commit that its state doesn't reflect yet, the state is marked stopped as it
+/// would be for an untrusted state. Its channel actors then refuse operations
+/// and stop until the actor is replaced and the state reloaded.
+struct StopOnPanic<'a>(RwLockWriteGuard<'a, ServerState>);
+
+impl Drop for StopOnPanic<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.0.stopped = true;
+            self.0.text_channels.clear();
         }
     }
 }
@@ -478,5 +494,38 @@ fn membership_upserted(membership: FullServerMembership) -> Update {
     Update {
         client: ClientWsUpdate::MembershipUpserted(membership.clone()),
         federation: FederationWsUpdate::MembershipUpserted(membership),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_panic_while_holding_the_state_marks_it_stopped() {
+        let state = SharedState::default();
+        let text_channel_id = TextChannelId::new();
+        state.write().await.text_channels.insert(text_channel_id);
+
+        // Released normally, the state is left as it is.
+        drop(StopOnPanic(state.write().await));
+        {
+            let state = state.read().await;
+            assert!(!state.stopped);
+            assert!(state.text_channels.contains(&text_channel_id));
+        }
+
+        // Held across an await, like the actor holds it, so that it is
+        // dropped along with the panicked task.
+        let held = state.clone();
+        let task = tokio::spawn(async move {
+            let _state = StopOnPanic(held.write().await);
+            tokio::task::yield_now().await;
+            panic!("panic while holding the state");
+        });
+        assert!(task.await.unwrap_err().is_panic());
+        let state = state.read().await;
+        assert!(state.stopped);
+        assert!(state.text_channels.is_empty());
     }
 }
