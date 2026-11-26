@@ -18,9 +18,11 @@ use runelink_types::{
         CapabilityWelcome, NegotiatedCapabilities, negotiate_capabilities,
         supported_capabilities, versions::NEGOTIATION_VERSION,
     },
+    ids::RequestId,
     user::{UserRef, canonical_host},
-    ws::{ClientWsEnvelope, FederationWsEnvelope},
+    ws::{ClientWsEnvelope, FederationWsEnvelope, WsError},
 };
+use serde::Deserialize;
 use tokio::{
     net::TcpStream,
     sync::{Semaphore, mpsc},
@@ -43,6 +45,7 @@ use crate::{
     capabilities::{
         client_websocket, federation_websocket, log_version_mismatches,
     },
+    error::ApiError,
     ids::ConnId,
     state::AppState,
 };
@@ -227,6 +230,9 @@ async fn client_ws_loop(
                             }
                             Err(error) => {
                                 log::warn!("Failed to parse client websocket message: {error}");
+                                if let Some((request_id, error)) = parse_error_reply(&payload, &error) {
+                                    let _ = state.client_ws_manager.send_error_to_connection(conn_id, Some(request_id), error).await;
+                                }
                             }
                         }
                     }
@@ -245,6 +251,24 @@ async fn client_ws_loop(
     }
 
     let _ = state.client_ws_manager.deregister_connection(conn_id).await;
+}
+
+/// The error to reply with to a message that failed to parse, if it is a
+/// request whose ID can be read. Other messages are only logged, so hosts never
+/// trade errors about each other's replies.
+fn parse_error_reply(
+    payload: &str,
+    error: &serde_json::Error,
+) -> Option<(RequestId, WsError)> {
+    let value = serde_json::from_str::<serde_json::Value>(payload).ok()?;
+    if value["type"] != "request" {
+        return None;
+    }
+    let request_id =
+        RequestId::deserialize(value.pointer("/data/request_id")?).ok()?;
+    let error =
+        ApiError::BadRequest(format!("Could not parse request: {error}"));
+    Some((request_id, error.into()))
 }
 
 /// The host named by a federation issuer, which must be that host's exact
@@ -491,6 +515,10 @@ pub async fn federation_socket_loop(
                             }
                             Err(error) => {
                                 log::warn!("Failed to parse federation websocket message: {error}");
+                                if let Some((request_id, error)) = parse_error_reply(&payload, &error) {
+                                    let host = state.federation_ws_manager.authenticated_host(conn_id).await;
+                                    let _ = state.federation_ws_manager.send_error(conn_id, host.as_deref(), Some(request_id), error).await;
+                                }
                             }
                         }
                     }
@@ -516,7 +544,7 @@ pub async fn federation_socket_loop(
 
 #[cfg(test)]
 mod tests {
-    use super::{hello_rejection, issuer_host};
+    use super::{hello_rejection, issuer_host, parse_error_reply};
 
     #[test]
     fn issuer_host_requires_canonical_issuers() {
@@ -612,5 +640,31 @@ mod tests {
             "Invalid capability hello"
         );
         assert_eq!(hello_rejection("not json"), "Invalid capability hello");
+    }
+
+    #[test]
+    fn parse_error_reply_answers_only_requests_with_ids() {
+        let id = "00000000-0000-0000-0000-000000000001";
+        let reply = |payload: &str| {
+            let error =
+                serde_json::from_str::<serde_json::Value>("x").unwrap_err();
+            parse_error_reply(payload, &error)
+                .map(|(request_id, error)| (request_id.to_string(), error.code))
+        };
+        assert_eq!(
+            reply(&format!(
+                r#"{{"type":"request","data":{{"request_id":"{id}"}}}}"#
+            )),
+            Some((id.into(), "bad_request".into()))
+        );
+        for payload in [
+            format!(r#"{{"type":"reply","data":{{"request_id":"{id}"}}}}"#),
+            format!(r#"{{"type":"error","data":{{"request_id":"{id}"}}}}"#),
+            r#"{"type":"request","data":{"request_id":"nope"}}"#.into(),
+            r#"{"type":"request","data":{}}"#.into(),
+            "not json".into(),
+        ] {
+            assert_eq!(reply(&payload), None, "{payload}");
+        }
     }
 }
