@@ -98,8 +98,7 @@ impl ActorCtx {
                 .client_ws_manager
                 .send_update_to_users(&targets.local_users, update.client)
                 .await;
-            let _ = self
-                .federation_ws_manager
+            self.federation_ws_manager
                 .send_update_to_hosts(&targets.remote_hosts, update.federation)
                 .await;
         }

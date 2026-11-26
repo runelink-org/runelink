@@ -1,7 +1,11 @@
 #![allow(dead_code)]
 
 use std::{
-    collections::HashMap, future::Future, pin::Pin, sync::Arc,
+    collections::{HashMap, HashSet},
+    fmt,
+    future::Future,
+    pin::Pin,
+    sync::{Arc, OnceLock},
     time::Duration as StdDuration,
 };
 
@@ -34,7 +38,7 @@ use tokio_tungstenite::{
 
 use super::{
     error::{FederationRequestError, FederationRequestResult},
-    pools::FederationWsPool,
+    pools::{FederationWsPool, HostSend},
     socket_loops::{
         FederationIncomingEvent, FederationSocket, HELLO_TIMEOUT,
         federation_socket_loop,
@@ -72,7 +76,7 @@ fn cached_by(request: &FederationWsRequest) -> &'static [Capability] {
 /// This manager combines connection-pool responsibilities with request/reply
 /// correlation so callers can send typed requests/updates without constructing
 /// websocket envelopes directly.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct FederationWsManager {
     pool: FederationWsPool,
     pending: Arc<Mutex<HashMap<RequestId, PendingFederationReplySender>>>,
@@ -81,6 +85,23 @@ pub struct FederationWsManager {
     /// take over sending to that host, and messages sent before and after a
     /// switch can arrive out of order.
     connecting: Arc<Mutex<HashMap<String, Shared<BoxFuture<'static, ()>>>>>,
+    /// Updates waiting for a connection to their host, and the responses sent
+    /// after them, by canonical host, in order. Every message to a host is
+    /// queued on a connection, and every connection authenticated, under this
+    /// lock, so that a new connection is given the waiting messages before
+    /// any others. It is never held across a connection attempt.
+    waiting: Arc<Mutex<HashMap<String, Vec<FederationWsEnvelope>>>>,
+    /// This host's state, for connecting to the hosts updates are sent to.
+    state: Arc<OnceLock<AppState>>,
+}
+
+impl fmt::Debug for FederationWsManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The state holds this manager.
+        f.debug_struct("FederationWsManager")
+            .field("pool", &self.pool)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for FederationWsManager {
@@ -97,7 +118,14 @@ impl FederationWsManager {
             pool,
             pending: Arc::new(Mutex::new(HashMap::new())),
             connecting: Arc::default(),
+            waiting: Arc::default(),
+            state: Arc::default(),
         }
+    }
+
+    /// Sets this host's state, so that updates can connect to their hosts.
+    pub fn set_state(&self, state: AppState) {
+        assert!(self.state.set(state).is_ok(), "state set twice");
     }
 
     /// Registers a new connection with the manager.
@@ -113,16 +141,45 @@ impl FederationWsManager {
         conn_id
     }
 
-    /// Authenticates a connection for a given host.
+    /// Authenticates a connection for a given host, and sends the host the
+    /// messages waiting for a connection to it.
     pub async fn authenticate_connection(
         &self,
         conn_id: ConnId,
         host: String,
         issuer: String,
     ) -> bool {
-        self.pool
-            .authenticate_connection(conn_id, host, issuer)
+        let host = canonical_host(&host);
+        let mut waiting = self.waiting.lock().await;
+        if !self
+            .pool
+            .authenticate_connection(conn_id, host.clone(), issuer)
             .await
+        {
+            return false;
+        }
+        if let Some(queue) = waiting.remove(&host) {
+            self.send_queue(&host, queue).await;
+        }
+        true
+    }
+
+    /// Sends messages that waited for `host`, in order, or drops them if it
+    /// has no connection. The caller holds the `waiting` lock.
+    async fn send_queue(&self, host: &str, queue: Vec<FederationWsEnvelope>) {
+        let mut dropped = 0;
+        for envelope in queue {
+            if self.pool.send_to_host(host, envelope).await
+                == HostSend::NotConnected
+            {
+                dropped += 1;
+            }
+        }
+        if dropped > 0 {
+            warn!(
+                "Dropped {dropped} federation messages for unreachable host {host}"
+            );
+        }
     }
 
     /// Deregisters a connection from the manager.
@@ -198,8 +255,11 @@ impl FederationWsManager {
             pending.insert(request_id, tx);
         }
 
-        let sent = self.pool.send_to_host(&host, envelope).await;
-        if !sent {
+        let sent = {
+            let _waiting = self.waiting.lock().await;
+            self.pool.send_to_host(&host, envelope).await
+        };
+        if sent != HostSend::Sent {
             warn!("Failed to send federation request to {host}");
             let mut pending = self.pending.lock().await;
             pending.remove(&request_id);
@@ -228,42 +288,54 @@ impl FederationWsManager {
         }
     }
 
-    /// Sends an update to the given host.
-    pub async fn send_update_to_host(
-        &self,
-        host: &str,
-        update: FederationWsUpdate,
-    ) -> bool {
-        self.pool
-            .send_to_host(
-                host,
-                FederationWsEnvelope::Update {
-                    event_id: EventId::new(),
-                    update,
-                },
-            )
-            .await
-    }
-
-    /// Sends an update to the given hosts.
+    /// Sends an update to the given hosts without waiting on the network. A
+    /// host without a connection, such as one that restarted, is connected to
+    /// in the background and sent its waiting updates in order once it is
+    /// connected, or they are dropped if it cannot be reached.
     pub async fn send_update_to_hosts<I, S>(
         &self,
         hosts: I,
         update: FederationWsUpdate,
-    ) -> usize
-    where
+    ) where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        self.pool
-            .send_to_hosts(
-                hosts,
-                FederationWsEnvelope::Update {
-                    event_id: EventId::new(),
-                    update,
-                },
-            )
-            .await
+        let envelope = FederationWsEnvelope::Update {
+            event_id: EventId::new(),
+            update,
+        };
+        let hosts = hosts
+            .into_iter()
+            .map(|host| canonical_host(host.as_ref()))
+            .collect::<HashSet<_>>();
+        if hosts.is_empty() {
+            return;
+        }
+        let mut waiting = self.waiting.lock().await;
+        for host in hosts {
+            if let Some(envelopes) = waiting.get_mut(&host) {
+                envelopes.push(envelope.clone());
+                continue;
+            }
+            if self.pool.send_to_host(&host, envelope.clone()).await
+                == HostSend::NotConnected
+                && let Some(state) = self.state.get()
+            {
+                waiting.insert(host.clone(), vec![envelope.clone()]);
+                tokio::spawn(self.clone().connect_waiting(state.clone(), host));
+            }
+        }
+    }
+
+    /// Connects to `host` and sends it the messages waiting for it, or drops
+    /// them if it can't be reached. A connection that authenticates meanwhile
+    /// is given them first (see [`Self::authenticate_connection`]).
+    async fn connect_waiting(self, state: AppState, host: String) {
+        self.ensure_connection(&state, &pad_host(&host)).await;
+        let mut waiting = self.waiting.lock().await;
+        if let Some(queue) = waiting.remove(&host) {
+            self.send_queue(&host, queue).await;
+        }
     }
 
     /// Sends a reply to a request from `host` that arrived on `conn_id`, on
@@ -275,17 +347,16 @@ impl FederationWsManager {
         request_id: RequestId,
         reply: FederationWsReply,
     ) -> bool {
-        self.pool
-            .send_response(
-                conn_id,
-                host,
-                FederationWsEnvelope::Reply {
-                    request_id,
-                    event_id: EventId::new(),
-                    reply,
-                },
-            )
-            .await
+        self.send_response(
+            conn_id,
+            host,
+            FederationWsEnvelope::Reply {
+                request_id,
+                event_id: EventId::new(),
+                reply,
+            },
+        )
+        .await
     }
 
     /// Sends an error for a request from `host` that arrived on `conn_id`, on
@@ -297,17 +368,34 @@ impl FederationWsManager {
         request_id: Option<RequestId>,
         error: WsError,
     ) -> bool {
-        self.pool
-            .send_response(
-                conn_id,
-                host,
-                FederationWsEnvelope::Error {
-                    request_id,
-                    event_id: EventId::new(),
-                    error,
-                },
-            )
-            .await
+        self.send_response(
+            conn_id,
+            host,
+            FederationWsEnvelope::Error {
+                request_id,
+                event_id: EventId::new(),
+                error,
+            },
+        )
+        .await
+    }
+
+    /// Sends a response to a request from `host` behind any updates waiting
+    /// for the host, since it may follow from them.
+    async fn send_response(
+        &self,
+        conn_id: ConnId,
+        host: Option<&str>,
+        envelope: FederationWsEnvelope,
+    ) -> bool {
+        let mut waiting = self.waiting.lock().await;
+        if let Some(queue) =
+            host.and_then(|host| waiting.get_mut(&canonical_host(host)))
+        {
+            queue.push(envelope);
+            return true;
+        }
+        self.pool.send_response(conn_id, host, envelope).await
     }
 
     /// Resolves a response envelope into a request ID and outcome.
@@ -345,6 +433,7 @@ impl FederationWsManager {
 
     /// Broadcasts an update to all active connections.
     pub async fn broadcast_update(&self, update: FederationWsUpdate) -> usize {
+        let _waiting = self.waiting.lock().await;
         self.pool
             .broadcast(FederationWsEnvelope::Update {
                 event_id: EventId::new(),
@@ -537,5 +626,65 @@ impl FederationWsManager {
                 });
             tokio::spawn(loop_task);
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use runelink_types::{
+        ids::EventId,
+        ws::{FederationWsEnvelope, WsError},
+    };
+    use tokio::sync::mpsc;
+
+    use super::FederationWsManager;
+
+    fn error(code: &str) -> WsError {
+        WsError {
+            code: code.into(),
+            message: String::new(),
+            details: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn new_connections_send_waiting_messages_first() {
+        let manager = FederationWsManager::new();
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let conn_id =
+            manager.register_connection(sender, BTreeMap::new()).await;
+        manager.waiting.lock().await.insert(
+            "example.com".into(),
+            vec![FederationWsEnvelope::Error {
+                request_id: None,
+                event_id: EventId::new(),
+                error: error("waiting"),
+            }],
+        );
+        // A response waits behind the waiting messages.
+        manager
+            .send_error(conn_id, Some("example.com"), None, error("queued"))
+            .await;
+        manager
+            .authenticate_connection(
+                conn_id,
+                "example.com".into(),
+                "issuer".into(),
+            )
+            .await;
+        manager
+            .send_error(conn_id, Some("example.com"), None, error("direct"))
+            .await;
+        for code in ["waiting", "queued", "direct"] {
+            let Ok(FederationWsEnvelope::Error { error, .. }) =
+                receiver.try_recv()
+            else {
+                panic!("expected an error envelope");
+            };
+            assert_eq!(error.code, code);
+        }
+        assert!(manager.waiting.lock().await.is_empty());
     }
 }
