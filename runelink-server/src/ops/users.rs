@@ -128,7 +128,7 @@ pub async fn delete_remote_user_record(
                 .into(),
         ));
     }
-    if session_user_ref.host == state.config.public_host() {
+    if state.config.locality(&session_user_ref.host).is_local() {
         return Err(ApiError::BadRequest(
             "Cannot delete local users via federation".into(),
         ));

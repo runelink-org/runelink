@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 use time::OffsetDateTime;
 
@@ -29,10 +29,29 @@ pub struct User {
 }
 
 /// User identity: (name, host) pair used for identification and authorization.
+///
+/// The host is canonicalized when a ref is created with [`UserRef::new`] or
+/// deserialized, so refs can be compared exactly.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct UserRef {
     pub name: String,
+    #[serde(deserialize_with = "deserialize_canonical_host")]
     pub host: String,
+}
+
+/// The canonical spelling of a host: lowercase, without the default port.
+pub fn canonical_host(host: &str) -> String {
+    let host = host.to_ascii_lowercase();
+    match host.strip_suffix(":7000") {
+        Some(stripped) => stripped.to_string(),
+        None => host,
+    }
+}
+
+fn deserialize_canonical_host<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    String::deserialize(deserializer).map(|host| canonical_host(&host))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -87,7 +106,10 @@ impl fmt::Display for UserRef {
 
 impl UserRef {
     pub fn new(name: String, host: String) -> Self {
-        Self { name, host }
+        Self {
+            name,
+            host: canonical_host(&host),
+        }
     }
 
     /// Format as "name@host" for use in JWT subject claims.
@@ -101,9 +123,28 @@ impl UserRef {
         if name.is_empty() || host.is_empty() {
             return None;
         }
-        Some(Self {
-            name: name.to_string(),
-            host: host.to_string(),
-        })
+        Some(Self::new(name.to_string(), host.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UserRef;
+
+    #[test]
+    fn user_ref_hosts_are_canonical() {
+        let expected = UserRef {
+            name: "alice".into(),
+            host: "example.com".into(),
+        };
+        assert_eq!(
+            UserRef::new("alice".into(), "Example.COM:7000".into()),
+            expected
+        );
+        let parsed: UserRef = serde_json::from_str(
+            r#"{"name":"alice","host":"EXAMPLE.com:7000"}"#,
+        )
+        .unwrap();
+        assert_eq!(parsed, expected);
     }
 }
