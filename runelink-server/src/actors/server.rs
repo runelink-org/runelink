@@ -5,7 +5,8 @@ use std::sync::Arc;
 use runelink_types::{
     channel::{
         NewServerChannel, ServerChannel, ServerChannelContent, ServerChannelId,
-        ServerChannelMove, ServerChannelUpdate, TextChannelId,
+        ServerChannelKind, ServerChannelMove, ServerChannelUpdate,
+        TextChannelId,
     },
     server::{
         FullServerMembership, NewServer, NewServerMembership, Server, ServerId,
@@ -66,6 +67,11 @@ pub(super) enum ServerOutput {
 /// How a committed operation changes the server's state.
 enum Change {
     None,
+    /// The server was created with its admin and any default text channel.
+    Create {
+        admin: UserRef,
+        text_channel: Option<TextChannelId>,
+    },
     AddMember(UserRef, ServerRole),
     RemoveMember(UserRef),
     AddTextChannel(TextChannelId),
@@ -156,6 +162,14 @@ async fn run(
                 let mut targets = state.targets(&ctx.config);
                 match change {
                     Change::None => {}
+                    Change::Create {
+                        admin,
+                        text_channel,
+                    } => {
+                        targets.add(&ctx.config, &admin);
+                        state.members.insert(admin, ServerRole::Admin);
+                        state.text_channels.extend(text_channel);
+                    }
                     Change::AddMember(user, role) => {
                         if !state.members.contains_key(&user) {
                             targets.add(&ctx.config, &user);
@@ -410,7 +424,7 @@ async fn apply(
 }
 
 /// Create the server along with its creator's admin membership, so that it is
-/// never visible without an admin.
+/// never visible without an admin, and any default channels.
 async fn create(
     ctx: &ActorCtx,
     server_id: ServerId,
@@ -444,11 +458,35 @@ async fn create(
         role: ServerRole::Admin,
     };
     let membership = upsert_membership(ctx, conn, &new_membership).await?;
+    // The creator hears about the server before their membership.
+    let mut updates = vec![
+        server_upserted(server.clone()),
+        membership_upserted(membership),
+    ];
+    let mut text_channel = None;
+    if new_server.default_channels {
+        let new_channel = NewServerChannel {
+            kind: ServerChannelKind::Text,
+            title: "general".into(),
+            description: None,
+            metadata: None,
+            parent_channel_id: None,
+        };
+        let channel =
+            queries::channels::insert(conn, server_id, &new_channel).await?;
+        if let ServerChannelContent::Text { text_channel_id } = channel.content
+        {
+            text_channel = Some(text_channel_id);
+        }
+        updates.push(channel_upserted(channel));
+    }
     Ok(Outcome {
-        output: ServerOutput::Server(server.clone()),
-        // The creator hears about the server before their membership.
-        updates: vec![server_upserted(server), membership_upserted(membership)],
-        change: Change::AddMember(new_membership.user_ref, ServerRole::Admin),
+        output: ServerOutput::Server(server),
+        updates,
+        change: Change::Create {
+            admin: new_membership.user_ref,
+            text_channel,
+        },
     })
 }
 

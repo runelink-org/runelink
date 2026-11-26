@@ -775,6 +775,7 @@ mod tests {
                 NewServer {
                     title: "actors test".into(),
                     description: None,
+                    default_channels: false,
                 },
                 f.user.clone(),
                 Authorization::host(),
@@ -885,6 +886,7 @@ mod tests {
                 NewServer {
                     title: "actors test".into(),
                     description: None,
+                    default_channels: false,
                 },
                 f.user.clone(),
                 Authorization::host(),
@@ -938,6 +940,7 @@ mod tests {
                 NewServer {
                     title: "actors test".into(),
                     description: None,
+                    default_channels: false,
                 },
                 f.user.clone(),
                 Authorization::host(),
@@ -997,6 +1000,7 @@ mod tests {
                 NewServer {
                     title: "actors test".into(),
                     description: None,
+                    default_channels: false,
                 },
                 f.user.clone(),
                 Authorization::host(),

@@ -28,6 +28,9 @@ pub struct NewServer {
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Also create the default channels: a "general" text channel.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub default_channels: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

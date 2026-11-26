@@ -70,6 +70,9 @@ pub struct ServerCreateArgs {
     /// Skip description cli prompt
     #[clap(long)]
     pub no_description: bool,
+    /// Don't create the default "general" text channel
+    #[clap(long)]
+    pub no_default_channels: bool,
     /// The host of the server
     #[clap(long)]
     pub host: Option<String>,
@@ -255,7 +258,11 @@ pub async fn handle_server_commands(
             } else {
                 read_input("Server Description (leave blank for none):\n> ")?
             };
-            let new_server = NewServer { title, description };
+            let new_server = NewServer {
+                title,
+                description,
+                default_channels: !create_args.no_default_channels,
+            };
             let server = requests::servers::create(
                 ctx.client,
                 &api_url,
