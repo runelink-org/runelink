@@ -250,23 +250,18 @@ pub async fn get_by_id(
     db_message.try_into()
 }
 
-/// Get the server and text channel that hold a message.
-pub async fn get_location(
+/// Get the text channel that holds a message.
+pub async fn get_text_channel_id(
     pool: &DbPool,
     message_id: MessageId,
-) -> ApiResult<(ServerId, TextChannelId)> {
-    let row = sqlx::query!(
-        r#"
-        SELECT c.server_id, m.text_channel_id
-        FROM messages m
-        JOIN server_channels c ON c.text_channel_id = m.text_channel_id
-        WHERE m.id = $1
-        "#,
+) -> ApiResult<TextChannelId> {
+    let text_channel_id = sqlx::query_scalar!(
+        "SELECT text_channel_id FROM messages WHERE id = $1;",
         message_id.as_uuid(),
     )
     .fetch_one(pool)
     .await?;
-    Ok((row.server_id.into(), row.text_channel_id.into()))
+    Ok(text_channel_id.into())
 }
 
 /// Retain identity and relationships, clear text, and preserve the first

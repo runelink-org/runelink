@@ -386,36 +386,33 @@ impl Actors {
 
     pub async fn create_message(
         &self,
-        server_id: ServerId,
         text_channel_id: TextChannelId,
         new_message: NewMessage,
         auth: Authorization,
     ) -> ApiResult<Message> {
-        let mailbox = self.channel(server_id, text_channel_id).await?;
+        let mailbox = self.channel(text_channel_id).await?;
         send(mailbox, ChannelOp::Create(new_message), auth).await
     }
 
     pub async fn update_message(
         &self,
-        server_id: ServerId,
         text_channel_id: TextChannelId,
         message_id: MessageId,
         update: MessageUpdate,
         auth: Authorization,
     ) -> ApiResult<Message> {
-        let mailbox = self.channel(server_id, text_channel_id).await?;
+        let mailbox = self.channel(text_channel_id).await?;
         let op = ChannelOp::Update { message_id, update };
         send(mailbox, op, auth).await
     }
 
     pub async fn delete_message(
         &self,
-        server_id: ServerId,
         text_channel_id: TextChannelId,
         message_id: MessageId,
         auth: Authorization,
     ) -> ApiResult<Message> {
-        let mailbox = self.channel(server_id, text_channel_id).await?;
+        let mailbox = self.channel(text_channel_id).await?;
         send(mailbox, ChannelOp::Delete(message_id), auth).await
     }
 
@@ -540,7 +537,6 @@ impl Actors {
     /// Get a text channel's actor, starting it if needed.
     async fn channel(
         &self,
-        server_id: ServerId,
         text_channel_id: TextChannelId,
     ) -> ApiResult<ChannelMailbox> {
         if let Some(mailbox) =
@@ -549,6 +545,13 @@ impl Actors {
         {
             return Ok(mailbox.clone());
         }
+        // Only needed to start the actor, and looked up without holding the
+        // registry. A channel never moves to another server.
+        let server_id = queries::channels::get_server_id_by_text_channel(
+            &self.ctx.db_pool,
+            text_channel_id,
+        )
+        .await?;
         let state = self.server(server_id).await?.state;
         // Checked without holding the registry, which a busy server operation
         // would otherwise hold up for every other actor. A channel deleted
@@ -799,7 +802,6 @@ mod tests {
                 kept_text
             };
             f.actors.create_message(
-                server.id,
                 text_channel_id,
                 f.message(format!("message {index}")),
                 Authorization::host(),
@@ -860,7 +862,6 @@ mod tests {
         assert!(matches!(
             f.actors
                 .create_message(
-                    server.id,
                     kept_text,
                     f.message("late".into()),
                     Authorization::host(),
@@ -899,7 +900,6 @@ mod tests {
         };
         f.actors
             .create_message(
-                server.id,
                 text_channel_id,
                 f.message("member".into()),
                 as_member(),
@@ -914,7 +914,6 @@ mod tests {
         let result = f
             .actors
             .create_message(
-                server.id,
                 text_channel_id,
                 f.message("former member".into()),
                 as_member(),

@@ -25,15 +25,9 @@ pub async fn create(
 ) -> ApiResult<Message> {
     match state.config.target_locality(target_host) {
         Locality::Local => {
-            let server_id = queries::channels::get_server_id_by_text_channel(
-                &state.db_pool,
-                text_channel_id,
-            )
-            .await?;
             state
                 .actors
                 .create_message(
-                    server_id,
                     text_channel_id,
                     new_message.clone(),
                     session.authorization(),
@@ -230,13 +224,14 @@ pub async fn delete(
 ) -> ApiResult<Message> {
     match state.config.target_locality(target_host) {
         Locality::Local => {
-            let (server_id, text_channel_id) =
-                queries::messages::get_location(&state.db_pool, message_id)
-                    .await?;
+            let text_channel_id = queries::messages::get_text_channel_id(
+                &state.db_pool,
+                message_id,
+            )
+            .await?;
             state
                 .actors
                 .delete_message(
-                    server_id,
                     text_channel_id,
                     message_id,
                     session.authorization(),
@@ -473,12 +468,12 @@ pub async fn update(
         };
         return Ok(resource);
     }
-    let (server_id, text_channel_id) =
-        queries::messages::get_location(&state.db_pool, message_id).await?;
+    let text_channel_id =
+        queries::messages::get_text_channel_id(&state.db_pool, message_id)
+            .await?;
     state
         .actors
         .update_message(
-            server_id,
             text_channel_id,
             message_id,
             message_update.clone(),
