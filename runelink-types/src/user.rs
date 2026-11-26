@@ -32,8 +32,7 @@ pub struct User {
 /// User identity: (name, host) pair used for identification and authorization.
 ///
 /// The host is canonicalized when a ref is created with [`UserRef::new`] or
-/// deserialized, as is a deserialized [`User`]'s, so refs can be compared
-/// exactly.
+/// deserialized, so refs can be compared exactly.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct UserRef {
     pub name: String,
@@ -157,6 +156,10 @@ mod tests {
         assert_eq!(
             UserRef::new("alice".into(), "Example.com:7001".into()).host,
             "example.com:7001"
+        );
+        assert_eq!(
+            UserRef::parse_subject("alice@Example.com:7000"),
+            Some(expected)
         );
         assert_eq!(UserRef::parse_subject("alice@:7000"), None);
     }
