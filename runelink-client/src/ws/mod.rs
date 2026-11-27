@@ -21,11 +21,10 @@
 //! # }
 //! ```
 //!
-//! [`ConnectionOptions::host`] tries `wss://host:7000/ws/client` first and
-//! falls back to `ws://` if the secure socket never opens. Set
+//! [`ConnectionOptions::host`] connects to `wss://host:7000/ws/client`. Set
 //! [`ConnectionOptions::transport_security`] to
-//! [`TransportSecurity::SecureOnly`] to disable the fallback, or use
-//! [`ConnectionOptions::url`] for a websocket URL.
+//! [`TransportSecurity::PreferSecure`] to fall back to `ws://` if the secure
+//! socket never opens, or use [`ConnectionOptions::url`] for a websocket URL.
 //!
 //! Connections reconnect with exponential backoff and jitter after a socket
 //! fails to open or closes. Requests in flight when a socket closes fail with
@@ -126,19 +125,21 @@ pub enum Status {
 /// Whether a host connection may fall back to `ws` if `wss` never opens.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TransportSecurity {
+    #[default]
     SecureOnly,
     /// Falls back to `ws` when `wss` fails to open for any reason, including
     /// certificate errors, after which credentials are sent unencrypted. Each
     /// reconnect tries `wss` again until a socket opens, and then the
-    /// connection keeps that scheme. Use [`TransportSecurity::SecureOnly`] for
-    /// hosts that should always use TLS.
-    #[default]
+    /// connection keeps that scheme. Only use this when unencrypted
+    /// connections to the host are acceptable, such as after the user agrees
+    /// to them.
     PreferSecure,
 }
 
 #[derive(Clone, Debug)]
 pub enum Target {
-    /// Connects to the host's client websocket, trying `wss` first.
+    /// Connects to the host's client websocket over `wss`, or `ws` as set by
+    /// [`ConnectionOptions::transport_security`].
     Host(String),
     /// Connects to this websocket URL directly.
     Url(String),
