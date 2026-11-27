@@ -3,5 +3,6 @@ pub mod error;
 pub mod requests;
 pub mod util;
 pub mod validation;
+pub mod ws;
 
 pub use error::*;

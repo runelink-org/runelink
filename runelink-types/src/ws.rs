@@ -235,6 +235,108 @@ impl ClientWsRequest {
             Self::MessagesDelete { .. } => Capability::MessagesDelete,
         }
     }
+
+    /// Whether a reply is the kind the host sends for this request.
+    pub fn expects_reply(&self, reply: &ClientWsReply) -> bool {
+        use ClientWsReply as Reply;
+        match self {
+            Self::Ping => matches!(reply, Reply::Pong),
+            Self::OidcDiscovery => matches!(reply, Reply::OidcDiscovery(_)),
+            Self::OidcJwks => matches!(reply, Reply::OidcJwks(_)),
+            Self::ConnectionState => matches!(reply, Reply::ConnectionState(_)),
+            Self::AuthSignup(_) => matches!(reply, Reply::AuthSignup(_)),
+            Self::AuthTokenPassword(_) | Self::AuthTokenRefresh(_) => {
+                matches!(reply, Reply::AuthToken(_))
+            }
+            Self::AuthTokenAccess(_) => {
+                matches!(reply, Reply::AuthTokenAccess(_))
+            }
+            // These have no replies yet
+            Self::AuthUserinfo | Self::AuthRegisterClient => false,
+            Self::UsersCreate(_) => matches!(reply, Reply::UsersCreate(_)),
+            Self::UsersGetAll { .. } => matches!(reply, Reply::UsersGetAll(_)),
+            Self::UsersGetByRef { .. } => {
+                matches!(reply, Reply::UsersGetByRef(_))
+            }
+            Self::UsersGetAssociatedHosts { .. } => {
+                matches!(reply, Reply::UsersGetAssociatedHosts(_))
+            }
+            Self::UsersDelete { .. } => matches!(reply, Reply::UsersDelete),
+            Self::MembershipsGetByUser { .. } => {
+                matches!(reply, Reply::MembershipsGetByUser(_))
+            }
+            Self::MembershipsGetMembersByServer { .. } => {
+                matches!(reply, Reply::MembershipsGetMembersByServer(_))
+            }
+            Self::MembershipsGetByUserAndServer { .. } => {
+                matches!(reply, Reply::MembershipsGetByUserAndServer(_))
+            }
+            Self::MembershipsUpsert { .. } => {
+                matches!(reply, Reply::MembershipsUpsert(_))
+            }
+            Self::MembershipsDelete { .. } => {
+                matches!(reply, Reply::MembershipsDelete)
+            }
+            Self::ServersUpdate { .. } => {
+                matches!(reply, Reply::ServersUpdate(_))
+            }
+            Self::ServersCreate { .. } => {
+                matches!(reply, Reply::ServersCreate(_))
+            }
+            Self::ServersGetAll { .. } => {
+                matches!(reply, Reply::ServersGetAll(_))
+            }
+            Self::ServersGetById { .. } => {
+                matches!(reply, Reply::ServersGetById(_))
+            }
+            Self::ServersGetWithChannels { .. } => {
+                matches!(reply, Reply::ServersGetWithChannels(_))
+            }
+            Self::ServersDelete { .. } => matches!(reply, Reply::ServersDelete),
+            Self::ChannelsUpdate { .. } => {
+                matches!(reply, Reply::ChannelsUpdate(_))
+            }
+            Self::ChannelsCreate { .. } => {
+                matches!(reply, Reply::ChannelsCreate(_))
+            }
+            Self::ChannelsGetAll { .. } => {
+                matches!(reply, Reply::ChannelsGetAll(_))
+            }
+            Self::ChannelsGetByServer { .. } => {
+                matches!(reply, Reply::ChannelsGetByServer(_))
+            }
+            Self::ChannelsGetById { .. } => {
+                matches!(reply, Reply::ChannelsGetById(_))
+            }
+            Self::ChannelsDelete { .. } => {
+                matches!(reply, Reply::ChannelsDelete)
+            }
+            Self::ChannelsMove { .. } => {
+                matches!(reply, Reply::ChannelsMove(_))
+            }
+            Self::MessagesUpdate { .. } => {
+                matches!(reply, Reply::MessagesUpdate(_))
+            }
+            Self::MessagesCreate { .. } => {
+                matches!(reply, Reply::MessagesCreate(_))
+            }
+            Self::MessagesGetAll { .. } => {
+                matches!(reply, Reply::MessagesGetAll(_))
+            }
+            Self::MessagesGetByServer { .. } => {
+                matches!(reply, Reply::MessagesGetByServer(_))
+            }
+            Self::MessagesGetByTextChannel { .. } => {
+                matches!(reply, Reply::MessagesGetByTextChannel(_))
+            }
+            Self::MessagesGetById { .. } => {
+                matches!(reply, Reply::MessagesGetById(_))
+            }
+            Self::MessagesDelete { .. } => {
+                matches!(reply, Reply::MessagesDelete(_))
+            }
+        }
+    }
 }
 
 /// Reply enum for websocket client traffic. Variants map 1:1 with request outcomes.

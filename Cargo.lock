@@ -2336,14 +2336,20 @@ dependencies = [
 name = "runelink-client"
 version = "0.5.15"
 dependencies = [
+ "futures-util",
  "log",
+ "rand 0.10.3",
  "reqwest",
  "runelink-types",
+ "rustls",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
  "time",
  "tokio",
+ "tokio-tungstenite 0.30.0",
+ "url",
  "uuid",
 ]
 
