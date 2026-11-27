@@ -30,7 +30,7 @@ This is a Rust workspace (see `Cargo.toml`) with these crates:
 
 - `runelink-server`: Axum HTTP/Websocket server + Postgres persistence + federation management.
 - `runelink-cli`: the `rune` CLI client (a TUI is planned, but not the primary interface yet).
-- `runelink-client`: reusable Rust client library for talking to RuneLink servers.
+- `runelink-client`: reusable Rust client library for talking to RuneLink hosts over HTTP and the client WebSocket (`runelink_client::ws`).
 - `runelink-types`: shared request/response and host types.
 
 ## Federation (high level)

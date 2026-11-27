@@ -1,6 +1,6 @@
 use runelink_types::capability::{
     Capability, CapabilityVersion, preferred_version,
-    versions::{auth, channels, memberships, messages, servers, users},
+    versions::{auth, channels, memberships, messages, servers, system, users},
 };
 
 use crate::error::{Error, Result};
@@ -40,6 +40,52 @@ pub const fn http(capability: &Capability) -> &'static [CapabilityVersion] {
         Capability::UsersRead => users::READ_VERSIONS,
         Capability::Unknown(_) => &[],
     }
+}
+
+/// The client websocket capability versions this client implements.
+pub const fn client_websocket(
+    capability: &Capability,
+) -> &'static [CapabilityVersion] {
+    match capability {
+        Capability::AuthAuthenticate => auth::AUTHENTICATE_VERSIONS,
+        Capability::AuthDiscovery => auth::DISCOVERY_VERSIONS,
+        Capability::AuthRegisterClient => &[],
+        Capability::AuthSignup => auth::SIGNUP_VERSIONS,
+        Capability::AuthToken => auth::TOKEN_VERSIONS,
+        Capability::AuthUserinfo => &[],
+        Capability::ChannelsUpdate => channels::UPDATE_VERSIONS,
+        Capability::ChannelsCreate => channels::CREATE_VERSIONS,
+        Capability::ChannelsDelete => channels::DELETE_VERSIONS,
+        Capability::ChannelsEvents => channels::EVENTS_VERSIONS,
+        Capability::ChannelsMove => channels::MOVE_VERSIONS,
+        Capability::ChannelsRead => channels::READ_VERSIONS,
+        Capability::ConnectionState => system::CONNECTION_STATE_VERSIONS,
+        Capability::MembershipsEvents => memberships::EVENTS_VERSIONS,
+        Capability::MembershipsRead => memberships::READ_VERSIONS,
+        Capability::MembershipsWrite => memberships::WRITE_VERSIONS,
+        Capability::MessagesUpdate => messages::UPDATE_VERSIONS,
+        Capability::MessagesCreate => messages::CREATE_VERSIONS,
+        Capability::MessagesDelete => messages::DELETE_VERSIONS,
+        Capability::MessagesEvents => messages::EVENTS_VERSIONS,
+        Capability::MessagesRead => messages::READ_VERSIONS,
+        Capability::Ping => system::PING_VERSIONS,
+        Capability::ServersUpdate => servers::UPDATE_VERSIONS,
+        Capability::ServersCreate => servers::CREATE_VERSIONS,
+        Capability::ServersDelete => servers::DELETE_VERSIONS,
+        Capability::ServersEvents => servers::EVENTS_VERSIONS,
+        Capability::ServersRead => servers::READ_VERSIONS,
+        Capability::UsersCreate => users::CREATE_VERSIONS,
+        Capability::UsersDelete => users::DELETE_VERSIONS,
+        Capability::UsersEvents => users::EVENTS_VERSIONS,
+        Capability::UsersRead => users::READ_VERSIONS,
+        Capability::Unknown(_) => &[],
+    }
+}
+
+pub fn preferred_client_websocket_version(
+    capability: &Capability,
+) -> Option<CapabilityVersion> {
+    preferred_version(client_websocket, capability)
 }
 
 pub fn preferred_http_version(

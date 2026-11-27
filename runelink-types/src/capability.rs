@@ -355,23 +355,44 @@ pub fn rejected_capabilities(
         .collect()
 }
 
+/// Why the versions one side offers and the other supports have nothing in
+/// common.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Incompatibility {
+    Missing,
+    OutdatedHost,
+    OutdatedClient,
+    Incompatible,
+}
+
+impl fmt::Display for Incompatibility {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Missing => "capability missing",
+            Self::OutdatedHost => "host needs updating",
+            Self::OutdatedClient => "client needs updating",
+            Self::Incompatible => "incompatible versions",
+        })
+    }
+}
+
 /// Explains incompatibility without assuming disjoint version sets imply age.
 pub fn incompatibility_reason(
     offered: &[CapabilityVersion],
     supported: &[CapabilityVersion],
-) -> &'static str {
+) -> Incompatibility {
     if supported.is_empty() {
-        "capability missing"
+        Incompatibility::Missing
     } else if !offered.is_empty()
         && supported.iter().max() < offered.iter().min()
     {
-        "host needs updating"
+        Incompatibility::OutdatedHost
     } else if !offered.is_empty()
         && offered.iter().max() < supported.iter().min()
     {
-        "client needs updating"
+        Incompatibility::OutdatedClient
     } else {
-        "incompatible versions"
+        Incompatibility::Incompatible
     }
 }
 
@@ -437,18 +458,24 @@ mod tests {
     fn incompatible_version_advice_handles_mixed_and_empty_sets() {
         assert_eq!(
             incompatibility_reason(&[V3], &[V1, V2]),
-            "host needs updating"
+            Incompatibility::OutdatedHost
         );
         assert_eq!(
             incompatibility_reason(&[V1], &[V3]),
-            "client needs updating"
+            Incompatibility::OutdatedClient
         );
         assert_eq!(
             incompatibility_reason(&[V2], &[V1, V3]),
-            "incompatible versions"
+            Incompatibility::Incompatible
         );
-        assert_eq!(incompatibility_reason(&[], &[V1]), "incompatible versions");
-        assert_eq!(incompatibility_reason(&[V1], &[]), "capability missing");
+        assert_eq!(
+            incompatibility_reason(&[], &[V1]),
+            Incompatibility::Incompatible
+        );
+        assert_eq!(
+            incompatibility_reason(&[V1], &[]),
+            Incompatibility::Missing
+        );
     }
 
     #[test]

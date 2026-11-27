@@ -11,6 +11,12 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 thiserror = "2.0.21"
 time = { version = "0.3.55", features = ["serde", "formatting", "parsing"] }
-tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
+rustls = { version = "0.23.46", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+rustls-platform-verifier = "0.7.1"
+url = "2.5.8"
+futures-util = "0.3.34"
+rand = "0.10.3"
 uuid = { version = "1.29.0", features = ["v4", "serde"] }
 log = "0.4.34"
