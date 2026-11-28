@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
-use runelink_types::{FederationClaims, PublicJwk};
+use runelink_types::{FederationClaims, Host, PublicJwk};
 use serde::Deserialize;
 use time::{Duration, OffsetDateTime};
 
@@ -148,6 +148,12 @@ pub async fn decode_federation_jwt(
     let header = jsonwebtoken::decode_header(token)
         .map_err(|e| ApiError::AuthError(format!("invalid JWT header: {e}")))?;
     let iss = parse_iss_unverified(token)?;
+    // Keys are only fetched from a host's exact API URL.
+    if Host::from_api_url(&iss, state.config.secure).is_none() {
+        return Err(ApiError::AuthError(
+            "federation issuer is not a host's API URL".into(),
+        ));
+    }
 
     let cached = get_cached_jwks(state, &iss).await?;
     let pub_bytes = select_public_key_bytes(&cached, header.kid.as_deref())?;
