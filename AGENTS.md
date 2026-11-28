@@ -38,3 +38,7 @@ The same applies to each kind of resource (`channel`, `text_channel`, `message`)
 ### Hosts
 
 Hosts are `Host` values, which only parsing creates and which are always canonical: lowercase, without the default port (`DEFAULT_PORT`). Compare and store them as `Host`s, and never add or strip ports by hand. Use `Host::api_url`, `Host::client_ws_url`, or `Host::federation_ws_url` to connect to a host, and `Host::authority` only where the port must always be spelled out. Parse hosts that people enter with `runelink_client::validation::validate_host`.
+
+### Tests
+
+Add unit tests where code defines a contract, such as parsing and canonicalization, wire shapes, ownership and security rules, or a public guarantee. Don't add tests that only restate a simple rule or helper, mirror constants, or cover one-off migrations of stored data.
