@@ -174,8 +174,8 @@ impl RawServerConfig {
         ))
         .map_err(|_| {
             invalid(
-                "public_host must be a host name or IP address, \
-                         without a scheme or port (set public_port)"
+                "public_host must be a host name or IP address, with IPv6 \
+                 in brackets, and without a scheme or port (set public_port)"
                     .into(),
             )
         })?;

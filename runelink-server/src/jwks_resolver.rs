@@ -50,25 +50,24 @@ async fn fetch_jwks(state: &AppState, issuer: &Host) -> ApiResult<CachedJwks> {
         "{}/.well-known/jwks.json",
         issuer.api_url(state.config.secure)
     );
-    let response =
-        state.http_client.get(url).send().await.map_err(|e| {
-            ApiError::Internal(format!("jwks fetch error: {e}"))
-        })?;
-
+    // Only logged, since the issuer is unverified and its response must not
+    // reach whoever sent the token.
+    let failed = |reason: String| {
+        log::warn!("Failed fetching JWKS from {issuer}: {reason}");
+        ApiError::AuthError("could not fetch the issuer's signing keys".into())
+    };
+    let response = state
+        .http_client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| failed(e.to_string()))?;
     let status = response.status();
     if !status.is_success() {
-        let body = response
-            .text()
-            .await
-            .unwrap_or_else(|e| format!("failed to read error body: {e}"));
-        return Err(ApiError::AuthError(format!(
-            "jwks fetch failed: {status} {body}"
-        )));
+        return Err(failed(status.to_string()));
     }
-
-    let jwks: JwksResponse = response.json().await.map_err(|e| {
-        ApiError::Internal(format!("jwks json parse error: {e}"))
-    })?;
+    let jwks: JwksResponse =
+        response.json().await.map_err(|e| failed(e.to_string()))?;
 
     let mut keys_by_kid = HashMap::new();
     for key in jwks.keys {
