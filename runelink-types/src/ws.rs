@@ -85,7 +85,6 @@ pub enum ClientWsRequest {
     },
     UsersGetByRef {
         user_ref: UserRef,
-        target_host: Option<Host>,
     },
     UsersGetAssociatedHosts {
         user_ref: UserRef,

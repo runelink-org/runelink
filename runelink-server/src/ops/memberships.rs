@@ -39,8 +39,7 @@ pub async fn upsert(
             ));
         }
         let user =
-            users::get_by_ref(state, new_membership.user_ref.clone(), None)
-                .await?;
+            users::get_by_ref(state, new_membership.user_ref.clone()).await?;
         let session_user_ref = session.user_ref.clone().ok_or_else(|| {
             ApiError::AuthError(
                 "User reference required for remote memberships".into(),
@@ -79,7 +78,6 @@ pub async fn upsert(
                 admission::hold(users::get_by_ref(
                     state,
                     new_membership.user_ref.clone(),
-                    None,
                 ))
                 .await?
             }

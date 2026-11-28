@@ -137,13 +137,8 @@ pub(super) async fn handle_client_request(
             Ok(ClientWsReply::UsersGetAll(users))
         }
 
-        ClientWsRequest::UsersGetByRef {
-            user_ref,
-            target_host,
-        } => {
-            let user =
-                ops::users::get_by_ref(state, user_ref, target_host.as_ref())
-                    .await?;
+        ClientWsRequest::UsersGetByRef { user_ref } => {
+            let user = ops::users::get_by_ref(state, user_ref).await?;
             Ok(ClientWsReply::UsersGetByRef(user))
         }
 

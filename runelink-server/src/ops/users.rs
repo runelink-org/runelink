@@ -68,7 +68,6 @@ pub async fn get_all(
 pub async fn get_by_ref(
     state: &AppState,
     user_ref: UserRef,
-    _target_host: Option<&Host>,
 ) -> ApiResult<User> {
     if state.config.locality(&user_ref.host).is_local() {
         let user =
