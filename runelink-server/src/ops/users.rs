@@ -114,34 +114,10 @@ pub async fn delete_remote_user_record(
     session: &Session,
     user_ref: &UserRef,
 ) -> ApiResult<()> {
-    let session_user_ref = session.user_ref.clone().ok_or_else(|| {
-        ApiError::AuthError(
-            "User reference required for federated user deletion".into(),
-        )
-    })?;
-    if session_user_ref.name != user_ref.name
-        || session_user_ref.host != user_ref.host
-    {
-        return Err(ApiError::BadRequest(
-            "User identity in path does not match user reference in token"
-                .into(),
-        ));
-    }
-    if state.config.locality(&session_user_ref.host).is_local() {
+    // The requirement checks that the user's home host sent this.
+    if state.config.locality(&user_ref.host).is_local() {
         return Err(ApiError::BadRequest(
             "Cannot delete local users via federation".into(),
-        ));
-    }
-
-    let expected_home_server_url =
-        session_user_ref.host.api_url(state.config.secure);
-    let federation_claims = session.federation.as_ref().ok_or_else(|| {
-        ApiError::AuthError("Federation claims required".into())
-    })?;
-
-    if federation_claims.iss != expected_home_server_url {
-        return Err(ApiError::AuthError(
-            "Only the home server can delete a user".into(),
         ));
     }
 

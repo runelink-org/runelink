@@ -227,24 +227,6 @@ impl FederationClaims {
             user_ref: None,
         }
     }
-
-    /// Create a federation token with explicit user delegation.
-    pub fn new_delegated(
-        issuer_server_id: String,
-        audience_server_id: String,
-        user_ref: UserRef,
-        lifetime: Duration,
-    ) -> Self {
-        let now = OffsetDateTime::now_utc().unix_timestamp();
-        Self {
-            iss: issuer_server_id.clone(),
-            sub: issuer_server_id,
-            aud: vec![audience_server_id],
-            exp: now + lifetime.whole_seconds(),
-            iat: now,
-            user_ref: Some(user_ref),
-        }
-    }
 }
 
 impl std::fmt::Debug for LocalAccount {

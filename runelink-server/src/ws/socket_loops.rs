@@ -290,7 +290,7 @@ async fn federation_ws_upgrade_loop(
             return;
         }
     };
-    let host = auth.host;
+    let host = auth.host().clone();
     let mut socket = FederationSocket::Inbound(Box::new(socket));
     let Some(capabilities) =
         negotiate_federation_socket(&host, &mut socket).await

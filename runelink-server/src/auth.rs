@@ -2,7 +2,6 @@
 
 use axum::http::HeaderMap;
 use runelink_types::{
-    auth::FederationClaims,
     server::{ServerMembership, ServerRef, ServerRole},
     user::{User, UserRef},
 };
@@ -128,18 +127,7 @@ impl Requirement {
                 else {
                     return Ok(Some("Federation auth required".into()));
                 };
-                let Some(user_ref) = federation.claims.user_ref.as_ref() else {
-                    return Ok(Some(
-                        "Federated delegated user required".into(),
-                    ));
-                };
-                if federation.host != expected.host {
-                    return Ok(Some(
-                        "Federation issuer does not match delegated user host"
-                            .into(),
-                    ));
-                }
-                if user_ref != expected {
+                if federation.user_ref() != Some(expected) {
                     return Ok(Some("Invalid delegated federated user".into()));
                 }
             }
@@ -357,8 +345,6 @@ pub struct Session {
     pub principal: Principal,
     /// Optional delegated user reference (always present for client auth, optional for federation)
     pub user_ref: Option<UserRef>,
-    /// Present only when the request was authenticated via federation
-    pub federation: Option<FederationClaims>,
     /// Cached user lookup result (None = not looked up, Some(None) = looked up but not found, Some(Some(user)) = found)
     cached_user: Option<Option<User>>,
     /// What the request was authorized with
@@ -413,7 +399,7 @@ pub async fn authorize(
     req: Requirement,
 ) -> ApiResult<Session> {
     // Extract user identity from the principal (no DB lookups yet)
-    let (user_ref, federation_claims) = match &principal {
+    let user_ref = match &principal {
         Principal::Client(auth) => {
             let user_ref = UserRef::parse_subject(&auth.claims.sub)
                 .ok_or_else(|| {
@@ -421,11 +407,9 @@ pub async fn authorize(
                         "Invalid token subject (expected name@host)".into(),
                     )
                 })?;
-            (Some(user_ref), None)
+            Some(user_ref)
         }
-        Principal::Federation(auth) => {
-            (auth.claims.user_ref.clone(), Some(auth.claims.clone()))
-        }
+        Principal::Federation(auth) => auth.user_ref().cloned(),
     };
     let authorization = Authorization {
         principal: Some(principal.clone()),
@@ -447,7 +431,6 @@ pub async fn authorize(
     let session = Session {
         principal,
         user_ref,
-        federation: federation_claims,
         cached_user,
         authorization,
     };
