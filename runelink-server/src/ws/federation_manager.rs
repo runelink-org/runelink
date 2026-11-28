@@ -291,6 +291,10 @@ impl FederationWsManager {
         hosts: &BTreeSet<Host>,
         update: FederationWsUpdate,
     ) {
+        // Local-only updates never wait on the queue lock.
+        if hosts.is_empty() {
+            return;
+        }
         let envelope = FederationWsEnvelope::Update {
             event_id: EventId::new(),
             update,
