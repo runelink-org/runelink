@@ -31,9 +31,12 @@ use runelink_types::{
     },
 };
 use time::Duration;
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::{
+    net::TcpStream,
+    sync::{Mutex, mpsc, oneshot},
+};
 use tokio_tungstenite::{
-    connect_async_with_config, tungstenite::client::IntoClientRequest,
+    client_async_tls_with_config, tungstenite::client::IntoClientRequest,
 };
 
 use super::{
@@ -519,13 +522,25 @@ impl FederationWsManager {
             };
             request.headers_mut().insert("Authorization", auth_header);
 
+            // Connects only to an address the peer policy allows, which is
+            // checked once it is resolved, so DNS can't change it after.
+            let connect = async {
+                let addrs = state.peer_policy.resolve(host).await?;
+                let tcp_stream = TcpStream::connect(&*addrs).await?;
+                tcp_stream.set_nodelay(true)?;
+                let (stream, _) = client_async_tls_with_config(
+                    request, tcp_stream, None, None,
+                )
+                .await?;
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(stream)
+            };
             let stream = match tokio::time::timeout(
                 StdDuration::from_secs(5),
-                connect_async_with_config(request, None, true),
+                connect,
             )
             .await
             {
-                Ok(Ok((stream, _))) => stream,
+                Ok(Ok(stream)) => stream,
                 Err(_) => {
                     warn!("Timed out opening federation websocket to {host}");
                     return;

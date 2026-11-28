@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     actors::Actors, config::ServerConfig, db::DbPool, key_manager::KeyManager,
-    ws,
+    peer_policy::PeerPolicy, ws,
 };
 
 pub type JwksCache = std::collections::HashMap<
@@ -15,6 +15,7 @@ pub struct AppState {
     pub config: Arc<ServerConfig>,
     pub db_pool: Arc<DbPool>,
     pub http_client: reqwest::Client,
+    pub peer_policy: PeerPolicy,
     pub client_ws_manager: ws::ClientWsManager,
     pub federation_ws_manager: ws::FederationWsManager,
     pub key_manager: KeyManager,
