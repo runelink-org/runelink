@@ -525,7 +525,7 @@ impl FederationWsManager {
             // Connects only to an address the peer policy allows, which is
             // checked once it is resolved, so DNS can't change it after.
             let connect = async {
-                let addrs = state.peer_policy.resolve(host).await?;
+                let addrs = state.peer_policy.allowed_addrs(host).await?;
                 let tcp_stream = TcpStream::connect(&*addrs).await?;
                 tcp_stream.set_nodelay(true)?;
                 let (stream, _) = client_async_tls_with_config(
