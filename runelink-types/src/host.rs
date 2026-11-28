@@ -37,10 +37,9 @@ impl Host {
 
     /// The host with its port, even the default one, for connecting to it.
     pub fn authority(&self) -> String {
-        // An unported IPv6 address ends with its closing bracket.
-        match self.0.rsplit_once(':') {
-            Some((_, port)) if !port.contains(']') => self.0.clone(),
-            _ => format!("{}:{DEFAULT_PORT}", self.0),
+        match split_port(&self.0) {
+            (_, Some(_)) => self.0.clone(),
+            (name, None) => format!("{name}:{DEFAULT_PORT}"),
         }
     }
 
@@ -159,11 +158,7 @@ mod sqlx_impls {
 /// spelling: lowercase, without the default port.
 fn canonical_host(host: &str) -> Result<String, InvalidHost> {
     let invalid = || InvalidHost(host.to_string());
-    let (name, port) = match host.rsplit_once(':') {
-        // The last colon of an unported IPv6 address is inside its brackets.
-        Some((name, port)) if !port.contains(']') => (name, Some(port)),
-        _ => (host, None),
-    };
+    let (name, port) = split_port(host);
     // URL hosts may also be percent-encoded, have empty labels, or contain
     // characters such as `!` and `_`.
     let parsed = url::Host::parse(name).map_err(|_| invalid())?;
@@ -184,6 +179,15 @@ fn canonical_host(host: &str) -> Result<String, InvalidHost> {
         None | Some(DEFAULT_PORT) => parsed.to_string(),
         Some(port) => format!("{parsed}:{port}"),
     })
+}
+
+/// Splits a host into its name and its port, if it has one.
+fn split_port(host: &str) -> (&str, Option<&str>) {
+    match host.rsplit_once(':') {
+        // The last colon of an unported IPv6 address is inside its brackets.
+        Some((name, port)) if !port.contains(']') => (name, Some(port)),
+        _ => (host, None),
+    }
 }
 
 fn is_host_label(label: &str) -> bool {

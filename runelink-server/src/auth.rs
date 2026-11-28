@@ -133,8 +133,7 @@ impl Requirement {
                         "Federated delegated user required".into(),
                     ));
                 };
-                let expected_iss = expected.host.api_url(config.secure);
-                if federation.claims.iss != expected_iss {
+                if federation.host != expected.host {
                     return Ok(Some(
                         "Federation issuer does not match delegated user host"
                             .into(),

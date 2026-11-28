@@ -41,15 +41,16 @@ pub(super) async fn authorize_federation(
     delegated_user_ref: Option<UserRef>,
     mut requirement: Requirement,
 ) -> ApiResult<Session> {
-    let issuer = state
+    let host = state
         .federation_ws_manager
-        .authenticated_issuer(conn_id)
+        .authenticated_host(conn_id)
         .await
         .ok_or_else(|| {
             ApiError::AuthError(
                 "Federation websocket connection is not authenticated".into(),
             )
         })?;
+    let issuer = host.api_url(state.config.secure);
 
     let claims = match delegated_user_ref {
         Some(user_ref) => {
@@ -72,6 +73,6 @@ pub(super) async fn authorize_federation(
         ),
     };
 
-    let principal = Principal::Federation(FederationAuth { claims });
+    let principal = Principal::Federation(FederationAuth { host, claims });
     authorize(state, principal, requirement).await
 }

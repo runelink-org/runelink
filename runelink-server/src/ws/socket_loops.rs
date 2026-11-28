@@ -290,15 +290,7 @@ async fn federation_ws_upgrade_loop(
             return;
         }
     };
-    // Issuers are the host's exact API URL.
-    let Some(host) = Host::from_api_url(&auth.claims.iss, state.config.secure)
-    else {
-        log::warn!(
-            "Rejected federation websocket with non-canonical issuer {}",
-            auth.claims.iss
-        );
-        return;
-    };
+    let host = auth.host;
     let mut socket = FederationSocket::Inbound(Box::new(socket));
     let Some(capabilities) =
         negotiate_federation_socket(&host, &mut socket).await
@@ -312,10 +304,9 @@ async fn federation_ws_upgrade_loop(
         .register_connection(sender, capabilities)
         .await;
 
-    let issuer = auth.claims.iss.clone();
     let _ = state
         .federation_ws_manager
-        .authenticate_connection(conn_id, host, issuer)
+        .authenticate_connection(conn_id, host)
         .await;
 
     federation_socket_loop(state, conn_id, socket, outbound_rx).await;
@@ -539,7 +530,7 @@ pub async fn federation_socket_loop(
 
 #[cfg(test)]
 mod tests {
-    use super::{hello_rejection, parse_error_reply};
+    use super::{Host, hello_rejection, parse_error_reply};
 
     #[tokio::test]
     async fn client_and_federation_welcomes_resolve_every_offer() {
@@ -552,8 +543,7 @@ mod tests {
                         upgrade.on_upgrade(move |mut socket| async move {
                             if federation {
                                 super::negotiate_federation_socket(
-                                    &runelink_types::host::Host::parse("test")
-                                        .unwrap(),
+                                    &Host::parse("test").unwrap(),
                                     &mut super::FederationSocket::Inbound(
                                         Box::new(socket),
                                     ),
