@@ -1,6 +1,6 @@
 use runelink_types::UserRef;
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::error::CliError;
 use crate::storage::{load_data, save_data};
@@ -31,14 +31,15 @@ pub struct AuthCache {
 }
 
 /// Reads keys saved before hosts were canonical, which may name the default
-/// port. A key that was already canonical wins over other spellings of it, and
-/// keys that aren't `name@host` are dropped.
+/// port. A key that was already canonical wins over other spellings of it,
+/// which otherwise win in key order, and keys that aren't `name@host` are
+/// dropped.
 fn deserialize_accounts<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<HashMap<String, AccountAuth>, D::Error> {
     let mut accounts = HashMap::new();
     for (key, auth) in
-        HashMap::<String, AccountAuth>::deserialize(deserializer)?
+        BTreeMap::<String, AccountAuth>::deserialize(deserializer)?
     {
         let Some(user_ref) = UserRef::parse_subject(&key) else {
             continue;

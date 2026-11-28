@@ -73,9 +73,9 @@ async fn fetch_jwks(state: &AppState, issuer: &Host) -> ApiResult<CachedJwks> {
     for key in jwks.keys {
         // For now we only support Ed25519 OKP keys as produced by KeyManager.
         // Future: validate kty/crv/alg/use_ and support rotation.
-        let pub_bytes = URL_SAFE_NO_PAD.decode(key.x).map_err(|e| {
-            ApiError::Internal(format!("jwks key decode error: {e}"))
-        })?;
+        let pub_bytes = URL_SAFE_NO_PAD
+            .decode(key.x)
+            .map_err(|e| failed(e.to_string()))?;
         keys_by_kid.insert(key.kid, pub_bytes);
     }
 
