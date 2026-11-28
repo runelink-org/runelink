@@ -29,7 +29,8 @@
 //! [`client_ws_url`](runelink_types::host::Host::client_ws_url). Set
 //! [`ConnectionOptions::transport_security`] to
 //! [`TransportSecurity::PreferSecure`] to fall back to `ws://` if the secure
-//! socket never opens, or use [`ConnectionOptions::url`] for a websocket URL.
+//! socket never opens, or [`TransportSecurity::InsecureOnly`] to use only
+//! `ws://`, or use [`ConnectionOptions::url`] for a websocket URL.
 //!
 //! Connections reconnect with exponential backoff and jitter after a socket
 //! fails to open or closes. Requests in flight when a socket closes fail with
@@ -126,7 +127,8 @@ pub enum Status {
     Reconnecting,
 }
 
-/// Whether a host connection may fall back to `ws` if `wss` never opens.
+/// Whether a host connection uses `wss`, `ws`, or `ws` only if `wss` never
+/// opens.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TransportSecurity {
     #[default]
@@ -138,6 +140,9 @@ pub enum TransportSecurity {
     /// connections to the host are acceptable, such as after the user agrees
     /// to them.
     PreferSecure,
+    /// Uses `ws` only, such as for a host the user already agreed to reach
+    /// unencrypted.
+    InsecureOnly,
 }
 
 #[derive(Clone, Debug)]
@@ -350,7 +355,10 @@ impl Connection {
         };
         let (url, insecure_url, host) = match options.target {
             Target::Host(host) => (
-                host.client_ws_url(true),
+                host.client_ws_url(
+                    options.transport_security
+                        != TransportSecurity::InsecureOnly,
+                ),
                 (options.transport_security == TransportSecurity::PreferSecure)
                     .then(|| host.client_ws_url(false)),
                 host.to_string(),
