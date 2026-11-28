@@ -118,7 +118,7 @@ pub async fn update(
     let session = authorize(
         &state,
         Principal::from_client_headers(&headers, &state)?,
-        ops::servers::auth::update(&state, &server_ref),
+        ops::servers::auth::update(&server_ref),
     )
     .await?;
     let resource =
