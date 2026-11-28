@@ -178,17 +178,5 @@ pub async fn decode_federation_jwt(
         &validation,
     )
     .map_err(|_| ApiError::AuthError("invalid or expired token".into()))?;
-    let claims = data.claims;
-
-    // Verify delegation policy: issuer can only delegate users from their own host
-    if let Some(user_ref) = &claims.user_ref
-        && user_ref.host != issuer
-    {
-        return Err(ApiError::AuthError(format!(
-            "Federation delegation mismatch: token from {issuer} cannot delegate user from {}",
-            user_ref.host
-        )));
-    }
-
-    Ok((issuer, claims))
+    Ok((issuer, data.claims))
 }

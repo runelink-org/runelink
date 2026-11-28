@@ -1,4 +1,4 @@
-use runelink_types::{ClientAccessClaims, FederationClaims, UserRef};
+use runelink_types::{ClientAccessClaims, UserRef};
 use time::Duration;
 
 use crate::{
@@ -39,7 +39,7 @@ pub(super) async fn authorize_federation(
     state: &AppState,
     conn_id: ConnId,
     delegated_user_ref: Option<UserRef>,
-    mut requirement: Requirement,
+    requirement: Requirement,
 ) -> ApiResult<Session> {
     let host = state
         .federation_ws_manager
@@ -50,29 +50,6 @@ pub(super) async fn authorize_federation(
                 "Federation websocket connection is not authenticated".into(),
             )
         })?;
-    let issuer = host.api_url(state.config.secure);
-
-    let claims = match delegated_user_ref {
-        Some(user_ref) => {
-            // A peer may only act for users whose accounts live on that peer.
-            requirement = crate::and!(
-                Requirement::FederatedUser(user_ref.clone()),
-                requirement
-            );
-            FederationClaims::new_delegated(
-                issuer,
-                state.config.api_url(),
-                user_ref,
-                Duration::hours(1),
-            )
-        }
-        None => FederationClaims::new_server_only(
-            issuer,
-            state.config.api_url(),
-            Duration::hours(1),
-        ),
-    };
-
-    let principal = Principal::Federation(FederationAuth { host, claims });
-    authorize(state, principal, requirement).await
+    let auth = FederationAuth::new(host, delegated_user_ref)?;
+    authorize(state, Principal::Federation(auth), requirement).await
 }

@@ -6,7 +6,7 @@ use crate::{
 use axum::http::HeaderMap;
 use axum::http::header;
 use jsonwebtoken::{Algorithm, Validation};
-use runelink_types::{ClientAccessClaims, FederationClaims, Host};
+use runelink_types::{ClientAccessClaims, Host, UserRef};
 
 fn extract_bearer_token(headers: &HeaderMap) -> ApiResult<String> {
     let auth_header = headers
@@ -54,15 +54,26 @@ impl ClientAuth {
     }
 }
 
+/// A peer host, and the user it acts for, if any.
 #[derive(Clone, Debug)]
 pub struct FederationAuth {
-    /// The host that issued the claims
-    pub host: Host,
-    pub claims: FederationClaims,
+    host: Host,
+    user_ref: Option<UserRef>,
 }
 
-#[allow(unused)]
 impl FederationAuth {
+    /// A peer may only act for users whose home host is that peer.
+    pub fn new(host: Host, user_ref: Option<UserRef>) -> ApiResult<Self> {
+        if let Some(user_ref) = &user_ref
+            && user_ref.host != host
+        {
+            return Err(ApiError::AuthError(format!(
+                "Federation delegation mismatch: {host} cannot act for {user_ref}"
+            )));
+        }
+        Ok(Self { host, user_ref })
+    }
+
     pub async fn from_headers(
         headers: &HeaderMap,
         state: &AppState,
@@ -75,7 +86,15 @@ impl FederationAuth {
             &expected_audience,
         )
         .await?;
-        Ok(Self { host, claims })
+        Self::new(host, claims.user_ref)
+    }
+
+    pub fn host(&self) -> &Host {
+        &self.host
+    }
+
+    pub fn user_ref(&self) -> Option<&UserRef> {
+        self.user_ref.as_ref()
     }
 }
 
@@ -129,6 +148,17 @@ mod tests {
         let token =
             extract_bearer_token(&headers).expect("should parse but be empty");
         assert_eq!(token, "");
+    }
+
+    #[test]
+    fn test_federation_delegation_requires_home_host() {
+        let peer = Host::parse("peer.example").unwrap();
+        let other = Host::parse("other.example").unwrap();
+        let own_user = UserRef::new("alice".into(), peer.clone());
+        let other_user = UserRef::new("bob".into(), other);
+        assert!(FederationAuth::new(peer.clone(), None).is_ok());
+        assert!(FederationAuth::new(peer.clone(), Some(own_user)).is_ok());
+        assert!(FederationAuth::new(peer, Some(other_user)).is_err());
     }
 
     #[test]
