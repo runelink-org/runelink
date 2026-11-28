@@ -618,8 +618,14 @@ impl FederationWsManager {
 
             let loop_task: Pin<Box<dyn Future<Output = ()> + Send>> =
                 Box::pin(async move {
-                    federation_socket_loop(state, conn_id, socket, outbound_rx)
-                        .await;
+                    federation_socket_loop(
+                        state,
+                        conn_id,
+                        host.clone(),
+                        socket,
+                        outbound_rx,
+                    )
+                    .await;
                     info!("Federation websocket closed for {host}");
                 });
             tokio::spawn(loop_task);

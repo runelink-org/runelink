@@ -1,13 +1,8 @@
 use crate::{state::AppState, ws};
 use axum::{
-    Router,
-    extract::Query,
-    middleware,
-    response::IntoResponse,
+    Router, middleware,
     routing::{get, post},
 };
-use log::debug;
-use serde::Deserialize;
 use tower_http::cors;
 
 mod auth;
@@ -98,21 +93,6 @@ pub fn router() -> Router<AppState> {
         .layer(cors)
 }
 
-#[derive(Deserialize, Debug)]
-pub struct PingParams {
-    id: Option<i32>,
-    msg: Option<String>,
-}
-
-pub async fn ping(Query(params): Query<PingParams>) -> impl IntoResponse {
-    debug!("GET /ping?id={:?}&msg={:?}", params.id, params.msg);
-    let msg_part = match params.msg {
-        Some(msg) => format!(": \"{msg}\""),
-        None => "".to_string(),
-    };
-    let id_part = match params.id {
-        Some(id) => format!(" ({id})"),
-        None => "".to_string(),
-    };
-    format!("pong{id_part}{msg_part}")
+pub async fn ping() -> &'static str {
+    "pong"
 }
