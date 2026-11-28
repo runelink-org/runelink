@@ -137,3 +137,30 @@ impl From<ApiError> for WsError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use runelink_types::{Host, ws::WsError};
+
+    use super::ApiError;
+    use crate::ws::error::FederationRequestError;
+
+    #[test]
+    fn errors_passed_between_hosts_keep_their_message() {
+        let host = Host::parse("peer.example").unwrap();
+        for error in [
+            ApiError::AuthError("x".into()),
+            ApiError::BadRequest("x".into()),
+            ApiError::Conflict("x".into()),
+        ] {
+            let sent = WsError::from(error);
+            let received = FederationRequestError::Remote {
+                code: sent.code.clone(),
+                message: sent.message.clone(),
+                error: Box::new(sent),
+            }
+            .into_api_error(&host);
+            assert_eq!(WsError::from(received).message, "x");
+        }
+    }
+}
