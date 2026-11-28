@@ -4,7 +4,7 @@ use runelink_client::{
     Error as ClientError, requests,
     util::{get_api_url, pad_host},
 };
-use runelink_types::UserRef;
+use runelink_types::{Host, UserRef};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -131,12 +131,12 @@ impl AppConfig {
 }
 
 pub trait TryGetHost {
-    fn try_get_host(&self) -> Result<&str, CliError>;
+    fn try_get_host(&self) -> Result<&Host, CliError>;
 }
 
 impl TryGetHost for Option<&AccountConfig> {
-    fn try_get_host(&self) -> Result<&str, CliError> {
-        self.map(|ac| ac.user_ref.host.as_str())
+    fn try_get_host(&self) -> Result<&Host, CliError> {
+        self.map(|ac| &ac.user_ref.host)
             .ok_or(CliError::MissingAccount)
     }
 }

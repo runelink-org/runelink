@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM user_remote_server_memberships\n        WHERE remote_server_host = $1 AND remote_server_id = $2\n            AND user_name = $3 AND user_host = $4\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bfc23f41dc75a236559d762fbe9a10f5a32dc24e7a6dd27f057517ac1d38ed72"
+}

@@ -11,13 +11,14 @@ use crate::{
     },
     channel::{
         NewServerChannel, ServerChannel, ServerChannelId, ServerChannelMove,
-        TextChannelId,
+        ServerChannelRef, TextChannelId, TextChannelRef,
     },
-    message::{Message, MessageId, NewMessage},
+    host::Host,
+    message::{Message, MessageId, MessageRef, NewMessage},
     server::{
         FullServerMembership, NewServer, NewServerMembership,
         NewServerMembershipFull, Server, ServerId, ServerMember,
-        ServerMembership, ServerWithChannels,
+        ServerMembership, ServerRef, ServerWithChannels,
     },
     user::{NewUser, User, UserRef},
 };
@@ -49,7 +50,7 @@ pub enum ClientWsConnectionState {
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum FederationWsConnectionState {
     Unauthenticated,
-    Authenticated { host: String },
+    Authenticated { host: Host },
 }
 
 /// Request enum for websocket client traffic. Variants map to existing API endpoints.
@@ -57,19 +58,16 @@ pub enum FederationWsConnectionState {
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ClientWsRequest {
     ServersUpdate {
-        server_id: ServerId,
+        server_ref: ServerRef,
         server_update: ServerUpdate,
-        target_host: Option<String>,
     },
     ChannelsUpdate {
-        channel_id: ServerChannelId,
+        channel_ref: ServerChannelRef,
         channel_update: ServerChannelUpdate,
-        target_host: Option<String>,
     },
     MessagesUpdate {
-        message_id: MessageId,
+        message_ref: MessageRef,
         message_update: MessageUpdate,
-        target_host: Option<String>,
     },
     Ping,
     OidcDiscovery,
@@ -83,15 +81,15 @@ pub enum ClientWsRequest {
     AuthRegisterClient,
     UsersCreate(NewUser),
     UsersGetAll {
-        target_host: Option<String>,
+        target_host: Option<Host>,
     },
     UsersGetByRef {
         user_ref: UserRef,
-        target_host: Option<String>,
+        target_host: Option<Host>,
     },
     UsersGetAssociatedHosts {
         user_ref: UserRef,
-        target_host: Option<String>,
+        target_host: Option<Host>,
     },
     UsersDelete {
         user_ref: UserRef,
@@ -100,90 +98,73 @@ pub enum ClientWsRequest {
         user_ref: UserRef,
     },
     MembershipsGetMembersByServer {
-        server_id: ServerId,
-        target_host: Option<String>,
+        server_ref: ServerRef,
     },
     MembershipsGetByUserAndServer {
-        server_id: ServerId,
+        server_ref: ServerRef,
         user_ref: UserRef,
-        target_host: Option<String>,
     },
     MembershipsUpsert {
-        server_id: ServerId,
         new_membership: NewServerMembership,
     },
     MembershipsDelete {
-        server_id: ServerId,
+        server_ref: ServerRef,
         user_ref: UserRef,
-        target_host: Option<String>,
     },
     ServersCreate {
         new_server: NewServer,
-        target_host: Option<String>,
+        target_host: Option<Host>,
     },
     ServersGetAll {
-        target_host: Option<String>,
+        target_host: Option<Host>,
     },
     ServersGetById {
-        server_id: ServerId,
-        target_host: Option<String>,
+        server_ref: ServerRef,
     },
     ServersGetWithChannels {
-        server_id: ServerId,
-        target_host: Option<String>,
+        server_ref: ServerRef,
     },
     ServersDelete {
-        server_id: ServerId,
-        target_host: Option<String>,
+        server_ref: ServerRef,
     },
     ChannelsCreate {
-        server_id: ServerId,
+        server_ref: ServerRef,
         new_channel: NewServerChannel,
-        target_host: Option<String>,
     },
     ChannelsGetAll {
-        target_host: Option<String>,
+        target_host: Option<Host>,
     },
     ChannelsGetByServer {
-        server_id: ServerId,
-        target_host: Option<String>,
+        server_ref: ServerRef,
     },
     ChannelsGetById {
-        channel_id: ServerChannelId,
-        target_host: Option<String>,
+        channel_ref: ServerChannelRef,
     },
     ChannelsDelete {
-        channel_id: ServerChannelId,
-        target_host: Option<String>,
+        channel_ref: ServerChannelRef,
     },
     ChannelsMove {
-        channel_id: ServerChannelId,
+        channel_ref: ServerChannelRef,
         channel_move: ServerChannelMove,
-        target_host: Option<String>,
     },
     MessagesCreate {
-        text_channel_id: TextChannelId,
+        text_channel_ref: TextChannelRef,
         new_message: NewMessage,
-        target_host: Option<String>,
     },
     MessagesGetAll {
-        target_host: Option<String>,
+        target_host: Option<Host>,
     },
     MessagesGetByServer {
-        server_id: ServerId,
-        target_host: Option<String>,
+        server_ref: ServerRef,
     },
     MessagesGetByTextChannel {
-        text_channel_id: TextChannelId,
-        target_host: Option<String>,
+        text_channel_ref: TextChannelRef,
     },
     MessagesGetById {
-        message_id: MessageId,
-        target_host: Option<String>,
+        message_ref: MessageRef,
     },
     MessagesDelete {
-        message_id: MessageId,
-        target_host: Option<String>,
+        message_ref: MessageRef,
     },
 }
 
@@ -356,7 +337,7 @@ pub enum ClientWsReply {
     UsersCreate(User),
     UsersGetAll(Vec<User>),
     UsersGetByRef(User),
-    UsersGetAssociatedHosts(Vec<String>),
+    UsersGetAssociatedHosts(Vec<Host>),
     UsersDelete,
     MembershipsGetByUser(Vec<ServerMembership>),
     MembershipsGetMembersByServer(Vec<ServerMember>),
@@ -411,9 +392,6 @@ pub enum FederationWsRequest {
     },
     MembershipsUpsert {
         new_membership: NewServerMembershipFull,
-    },
-    MembershipsGetByUser {
-        user_ref: UserRef,
     },
     MembershipsDelete {
         server_id: ServerId,
@@ -482,8 +460,7 @@ impl FederationWsRequest {
             | Self::UsersGetByRef { .. }
             | Self::UsersGetAssociatedHosts { .. } => Capability::UsersRead,
             Self::UsersDelete { .. } => Capability::UsersDelete,
-            Self::MembershipsGetByUser { .. }
-            | Self::MembershipsGetMembersByServer { .. }
+            Self::MembershipsGetMembersByServer { .. }
             | Self::MembershipsGetByUserAndServer { .. } => {
                 Capability::MembershipsRead
             }
@@ -524,10 +501,9 @@ pub enum FederationWsReply {
     ConnectionState(FederationWsConnectionState),
     UsersGetAll(Vec<User>),
     UsersGetByRef(User),
-    UsersGetAssociatedHosts(Vec<String>),
+    UsersGetAssociatedHosts(Vec<Host>),
     UsersDelete,
     MembershipsUpsert(FullServerMembership),
-    MembershipsGetByUser(Vec<ServerMembership>),
     MembershipsDelete,
     MembershipsGetMembersByServer(Vec<ServerMember>),
     MembershipsGetByUserAndServer(ServerMember),
@@ -550,6 +526,58 @@ pub enum FederationWsReply {
     MessagesDelete(Message),
 }
 
+impl FederationWsReply {
+    /// Whether every resource in the reply that has an owning host is owned
+    /// by `host`, which is what a host may reply with about its own
+    /// resources. Users and members may be other hosts' users.
+    pub fn is_owned_by(&self, host: &Host) -> bool {
+        let servers =
+            |servers: &[Server]| servers.iter().all(|s| s.host == *host);
+        let channels = |channels: &[ServerChannel]| {
+            channels.iter().all(|c| c.host == *host)
+        };
+        let messages =
+            |messages: &[Message]| messages.iter().all(|m| m.host == *host);
+        match self {
+            Self::ServersCreate(server)
+            | Self::ServersGetById(server)
+            | Self::ServersUpdate(server) => server.host == *host,
+            Self::ServersGetAll(list) => servers(list),
+            Self::ServersGetWithChannels(ServerWithChannels {
+                server,
+                channels: list,
+            }) => server.host == *host && channels(list),
+            Self::MembershipsUpsert(membership) => {
+                membership.server.host == *host
+            }
+            Self::ChannelsCreate(channel)
+            | Self::ChannelsGetById(channel)
+            | Self::ChannelsUpdate(channel) => channel.host == *host,
+            Self::ChannelsGetAll(list)
+            | Self::ChannelsGetByServer(list)
+            | Self::ChannelsMove(list) => channels(list),
+            Self::MessagesCreate(message)
+            | Self::MessagesGetById(message)
+            | Self::MessagesUpdate(message)
+            | Self::MessagesDelete(message) => message.host == *host,
+            Self::MessagesGetAll(list)
+            | Self::MessagesGetByServer(list)
+            | Self::MessagesGetByTextChannel(list) => messages(list),
+            // Peers answer for their own users only.
+            Self::UsersGetByRef(user) => user.host == *host,
+            Self::ConnectionState(_)
+            | Self::UsersGetAll(_)
+            | Self::UsersGetAssociatedHosts(_)
+            | Self::UsersDelete
+            | Self::MembershipsDelete
+            | Self::MembershipsGetMembersByServer(_)
+            | Self::MembershipsGetByUserAndServer(_)
+            | Self::ServersDelete
+            | Self::ChannelsDelete => true,
+        }
+    }
+}
+
 /// Client websocket updates are push-only events and do not map 1:1 with requests.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
@@ -560,16 +588,16 @@ pub enum ClientWsUpdate {
     },
     MembershipUpserted(FullServerMembership),
     MembershipDeleted {
-        server_id: ServerId,
+        server_ref: ServerRef,
         user_ref: UserRef,
     },
     ServerUpserted(Server),
     ServerDeleted {
-        server_id: ServerId,
+        server_ref: ServerRef,
     },
     ChannelUpserted(ServerChannel),
     ChannelDeleted {
-        server_id: ServerId,
+        server_ref: ServerRef,
         channel_id: ServerChannelId,
     },
     MessageUpserted(Message),
@@ -601,18 +629,19 @@ impl ClientWsUpdate {
 pub enum FederationWsUpdate {
     MembershipUpserted(FullServerMembership),
     MembershipDeleted {
-        server_id: ServerId,
+        server_ref: ServerRef,
         user_ref: UserRef,
     },
     ServerUpserted(Server),
     ServerDeleted {
-        server_id: ServerId,
+        server_ref: ServerRef,
     },
     ChannelUpserted(ServerChannel),
     ChannelDeleted {
-        server_id: ServerId,
+        server_ref: ServerRef,
         channel_id: ServerChannelId,
     },
+    /// A message in a text channel of the server on the message's host.
     MessageUpserted {
         server_id: ServerId,
         message: Message,
@@ -623,6 +652,21 @@ pub enum FederationWsUpdate {
 }
 
 impl FederationWsUpdate {
+    /// The host that owns what the update is about, which is the only host
+    /// that may send it.
+    pub fn owner(&self) -> &Host {
+        match self {
+            Self::MembershipUpserted(membership) => &membership.server.host,
+            Self::MembershipDeleted { server_ref, .. }
+            | Self::ServerDeleted { server_ref }
+            | Self::ChannelDeleted { server_ref, .. } => &server_ref.host,
+            Self::ServerUpserted(server) => &server.host,
+            Self::ChannelUpserted(channel) => &channel.host,
+            Self::MessageUpserted { message, .. } => &message.host,
+            Self::RemoteUserDeleted { user_ref } => &user_ref.host,
+        }
+    }
+
     pub fn capability(&self) -> Capability {
         match self {
             Self::RemoteUserDeleted { .. } => Capability::UsersEvents,
@@ -704,11 +748,159 @@ impl std::fmt::Debug for AuthTokenAccessRequest {
 mod tests {
     use std::collections::BTreeMap;
 
-    use super::{AuthTokenAccessRequest, ClientWsEnvelope};
+    use super::*;
     use crate::capability::{
         CapabilityHello,
         versions::{NEGOTIATION_VERSION, messages},
     };
+    use crate::{channel::ServerChannelContent, message::MessageContent};
+    use time::OffsetDateTime;
+
+    fn host(host: &str) -> Host {
+        Host::parse(host).unwrap()
+    }
+
+    fn server(host: &Host) -> Server {
+        Server {
+            id: ServerId::new(),
+            host: host.clone(),
+            title: "test".into(),
+            description: None,
+            created_at: OffsetDateTime::UNIX_EPOCH,
+            updated_at: OffsetDateTime::UNIX_EPOCH,
+        }
+    }
+
+    fn channel(host: &Host) -> ServerChannel {
+        ServerChannel {
+            id: ServerChannelId::new(),
+            host: host.clone(),
+            server_id: ServerId::new(),
+            content: ServerChannelContent::Category,
+            title: "test".into(),
+            description: None,
+            metadata: None,
+            parent_channel_id: None,
+            position: 0,
+            created_at: OffsetDateTime::UNIX_EPOCH,
+            updated_at: OffsetDateTime::UNIX_EPOCH,
+        }
+    }
+
+    fn message(host: &Host) -> Message {
+        Message {
+            id: MessageId::new(),
+            host: host.clone(),
+            text_channel_id: TextChannelId::new(),
+            author: None,
+            reply_to: None,
+            metadata: None,
+            content: MessageContent::Active {
+                body: "hi".into(),
+                deleted_at: (),
+            },
+            created_at: OffsetDateTime::UNIX_EPOCH,
+            updated_at: OffsetDateTime::UNIX_EPOCH,
+            edited_at: None,
+        }
+    }
+
+    fn user(host: &Host) -> User {
+        User {
+            name: "alice".into(),
+            host: host.clone(),
+            role: crate::user::UserRole::User,
+            created_at: OffsetDateTime::UNIX_EPOCH,
+            updated_at: OffsetDateTime::UNIX_EPOCH,
+            synced_at: None,
+        }
+    }
+
+    /// A membership of a server on `server_host` by a user on `user_host`.
+    fn membership(
+        server_host: &Host,
+        user_host: &Host,
+    ) -> FullServerMembership {
+        FullServerMembership {
+            server: server(server_host),
+            user: user(user_host),
+            role: crate::server::ServerRole::Member,
+            joined_at: OffsetDateTime::UNIX_EPOCH,
+            updated_at: OffsetDateTime::UNIX_EPOCH,
+            synced_at: None,
+        }
+    }
+
+    #[test]
+    fn updates_are_owned_by_the_host_of_their_resource() {
+        let (a, b) = (host("a.example"), host("b.example"));
+        let user_ref = UserRef::new("alice".into(), "b.example").unwrap();
+        let server_ref = ServerRef::new(a.clone(), ServerId::new());
+        for update in [
+            FederationWsUpdate::ServerUpserted(server(&a)),
+            FederationWsUpdate::ServerDeleted {
+                server_ref: server_ref.clone(),
+            },
+            FederationWsUpdate::ChannelUpserted(channel(&a)),
+            FederationWsUpdate::ChannelDeleted {
+                server_ref: server_ref.clone(),
+                channel_id: ServerChannelId::new(),
+            },
+            FederationWsUpdate::MembershipDeleted {
+                server_ref: server_ref.clone(),
+                user_ref: user_ref.clone(),
+            },
+            FederationWsUpdate::MessageUpserted {
+                server_id: ServerId::new(),
+                message: message(&a),
+            },
+            // Owned by the server's host, whoever the member is
+            FederationWsUpdate::MembershipUpserted(membership(&a, &b)),
+        ] {
+            assert_eq!(update.owner(), &a, "{update:?}");
+        }
+        // A user's deletion belongs to their home host.
+        assert_eq!(
+            FederationWsUpdate::RemoteUserDeleted { user_ref }.owner(),
+            &b
+        );
+    }
+
+    #[test]
+    fn replies_are_owned_only_if_all_their_resources_are() {
+        let (a, b) = (host("a.example"), host("b.example"));
+        assert!(FederationWsReply::ServersGetById(server(&a)).is_owned_by(&a));
+        assert!(!FederationWsReply::ServersGetById(server(&b)).is_owned_by(&a));
+        assert!(
+            !FederationWsReply::ServersGetAll(vec![server(&a), server(&b)])
+                .is_owned_by(&a)
+        );
+        assert!(
+            !FederationWsReply::ServersGetWithChannels(ServerWithChannels {
+                server: server(&a),
+                channels: vec![channel(&a), channel(&b)],
+            })
+            .is_owned_by(&a)
+        );
+        assert!(
+            !FederationWsReply::ChannelsMove(vec![channel(&b)]).is_owned_by(&a)
+        );
+        assert!(
+            !FederationWsReply::MessagesGetByTextChannel(vec![message(&b)])
+                .is_owned_by(&a)
+        );
+        assert!(FederationWsReply::MessagesDelete(message(&a)).is_owned_by(&a));
+        assert!(
+            FederationWsReply::MembershipsUpsert(membership(&a, &b))
+                .is_owned_by(&a)
+        );
+        assert!(
+            !FederationWsReply::MembershipsUpsert(membership(&b, &a))
+                .is_owned_by(&a)
+        );
+        assert!(FederationWsReply::UsersGetByRef(user(&a)).is_owned_by(&a));
+        assert!(!FederationWsReply::UsersGetByRef(user(&b)).is_owned_by(&a));
+    }
 
     #[test]
     fn auth_token_access_request_debug_redacts_access_token() {
@@ -738,7 +930,7 @@ mod tests {
                 "type": "hello",
                 "data": {
                     "negotiation_version": 1,
-                    "capabilities": { "messages.read": ["2026.10.19"] }
+                    "capabilities": { "messages.read": ["2026.11.27"] }
                 }
             })
         );

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO users (name, host, role, created_at, updated_at, synced_at)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        ON CONFLICT (name, host) DO UPDATE SET\n            role = EXCLUDED.role,\n            updated_at = EXCLUDED.updated_at,\n            synced_at = EXCLUDED.synced_at\n        RETURNING\n            name,\n            host,\n            role AS \"role: UserRole\",\n            created_at,\n            updated_at,\n            synced_at;\n        ",
+  "query": "\n        INSERT INTO users (name, host, role)\n        VALUES ($1, $2, 'user')\n        ON CONFLICT (name, host) DO UPDATE SET updated_at = NOW()\n        RETURNING\n            name,\n            host AS \"host: Host\",\n            role AS \"role: UserRole\",\n            created_at,\n            updated_at,\n            synced_at;\n        ",
   "describe": {
     "columns": [
       {
@@ -16,7 +16,7 @@
       },
       {
         "ordinal": 1,
-        "name": "host",
+        "name": "host: Host",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -83,21 +83,7 @@
     "parameters": {
       "Left": [
         "Text",
-        "Text",
-        {
-          "Custom": {
-            "name": "user_role",
-            "kind": {
-              "Enum": [
-                "user",
-                "admin"
-              ]
-            }
-          }
-        },
-        "Timestamptz",
-        "Timestamptz",
-        "Timestamptz"
+        "Text"
       ]
     },
     "nullable": [
@@ -109,5 +95,5 @@
       true
     ]
   },
-  "hash": "d43ae49968f3e35c2b3a411e2b4a1765000158aa75fa6214393c396dc459017e"
+  "hash": "4d609a1845e2eb3ad15110bedf44b17e7828841d3e0eed719bd94801e32fbc04"
 }

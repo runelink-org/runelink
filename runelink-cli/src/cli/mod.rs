@@ -40,6 +40,12 @@ pub struct Cli {
     /// Fail instead of prompting when input is missing, for scripts
     #[clap(long, global = true, env = "RUNE_NON_INTERACTIVE", action = clap::ArgAction::SetTrue, value_parser = FalseyValueParser::new())]
     pub non_interactive: bool,
+    /// Show each server's host in server lists and prompts
+    #[clap(long, global = true, conflicts_with = "hide_server_hosts")]
+    pub show_server_hosts: bool,
+    /// Hide server hosts in server lists and prompts (the default)
+    #[clap(long, global = true)]
+    pub hide_server_hosts: bool,
     /// Print returned data as JSON instead of human-readable text
     #[clap(long, global = true, env = "RUNE_JSON", action = clap::ArgAction::SetTrue, value_parser = FalseyValueParser::new())]
     pub json: bool,
@@ -114,6 +120,7 @@ pub async fn handle_cli(
         auth_cache,
         account: account_owned.as_ref(),
         strict_input: cli.strict_input,
+        show_server_hosts: cli.show_server_hosts && !cli.hide_server_hosts,
         json: cli.json,
     };
     let ctx = &mut ctx_owned;

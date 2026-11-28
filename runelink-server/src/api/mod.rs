@@ -49,48 +49,48 @@ pub fn router() -> Router<AppState> {
         )
         .route("/messages", get(messages::get_all))
         .route(
-            "/messages/{message_id}",
+            "/messages/{host}/{id}",
             get(messages::get_by_id)
                 .delete(messages::delete)
                 .patch(messages::update),
         )
         .route(
-            "/text_channels/{text_channel_id}/messages",
+            "/text_channels/{host}/{id}/messages",
             get(messages::get_by_text_channel).post(messages::create),
         )
         .route("/channels", get(channels::get_all))
         .route(
-            "/channels/{channel_id}",
+            "/channels/{host}/{id}",
             get(channels::get_by_id)
                 .delete(channels::delete)
                 .patch(channels::update),
         )
-        .route("/channels/{channel_id}/move", post(channels::move_channel))
+        .route("/channels/{host}/{id}/move", post(channels::move_channel))
         .route("/servers", get(servers::get_all).post(servers::create))
         .route(
-            "/servers/{server_id}",
+            "/servers/{host}/{id}",
             get(servers::get_by_id)
                 .delete(servers::delete)
                 .patch(servers::update),
         )
         .route(
-            "/servers/{server_id}/channels",
+            "/servers/{host}/{id}/channels",
             get(channels::get_by_server).post(channels::create),
         )
         .route(
-            "/servers/{server_id}/messages",
+            "/servers/{host}/{id}/messages",
             get(messages::get_by_server),
         )
         .route(
-            "/servers/{server_id}/with_channels",
+            "/servers/{host}/{id}/with_channels",
             get(servers::get_with_channels),
         )
         .route(
-            "/servers/{server_id}/users",
+            "/servers/{host}/{id}/users",
             get(memberships::get_members_by_server).post(memberships::create),
         )
         .route(
-            "/servers/{server_id}/users/{host}/{name}",
+            "/servers/{host}/{id}/users/{user_host}/{name}",
             get(memberships::get_by_user_and_server)
                 .delete(memberships::delete),
         )

@@ -1,4 +1,4 @@
-use runelink_types::{NewUser, User, UserRef, UserRole};
+use runelink_types::{Host, NewUser, User, UserRef, UserRole};
 use sqlx::{PgConnection, PgExecutor};
 use time::{Duration, OffsetDateTime};
 
@@ -27,14 +27,14 @@ pub async fn insert(
         VALUES ($1, $2, $3)
         RETURNING
             name,
-            host,
+            host AS "host: Host",
             role AS "role: UserRole",
             created_at,
             updated_at,
             synced_at;
         "#,
         new_user.name,
-        new_user.host,
+        new_user.host.as_str(),
         new_user.role as UserRole,
     )
     .fetch_one(conn)
@@ -112,14 +112,14 @@ pub async fn upsert_remote(
             synced_at = EXCLUDED.synced_at
         RETURNING
             name,
-            host,
+            host AS "host: Host",
             role AS "role: UserRole",
             created_at,
             updated_at,
             synced_at;
         "#,
         remote_user.name,
-        remote_user.host,
+        remote_user.host.as_str(),
         UserRole::User as UserRole,
         remote_user.created_at,
         remote_user.updated_at,
@@ -136,7 +136,7 @@ pub async fn get_all(pool: &DbPool) -> ApiResult<Vec<User>> {
         r#"
         SELECT
             name,
-            host,
+            host AS "host: Host",
             role AS "role: UserRole",
             created_at,
             updated_at,
@@ -170,14 +170,14 @@ pub async fn ensure_exists(
         ON CONFLICT (name, host) DO UPDATE SET updated_at = NOW()
         RETURNING
             name,
-            host,
+            host AS "host: Host",
             role AS "role: UserRole",
             created_at,
             updated_at,
             synced_at;
         "#,
         user_ref.name,
-        user_ref.host,
+        user_ref.host.as_str(),
     )
     .fetch_one(conn)
     .await?;
@@ -205,7 +205,7 @@ pub async fn get_by_ref(
         r#"
         SELECT
             name,
-            host,
+            host AS "host: Host",
             role AS "role: UserRole",
             created_at,
             updated_at,
@@ -214,7 +214,7 @@ pub async fn get_by_ref(
         WHERE name = $1 AND host = $2;
         "#,
         user_ref.name,
-        user_ref.host,
+        user_ref.host.as_str(),
     )
     .fetch_one(executor)
     .await?;
@@ -247,7 +247,7 @@ pub async fn delete(
     let deleted = sqlx::query!(
         "DELETE FROM users WHERE name = $1 AND host = $2",
         user_ref.name,
-        user_ref.host
+        user_ref.host.as_str()
     )
     .execute(&mut *tx)
     .await?
@@ -280,7 +280,7 @@ async fn insert_deleted(
         ON CONFLICT (name, host) DO UPDATE SET deleted_at = EXCLUDED.deleted_at;
         "#,
         user_ref.name,
-        user_ref.host
+        user_ref.host.as_str()
     )
     .execute(conn)
     .await?;
@@ -290,17 +290,16 @@ async fn insert_deleted(
 pub async fn get_associated_hosts(
     pool: &DbPool,
     user_ref: &UserRef,
-) -> ApiResult<Vec<String>> {
+) -> ApiResult<Vec<Host>> {
     let hosts = sqlx::query_scalar!(
         r#"
-        SELECT DISTINCT s.host
-        FROM user_remote_server_memberships m
-        JOIN cached_remote_servers s ON s.id = m.remote_server_id
-        WHERE m.user_name = $1 AND m.user_host = $2
-        ORDER BY s.host ASC;
+        SELECT DISTINCT remote_server_host AS "remote_server_host: Host"
+        FROM user_remote_server_memberships
+        WHERE user_name = $1 AND user_host = $2
+        ORDER BY remote_server_host ASC;
         "#,
         user_ref.name,
-        user_ref.host,
+        user_ref.host.as_str(),
     )
     .fetch_all(pool)
     .await?;

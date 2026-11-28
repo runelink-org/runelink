@@ -1,9 +1,9 @@
-use runelink_types::server::{NewServer, Server, ServerId};
+use runelink_types::server::{NewServer, Server, ServerId, ServerRef};
 use sqlx::{PgConnection, PgExecutor};
 use time::OffsetDateTime;
 
 use crate::{
-    config::{ServerConfig, canonical_host},
+    config::ServerConfig,
     db::DbPool,
     error::{ApiError, ApiResult},
 };
@@ -22,7 +22,7 @@ impl LocalServerRow {
     fn into_server(self, config: &ServerConfig) -> Server {
         Server {
             id: self.id,
-            host: config.public_host(),
+            host: config.public_host().clone(),
             title: self.title,
             description: self.description,
             created_at: self.created_at,
@@ -53,42 +53,53 @@ pub async fn insert(
     Ok(row.into_server(config))
 }
 
-/// Cache a remote server reported by `source_host`.
-///
-/// Only a server's own host may report it, and a cached server's host never
-/// changes, so the first host to claim a server ID keeps it. Local server IDs
-/// are never cached.
+/// Cache a remote server, unless a newer version is cached.
 pub async fn upsert_remote(
-    pool: &DbPool,
+    executor: impl PgExecutor<'_>,
     server: &Server,
-    source_host: &str,
 ) -> ApiResult<()> {
-    let host = canonical_host(&server.host)?;
-    if host != canonical_host(source_host)? {
-        return Err(ApiError::Conflict(format!(
-            "{source_host} cannot report servers on {}",
-            server.host
-        )));
-    }
-    let result = sqlx::query!(
+    sqlx::query!(
         r#"
         INSERT INTO cached_remote_servers (
             id, host, title, description, remote_created_at,
             remote_updated_at, synced_at
         )
-        SELECT $1, $2, $3, $4, $5, $6, NOW()
-        WHERE NOT EXISTS (SELECT 1 FROM servers WHERE id = $1)
-        ON CONFLICT(id) DO UPDATE
+        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        ON CONFLICT (host, id) DO UPDATE
             SET title = EXCLUDED.title,
                 description = EXCLUDED.description,
                 remote_created_at = EXCLUDED.remote_created_at,
                 remote_updated_at = EXCLUDED.remote_updated_at,
                 synced_at = NOW()
         WHERE cached_remote_servers.remote_updated_at <= EXCLUDED.remote_updated_at
-            AND cached_remote_servers.host = EXCLUDED.host
         "#,
         server.id.as_uuid(),
-        host,
+        server.host.as_str(),
+        server.title,
+        server.description,
+        server.created_at,
+        server.updated_at,
+    )
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+/// Update a cached remote server, unless a newer version is cached. Servers
+/// that are not cached stay that way. Returns whether it was updated.
+pub async fn update_remote(pool: &DbPool, server: &Server) -> ApiResult<bool> {
+    let result = sqlx::query!(
+        r#"
+        UPDATE cached_remote_servers
+        SET title = $3,
+            description = $4,
+            remote_created_at = $5,
+            remote_updated_at = $6,
+            synced_at = NOW()
+        WHERE host = $1 AND id = $2 AND remote_updated_at <= $6
+        "#,
+        server.host.as_str(),
+        server.id.as_uuid(),
         server.title,
         server.description,
         server.created_at,
@@ -96,34 +107,17 @@ pub async fn upsert_remote(
     )
     .execute(pool)
     .await?;
-    if result.rows_affected() == 0 {
-        // The update is stale, or another host claimed this ID first.
-        let cached_host = sqlx::query_scalar!(
-            "SELECT host FROM cached_remote_servers WHERE id = $1",
-            server.id.as_uuid(),
-        )
-        .fetch_optional(pool)
-        .await?;
-        if cached_host.as_deref() != Some(host.as_str()) {
-            return Err(ApiError::Conflict(format!(
-                "Server {} belongs to another host",
-                server.id
-            )));
-        }
-    }
-    Ok(())
+    Ok(result.rows_affected() > 0)
 }
 
-/// Remove a cached remote server reported deleted by its own host.
 pub async fn delete_remote(
     pool: &DbPool,
-    server_id: ServerId,
-    source_host: &str,
+    server_ref: &ServerRef,
 ) -> ApiResult<()> {
     sqlx::query!(
-        "DELETE FROM cached_remote_servers WHERE id = $1 AND host = $2",
-        server_id.as_uuid(),
-        canonical_host(source_host)?,
+        "DELETE FROM cached_remote_servers WHERE host = $1 AND id = $2",
+        server_ref.host.as_str(),
+        server_ref.id.as_uuid(),
     )
     .execute(pool)
     .await?;

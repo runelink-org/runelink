@@ -1,7 +1,7 @@
 use runelink_types::{
     server::{
-        FullServerMembership, NewServerMembership, ServerId, ServerMember,
-        ServerMembership, ServerRole,
+        FullServerMembership, NewServerMembership, ServerMember,
+        ServerMembership, ServerRef, ServerRole,
     },
     user::{User, UserRef},
     ws::{FederationWsReply, FederationWsRequest},
@@ -25,19 +25,19 @@ pub async fn upsert(
     remote_user: Option<&User>,
 ) -> ApiResult<FullServerMembership> {
     // If this membership is for a remote server, proxy via federation and cache locally.
-    if state
-        .config
-        .locality(&new_membership.server_host)
-        .is_remote()
+    if let Locality::Remote(host) =
+        state.config.locality(&new_membership.server_ref.host)
     {
         // Home Server should only create memberships for its own users.
-        let user_host = new_membership.user_ref.host.clone();
-        if state.config.locality(&user_host).is_remote() {
+        if state
+            .config
+            .locality(&new_membership.user_ref.host)
+            .is_remote()
+        {
             return Err(ApiError::BadRequest(
                 "User host in membership does not match local host".into(),
             ));
         }
-        let host = new_membership.server_host.as_str();
         let user =
             users::get_by_ref(state, new_membership.user_ref.clone(), None)
                 .await?;
@@ -106,14 +106,13 @@ pub async fn upsert(
 /// Get all members of a server (public).
 pub async fn get_members_by_server(
     state: &AppState,
-    server_id: ServerId,
-    target_host: Option<&str>,
+    server_ref: &ServerRef,
 ) -> ApiResult<Vec<ServerMember>> {
-    match state.config.target_locality(target_host) {
+    match state.config.locality(&server_ref.host) {
         Locality::Local => {
             let members = queries::memberships::get_members_by_server(
                 &state.db_pool,
-                server_id,
+                server_ref.id,
             )
             .await?;
             Ok(members)
@@ -125,7 +124,7 @@ pub async fn get_members_by_server(
                 host,
                 None,
                 FederationWsRequest::MembershipsGetMembersByServer {
-                    server_id,
+                    server_id: server_ref.id,
                 },
             )
             .await?;
@@ -144,16 +143,15 @@ pub async fn get_members_by_server(
 /// Get a specific server member (public).
 pub async fn get_member_by_user_and_server(
     state: &AppState,
-    server_id: ServerId,
+    server_ref: &ServerRef,
     user_ref: UserRef,
-    target_host: Option<&str>,
 ) -> ApiResult<ServerMember> {
-    match state.config.target_locality(target_host) {
+    match state.config.locality(&server_ref.host) {
         Locality::Local => {
             let member =
                 queries::memberships::get_local_member_by_user_and_server(
                     &*state.db_pool,
-                    server_id,
+                    server_ref.id,
                     user_ref,
                 )
                 .await?;
@@ -166,7 +164,7 @@ pub async fn get_member_by_user_and_server(
                 host,
                 None,
                 FederationWsRequest::MembershipsGetByUserAndServer {
-                    server_id,
+                    server_id: server_ref.id,
                     user_ref,
                 },
             )
@@ -197,19 +195,22 @@ pub async fn get_by_user(
 pub async fn delete(
     state: &AppState,
     session: &mut Session,
-    server_id: ServerId,
+    server_ref: &ServerRef,
     user_ref: UserRef,
-    target_host: Option<&str>,
 ) -> ApiResult<()> {
     let session_user_ref = session.user_ref.clone().ok_or_else(|| {
         ApiError::AuthError("User reference required for leaving server".into())
     })?;
 
-    match state.config.target_locality(target_host) {
+    match state.config.locality(&server_ref.host) {
         Locality::Local => {
             state
                 .actors
-                .delete_membership(server_id, user_ref, session.authorization())
+                .delete_membership(
+                    server_ref.id,
+                    user_ref,
+                    session.authorization(),
+                )
                 .await
         }
         Locality::Remote(host) => {
@@ -218,7 +219,7 @@ pub async fn delete(
                 host,
                 Some(session_user_ref),
                 FederationWsRequest::MembershipsDelete {
-                    server_id,
+                    server_id: server_ref.id,
                     user_ref: user_ref.clone(),
                 },
             )
@@ -244,16 +245,16 @@ pub mod auth {
     /// another user or granting the admin role) needs a server admin.
     fn upsert_base(
         new_membership_user: Req,
-        server_id: ServerId,
+        server_ref: ServerRef,
         role: ServerRole,
     ) -> Req {
         // TODO: create an invite system. Servers should also be public or
         // private.
         match role {
             ServerRole::Member => {
-                or!(new_membership_user, Req::ServerAdmin(server_id))
+                or!(new_membership_user, Req::ServerAdmin(server_ref))
             }
-            ServerRole::Admin => Req::ServerAdmin(server_id),
+            ServerRole::Admin => Req::ServerAdmin(server_ref),
         }
     }
 
@@ -264,22 +265,22 @@ pub mod auth {
         // The owning host enforces the rules for remote servers
         if state
             .config
-            .locality(&new_membership.server_host)
+            .locality(&new_membership.server_ref.host)
             .is_remote()
         {
             return Req::Client;
         }
         upsert_base(
             Req::User(new_membership.user_ref.clone()),
-            new_membership.server_id,
+            new_membership.server_ref.clone(),
             new_membership.role,
         )
         .or_admin()
         .client_only()
     }
 
-    pub fn delete(server_id: ServerId, user_ref: UserRef) -> Req {
-        or!(Req::User(user_ref), Req::ServerAdmin(server_id))
+    pub fn delete(server_ref: &ServerRef, user_ref: UserRef) -> Req {
+        or!(Req::User(user_ref), Req::ServerAdmin(server_ref.clone()))
             .or_admin()
             .client_only()
     }
@@ -288,17 +289,17 @@ pub mod auth {
         use super::*;
 
         pub fn create(
-            server_id: ServerId,
+            server_ref: ServerRef,
             user_ref: UserRef,
             role: ServerRole,
         ) -> Req {
             // Not `Req::User`, which needs the user to exist locally
-            upsert_base(Req::FederatedUser(user_ref), server_id, role)
+            upsert_base(Req::FederatedUser(user_ref), server_ref, role)
                 .federated_only()
         }
 
-        pub fn delete(server_id: ServerId, user_ref: UserRef) -> Req {
-            or!(Req::FederatedUser(user_ref), Req::ServerAdmin(server_id))
+        pub fn delete(server_ref: ServerRef, user_ref: UserRef) -> Req {
+            or!(Req::FederatedUser(user_ref), Req::ServerAdmin(server_ref))
                 .federated_only()
         }
     }
@@ -307,31 +308,43 @@ pub mod auth {
     mod tests {
         use super::*;
 
+        use runelink_types::server::ServerId;
+
         fn user() -> UserRef {
-            UserRef::new("alice".into(), "example.com".into()).unwrap()
+            UserRef::new("alice".into(), "example.com").unwrap()
+        }
+
+        fn server_ref() -> ServerRef {
+            ServerRef::new(user().host, ServerId::new())
         }
 
         #[test]
         fn members_may_join_themselves() {
-            let server_id = ServerId::new();
-            let req =
-                upsert_base(Req::User(user()), server_id, ServerRole::Member);
+            let server_ref = server_ref();
+            let req = upsert_base(
+                Req::User(user()),
+                server_ref.clone(),
+                ServerRole::Member,
+            );
             let Req::Or(reqs) = req else {
                 panic!("expected an or requirement, got {req:?}");
             };
             assert!(matches!(
                 reqs.as_slice(),
-                [Req::User(u), Req::ServerAdmin(id)]
-                    if *u == user() && *id == server_id
+                [Req::User(u), Req::ServerAdmin(s)]
+                    if *u == user() && *s == server_ref
             ));
         }
 
         #[test]
         fn admin_role_requires_server_admin() {
-            let server_id = ServerId::new();
-            let req =
-                upsert_base(Req::User(user()), server_id, ServerRole::Admin);
-            assert!(matches!(req, Req::ServerAdmin(id) if id == server_id));
+            let server_ref = server_ref();
+            let req = upsert_base(
+                Req::User(user()),
+                server_ref.clone(),
+                ServerRole::Admin,
+            );
+            assert!(matches!(req, Req::ServerAdmin(s) if s == server_ref));
         }
     }
 }

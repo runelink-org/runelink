@@ -1,5 +1,5 @@
 use runelink_client::validation::{validate_host, validate_username};
-use runelink_types::{ServerMembership, UserRef};
+use runelink_types::{Host, Server, ServerMembership, UserRef};
 use std::{collections::HashMap, fmt::Display};
 
 use crate::error::CliError;
@@ -58,9 +58,12 @@ pub fn parse_host_input(input: &str, strict: bool) -> Result<String, CliError> {
 pub fn parse_optional_host_input(
     input: Option<&str>,
     strict: bool,
-) -> Result<Option<String>, CliError> {
+) -> Result<Option<Host>, CliError> {
     input
-        .map(|value| parse_host_input(value, strict))
+        .map(|value| {
+            Host::parse(&parse_host_input(value, strict)?)
+                .map_err(|error| CliError::InvalidArgument(error.to_string()))
+        })
         .transpose()
 }
 
@@ -86,5 +89,22 @@ pub fn list_label(
         format!("{label} [{id}]")
     } else {
         label.to_string()
+    }
+}
+
+/// Format a server for lists and prompts, with its optional full ID and
+/// host.
+pub fn server_label(
+    server: &Server,
+    show_ids: bool,
+    show_hosts: bool,
+) -> String {
+    match (show_ids, show_hosts) {
+        (true, true) => {
+            format!("{server} [{} / {}]", server.host, server.id)
+        }
+        (true, false) => format!("{server} [{}]", server.id),
+        (false, true) => format!("{server} [{}]", server.host),
+        (false, false) => server.to_string(),
     }
 }

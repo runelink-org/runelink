@@ -17,6 +17,8 @@ use runelink_types::{
 use time::OffsetDateTime;
 use tokio::sync::{RwLock, mpsc};
 
+use runelink_types::host::Host;
+
 use crate::{config::canonical_host, ids::ConnId};
 
 /// Tracks active client websocket connections and provides safe send helpers.
@@ -331,7 +333,7 @@ impl FederationPoolState {
 #[derive(Clone, Debug)]
 pub struct FederationConn {
     pub sender: mpsc::UnboundedSender<FederationWsEnvelope>,
-    pub host: Option<String>,
+    pub host: Option<Host>,
     pub issuer: Option<String>,
     /// When the connection authenticated, from the pool's count.
     authenticated: u64,
@@ -372,7 +374,7 @@ impl FederationWsPool {
         host: String,
         issuer: String,
     ) -> bool {
-        let Ok(host) = canonical_host(&host) else {
+        let Ok(host) = Host::parse(&host) else {
             return false;
         };
         let mut state = self.inner.write().await;
@@ -387,7 +389,7 @@ impl FederationWsPool {
 
         state.authentications += 1;
         let authenticated = state.authentications;
-        state.by_host.insert(host.clone(), conn_id);
+        state.by_host.insert(host.to_string(), conn_id);
         if let Some(conn) = state.connections.get_mut(&conn_id) {
             conn.host = Some(host);
             conn.issuer = Some(issuer);
@@ -435,7 +437,7 @@ impl FederationWsPool {
     }
 
     /// Returns the authenticated host for a connection, if any.
-    pub async fn authenticated_host(&self, conn_id: ConnId) -> Option<String> {
+    pub async fn authenticated_host(&self, conn_id: ConnId) -> Option<Host> {
         let state = self.inner.read().await;
         state
             .connections
@@ -750,6 +752,8 @@ mod tests {
             update: ClientWsUpdate::MessageUpserted(
                 runelink_types::message::Message {
                     id: MessageId::new(),
+                    host: runelink_types::host::Host::parse("localhost")
+                        .unwrap(),
                     text_channel_id: TextChannelId::new(),
                     author: None,
                     reply_to: None,

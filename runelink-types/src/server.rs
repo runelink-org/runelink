@@ -4,16 +4,17 @@ use time::OffsetDateTime;
 
 use crate::{
     channel::ServerChannel,
+    host::Host,
     user::{User, UserRef},
 };
 
-pub use crate::ids::ServerId;
+pub use crate::ids::{ServerId, ServerRef};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
 pub struct Server {
     pub id: ServerId,
-    pub host: String,
+    pub host: Host,
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -90,20 +91,23 @@ pub struct ServerMember {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NewServerMembership {
     pub user_ref: UserRef,
-    pub server_id: ServerId,
-    pub server_host: String,
+    pub server_ref: ServerRef,
     pub role: ServerRole,
 }
 
+/// A new membership sent to the server's own host, with the user's profile.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NewServerMembershipFull {
     pub user: User,
     pub server_id: ServerId,
-    pub server_host: String,
     pub role: ServerRole,
 }
 
 impl Server {
+    pub fn to_ref(&self) -> ServerRef {
+        ServerRef::new(self.host.clone(), self.id)
+    }
+
     pub fn verbose(&self) -> String {
         format!("{} ({})", self.title, self.id)
     }
@@ -124,17 +128,6 @@ impl From<FullServerMembership> for ServerMembership {
             joined_at: full_membership.joined_at,
             updated_at: full_membership.updated_at,
             synced_at: full_membership.synced_at,
-        }
-    }
-}
-
-impl From<NewServerMembershipFull> for NewServerMembership {
-    fn from(full_membership: NewServerMembershipFull) -> Self {
-        NewServerMembership {
-            user_ref: full_membership.user.as_ref(),
-            server_id: full_membership.server_id,
-            server_host: full_membership.server_host,
-            role: full_membership.role,
         }
     }
 }
@@ -167,8 +160,19 @@ impl NewServerMembership {
     pub fn as_full(self, user: User) -> NewServerMembershipFull {
         NewServerMembershipFull {
             user,
-            server_id: self.server_id,
-            server_host: self.server_host,
+            server_id: self.server_ref.id,
+            role: self.role,
+        }
+    }
+}
+
+impl NewServerMembershipFull {
+    /// The membership on `host`, the host that received it, which is the
+    /// server's host.
+    pub fn with_host(self, host: Host) -> NewServerMembership {
+        NewServerMembership {
+            user_ref: self.user.as_ref(),
+            server_ref: ServerRef::new(host, self.server_id),
             role: self.role,
         }
     }

@@ -1,5 +1,6 @@
 use runelink_client::util::get_api_url;
 use runelink_types::{
+    host::Host,
     user::{NewUser, User, UserRef},
     ws::{FederationWsReply, FederationWsRequest},
 };
@@ -27,7 +28,7 @@ pub async fn create(
     }
     // Stored under this host's own name, however the request spelled it.
     let new_user = NewUser {
-        host: state.config.public_host(),
+        host: state.config.public_host().clone(),
         ..new_user.clone()
     };
     state
@@ -39,7 +40,7 @@ pub async fn create(
 /// List all users (public).
 pub async fn get_all(
     state: &AppState,
-    target_host: Option<&str>,
+    target_host: Option<&Host>,
 ) -> ApiResult<Vec<User>> {
     match state.config.target_locality(target_host) {
         Locality::Local => {
@@ -68,7 +69,7 @@ pub async fn get_all(
 pub async fn get_by_ref(
     state: &AppState,
     user_ref: UserRef,
-    _target_host: Option<&str>,
+    _target_host: Option<&Host>,
 ) -> ApiResult<User> {
     if state.config.locality(&user_ref.host).is_local() {
         let user =
@@ -156,8 +157,8 @@ pub async fn delete_remote_user_record(
 pub async fn get_associated_hosts(
     state: &AppState,
     user_ref: UserRef,
-    target_host: Option<&str>,
-) -> ApiResult<Vec<String>> {
+    target_host: Option<&Host>,
+) -> ApiResult<Vec<Host>> {
     match state.config.target_locality(target_host) {
         Locality::Local => {
             let hosts =

@@ -126,6 +126,7 @@ mod tests {
     ) -> ServerChannel {
         ServerChannel {
             id: id(n),
+            host: runelink_types::host::Host::parse("localhost").unwrap(),
             server_id: server_id(),
             content: match kind {
                 ServerChannelKind::Text => ServerChannelContent::Text {

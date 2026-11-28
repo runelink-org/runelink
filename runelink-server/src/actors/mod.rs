@@ -39,10 +39,11 @@ use runelink_types::{
         NewServerChannel, ServerChannel, ServerChannelId, ServerChannelMove,
         ServerChannelUpdate, TextChannelId,
     },
+    host::Host,
     message::{Message, MessageId, MessageUpdate, NewMessage},
     server::{
         FullServerMembership, NewServer, NewServerMembership, Server, ServerId,
-        ServerRole, ServerUpdate,
+        ServerRef, ServerRole, ServerUpdate,
     },
     user::{NewUser, User, UserRef},
     ws::{ClientWsUpdate, FederationWsUpdate},
@@ -115,15 +116,15 @@ struct Update {
 #[derive(Debug, Default)]
 struct Targets {
     local_users: Vec<UserRef>,
-    remote_hosts: BTreeSet<String>,
+    remote_hosts: BTreeSet<Host>,
 }
 
 impl Targets {
-    fn add(&mut self, config: &ServerConfig, user: &UserRef) {
-        if config.locality(&user.host).is_local() {
-            self.local_users.push(user.clone());
+    fn add(&mut self, config: &ServerConfig, user_ref: &UserRef) {
+        if config.locality(&user_ref.host).is_local() {
+            self.local_users.push(user_ref.clone());
         } else {
-            self.remote_hosts.insert(user.host.clone());
+            self.remote_hosts.insert(user_ref.host.clone());
         }
     }
 }
@@ -180,7 +181,8 @@ struct Envelope<Op, Output> {
 /// against the actor's current state.
 struct ActorFacts<'a> {
     conn: &'a mut PgConnection,
-    server_id: ServerId,
+    /// The actor's server, which is on this host.
+    server_ref: ServerRef,
     state: &'a ServerState,
 }
 
@@ -191,12 +193,12 @@ impl Facts for ActorFacts<'_> {
 
     async fn server_role(
         &mut self,
-        server_id: ServerId,
+        server_ref: &ServerRef,
         user_ref: &UserRef,
     ) -> ApiResult<Option<ServerRole>> {
         // Actors only know their own server's members, so requirements on any
         // other server fail.
-        if server_id != self.server_id {
+        if *server_ref != self.server_ref {
             return Ok(None);
         }
         Ok(self.state.members.get(user_ref).copied())
@@ -359,7 +361,7 @@ impl Actors {
         remote_user: Option<User>,
         auth: Authorization,
     ) -> ApiResult<FullServerMembership> {
-        let server_id = new_membership.server_id;
+        let server_id = new_membership.server_ref.id;
         let op = ServerOp::UpsertMembership {
             new_membership,
             remote_user,
@@ -619,7 +621,6 @@ fn unexpected(output: impl std::fmt::Debug) -> ApiError {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
 
     use futures_util::future::join_all;
     use runelink_types::{
@@ -634,7 +635,7 @@ mod tests {
     struct Fixture {
         actors: Actors,
         pool: Arc<DbPool>,
-        user: UserRef,
+        user_ref: UserRef,
         updates: mpsc::UnboundedReceiver<ClientWsEnvelope>,
     }
 
@@ -644,16 +645,8 @@ mod tests {
         let url = std::env::var("DATABASE_URL")
             .expect("Set DATABASE_URL to a migrated test database");
         let pool = Arc::new(DbPool::connect(&url).await.unwrap());
-        let config = ServerConfig {
-            public_host_raw: "localhost".into(),
-            database_url: url,
-            public_port: 7000,
-            bind_host: "127.0.0.1".into(),
-            bind_port: 7000,
-            secure: false,
-            key_dir: PathBuf::new(),
-        };
-        let user = UserRef::new(
+        let config = ServerConfig::for_test(url);
+        let user_ref = UserRef::new(
             format!("actors-test-{}", ServerId::new().as_uuid().simple()),
             config.public_host(),
         )
@@ -661,8 +654,8 @@ mod tests {
         sqlx::query(
             "INSERT INTO users (name, host, role) VALUES ($1, $2, 'user')",
         )
-        .bind(&user.name)
-        .bind(&user.host)
+        .bind(&user_ref.name)
+        .bind(&user_ref.host)
         .execute(&*pool)
         .await
         .unwrap();
@@ -687,7 +680,9 @@ mod tests {
         })
         .collect();
         let conn_id = clients.register_connection(sender, capabilities).await;
-        clients.authenticate_connection(conn_id, user.clone()).await;
+        clients
+            .authenticate_connection(conn_id, user_ref.clone())
+            .await;
 
         let actors = Actors::new(ActorCtx::new(
             pool.clone(),
@@ -698,7 +693,7 @@ mod tests {
         Fixture {
             actors,
             pool,
-            user,
+            user_ref,
             updates,
         }
     }
@@ -743,7 +738,7 @@ mod tests {
 
         fn message(&self, body: String) -> NewMessage {
             NewMessage {
-                author: self.user.clone(),
+                author: self.user_ref.clone(),
                 body,
                 reply_to: None,
                 metadata: None,
@@ -756,8 +751,8 @@ mod tests {
                 "DELETE FROM deleted_users WHERE name = $1 AND host = $2",
             ] {
                 sqlx::query(query)
-                    .bind(&self.user.name)
-                    .bind(&self.user.host)
+                    .bind(&self.user_ref.name)
+                    .bind(&self.user_ref.host)
                     .execute(&*self.pool)
                     .await
                     .unwrap();
@@ -777,7 +772,7 @@ mod tests {
                     description: None,
                     default_channels: false,
                 },
-                f.user.clone(),
+                f.user_ref.clone(),
                 Authorization::host(),
             )
             .await
@@ -888,7 +883,7 @@ mod tests {
                     description: None,
                     default_channels: true,
                 },
-                f.user.clone(),
+                f.user_ref.clone(),
                 Authorization::host(),
             )
             .await
@@ -910,8 +905,8 @@ mod tests {
         };
         let as_member = || {
             Authorization::for_test_user(
-                f.user.clone(),
-                Requirement::ServerMember(server.id),
+                f.user_ref.clone(),
+                Requirement::ServerMember(server.to_ref()),
             )
         };
         f.actors
@@ -924,7 +919,11 @@ mod tests {
             .unwrap();
 
         f.actors
-            .delete_membership(server.id, f.user.clone(), Authorization::host())
+            .delete_membership(
+                server.id,
+                f.user_ref.clone(),
+                Authorization::host(),
+            )
             .await
             .unwrap();
         let result = f
@@ -956,13 +955,13 @@ mod tests {
                     description: None,
                     default_channels: false,
                 },
-                f.user.clone(),
+                f.user_ref.clone(),
                 Authorization::host(),
             )
             .await
             .unwrap();
         f.actors
-            .delete_home_user(f.user.clone(), Authorization::host())
+            .delete_home_user(f.user_ref.clone(), Authorization::host())
             .await
             .unwrap();
         assert!(matches!(
@@ -984,8 +983,8 @@ mod tests {
             .actors
             .create_user(
                 NewUser {
-                    name: f.user.name.clone(),
-                    host: f.user.host.clone(),
+                    name: f.user_ref.name.clone(),
+                    host: f.user_ref.host.clone(),
                     role: runelink_types::user::UserRole::User,
                 },
                 None,
@@ -1016,7 +1015,7 @@ mod tests {
                     description: None,
                     default_channels: false,
                 },
-                f.user.clone(),
+                f.user_ref.clone(),
                 Authorization::host(),
             )
             .await

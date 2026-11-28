@@ -23,6 +23,7 @@ use runelink_types::{
         VersionedCapability, preferred_version, supported_capabilities,
         versions::NEGOTIATION_VERSION,
     },
+    host::Host,
     ids::{EventId, RequestId},
     user::UserRef,
     ws::{
@@ -189,7 +190,7 @@ impl FederationWsManager {
         self.pool.deregister_connection(conn_id).await
     }
 
-    pub async fn authenticated_host(&self, conn_id: ConnId) -> Option<String> {
+    pub async fn authenticated_host(&self, conn_id: ConnId) -> Option<Host> {
         self.pool.authenticated_host(conn_id).await
     }
 

@@ -7,14 +7,15 @@ use crossterm::{
 };
 use runelink_client::requests;
 use runelink_types::{
-    channel::{ServerChannel, ServerChannelId},
-    server::{Server, ServerId},
+    channel::{ServerChannel, ServerChannelId, ServerChannelRef},
+    host::Host,
+    server::{Server, ServerId, ServerRef},
 };
 use std::collections::HashSet;
 use std::fmt;
 use std::io::Write;
 
-use crate::error::CliError;
+use crate::{error::CliError, util::server_label};
 
 use super::{
     context::CliContext,
@@ -167,8 +168,8 @@ where
 #[derive(Clone, Debug)]
 pub enum ServerSelectionType<'a> {
     MemberOnly,
-    All { host: &'a str },
-    NonMemberOnly { host: &'a str },
+    All { host: &'a Host },
+    NonMemberOnly { host: &'a Host },
 }
 
 /// Interactively select a server. `flags` name the arguments that would
@@ -182,13 +183,7 @@ pub async fn get_server_selection(
     let account = ctx.account.ok_or(CliError::MissingAccount)?;
     let servers = match selection_type {
         ServerSelectionType::All { host } => {
-            // Use target_host if it's different from account host
-            let target_host = if account.user_ref.host != host {
-                Some(host)
-            } else {
-                None
-            };
-            requests::servers::fetch_all(ctx.client, &api_url, target_host)
+            requests::servers::fetch_all(ctx.client, &api_url, Some(host))
                 .await?
         }
 
@@ -203,15 +198,8 @@ pub async fn get_server_selection(
 
         ServerSelectionType::NonMemberOnly { host } => {
             // Fetch all servers from the specified host
-            let target_host = if Some(host)
-                != ctx.account.map(|ac| ac.user_ref.host.as_str())
-            {
-                Some(host)
-            } else {
-                None
-            };
             let (all_servers_result, member_servers_result) = tokio::join!(
-                requests::servers::fetch_all(ctx.client, &api_url, target_host),
+                requests::servers::fetch_all(ctx.client, &api_url, Some(host)),
                 requests::servers::fetch_by_user(
                     ctx.client,
                     &api_url,
@@ -220,13 +208,14 @@ pub async fn get_server_selection(
             );
             let all_servers = all_servers_result?;
             let member_servers = member_servers_result?;
-            // Create a set of member server IDs for efficient lookup
-            let member_server_ids =
-                member_servers.iter().map(|s| s.id).collect::<HashSet<_>>();
+            let member_servers = member_servers
+                .iter()
+                .map(Server::to_ref)
+                .collect::<HashSet<_>>();
             // Filter out servers the user is already a member of
             all_servers
                 .into_iter()
-                .filter(|s| !member_server_ids.contains(&s.id))
+                .filter(|s| !member_servers.contains(&s.to_ref()))
                 .collect()
         }
     };
@@ -238,17 +227,12 @@ pub async fn get_server_selection(
             selection_type,
         )));
     }
-    let server =
-        select_inline(&servers, "Select server", flags, Server::to_string)?
-            .ok_or(CliError::Cancellation)?;
+    let server = select_inline(&servers, "Select server", flags, |server| {
+        server_label(server, false, ctx.show_server_hosts)
+    })?
+    .ok_or(CliError::Cancellation)?;
     eprintln!();
     Ok(server.clone())
-}
-
-#[derive(Debug, Clone)]
-pub struct ChannelSelection {
-    pub host: String,
-    pub channel: ServerChannel,
 }
 
 /// Order channels depth-first through the category tree, with each
@@ -285,19 +269,17 @@ pub fn indented(depth: usize, item: impl fmt::Display) -> String {
 /// name the arguments that would provide the choice instead.
 pub async fn get_channel_selection(
     ctx: &mut CliContext<'_>,
-    server_id: ServerId,
-    server_host: &str,
+    server_ref: &ServerRef,
     text_only: bool,
     flags: &str,
-) -> Result<ChannelSelection, CliError> {
+) -> Result<ServerChannel, CliError> {
     let api_url = ctx.home_api_url().await?;
     let access_token = ctx.get_access_token().await?;
     let channels = requests::channels::fetch_by_server(
         ctx.client,
         &api_url,
         &access_token,
-        server_id,
-        Some(server_host),
+        server_ref,
     )
     .await?;
     // Categories stay visible for context when only text channels can be
@@ -326,16 +308,13 @@ pub async fn get_channel_selection(
     )?
     .ok_or(CliError::Cancellation)?;
     eprintln!();
-    Ok(ChannelSelection {
-        host: server_host.to_string(),
-        channel: (*channel).clone(),
-    })
+    Ok((*channel).clone())
 }
 
 /// Resolve a channel by ID, or prompt for one in the given server, or in a
-/// server chosen at a prompt. Prompts offer only text channels when
-/// `text_only` is set. `flags` name the arguments that would provide the
-/// channel instead.
+/// server chosen at a prompt. IDs are on `host`, or the home host if it is
+/// not given. Prompts offer only text channels when `text_only` is set.
+/// `flags` name the arguments that would provide the channel instead.
 pub async fn get_channel_selection_with_inputs(
     ctx: &mut CliContext<'_>,
     channel_id: Option<ServerChannelId>,
@@ -343,11 +322,8 @@ pub async fn get_channel_selection_with_inputs(
     host: Option<&str>,
     text_only: bool,
     flags: &str,
-) -> Result<ChannelSelection, CliError> {
-    let host = match host {
-        Some(host) => host.to_string(),
-        None => ctx.home_host()?.to_string(),
-    };
+) -> Result<ServerChannel, CliError> {
+    let host = ctx.resource_host(host)?;
     match (channel_id, server_id) {
         (Some(channel_id), _) => {
             let api_url = ctx.home_api_url().await?;
@@ -356,17 +332,15 @@ pub async fn get_channel_selection_with_inputs(
                 ctx.client,
                 &api_url,
                 &access_token,
-                channel_id,
-                Some(host.as_str()),
+                &ServerChannelRef::new(host, channel_id),
             )
             .await?;
-            Ok(ChannelSelection { host, channel })
+            Ok(channel)
         }
         (None, Some(server_id)) => {
             get_channel_selection(
                 ctx,
-                server_id,
-                host.as_str(),
+                &ServerRef::new(host, server_id),
                 text_only,
                 flags,
             )
@@ -379,14 +353,7 @@ pub async fn get_channel_selection_with_inputs(
                 flags,
             )
             .await?;
-            get_channel_selection(
-                ctx,
-                server.id,
-                server.host.as_str(),
-                text_only,
-                flags,
-            )
-            .await
+            get_channel_selection(ctx, &server.to_ref(), text_only, flags).await
         }
     }
 }

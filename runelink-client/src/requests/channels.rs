@@ -3,9 +3,10 @@ use reqwest::Client;
 use runelink_types::{
     capability::Capability,
     channel::{
-        NewServerChannel, ServerChannel, ServerChannelId, ServerChannelMove,
+        NewServerChannel, ServerChannel, ServerChannelMove, ServerChannelRef,
     },
-    server::ServerId,
+    host::Host,
+    server::ServerRef,
 };
 
 use crate::error::Result;
@@ -16,14 +17,13 @@ pub async fn create(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: ServerId,
+    server_ref: &ServerRef,
     new_channel: &NewServerChannel,
-    target_host: Option<&str>,
 ) -> Result<ServerChannel> {
-    let mut url = format!("{api_url}/servers/{server_id}/channels");
-    if let Some(host) = target_host {
-        url = format!("{url}?target_host={host}");
-    }
+    let url = format!(
+        "{api_url}/servers/{}/{}/channels",
+        server_ref.host, server_ref.id
+    );
     info!("creating channel: {url}");
     post_json_authed::<NewServerChannel, ServerChannel>(
         client,
@@ -39,7 +39,7 @@ pub async fn fetch_all(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    target_host: Option<&str>,
+    target_host: Option<&Host>,
 ) -> Result<Vec<ServerChannel>> {
     let mut url = format!("{api_url}/channels");
     if let Some(host) = target_host {
@@ -59,13 +59,12 @@ pub async fn fetch_by_server(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: ServerId,
-    target_host: Option<&str>,
+    server_ref: &ServerRef,
 ) -> Result<Vec<ServerChannel>> {
-    let mut url = format!("{api_url}/servers/{server_id}/channels");
-    if let Some(host) = target_host {
-        url = format!("{url}?target_host={host}");
-    }
+    let url = format!(
+        "{api_url}/servers/{}/{}/channels",
+        server_ref.host, server_ref.id
+    );
     info!("fetching channels by server: {url}");
     fetch_json_authed::<Vec<ServerChannel>>(
         client,
@@ -80,13 +79,10 @@ pub async fn fetch_by_id(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    channel_id: ServerChannelId,
-    target_host: Option<&str>,
+    channel_ref: &ServerChannelRef,
 ) -> Result<ServerChannel> {
-    let mut url = format!("{api_url}/channels/{channel_id}");
-    if let Some(host) = target_host {
-        url = format!("{url}?target_host={host}");
-    }
+    let url =
+        format!("{api_url}/channels/{}/{}", channel_ref.host, channel_ref.id);
     info!("fetching channel: {url}");
     fetch_json_authed::<ServerChannel>(
         client,
@@ -101,13 +97,10 @@ pub async fn delete(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    channel_id: ServerChannelId,
-    target_host: Option<&str>,
+    channel_ref: &ServerChannelRef,
 ) -> Result<()> {
-    let mut url = format!("{api_url}/channels/{channel_id}");
-    if let Some(host) = target_host {
-        url = format!("{url}?target_host={host}");
-    }
+    let url =
+        format!("{api_url}/channels/{}/{}", channel_ref.host, channel_ref.id);
     info!("deleting channel: {url}");
     delete_authed(client, &url, access_token, Capability::ChannelsDelete).await
 }
@@ -116,14 +109,13 @@ pub async fn move_channel(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    channel_id: ServerChannelId,
+    channel_ref: &ServerChannelRef,
     channel_move: &ServerChannelMove,
-    target_host: Option<&str>,
 ) -> Result<Vec<ServerChannel>> {
-    let mut url = format!("{api_url}/channels/{channel_id}/move");
-    if let Some(host) = target_host {
-        url = format!("{url}?target_host={host}");
-    }
+    let url = format!(
+        "{api_url}/channels/{}/{}/move",
+        channel_ref.host, channel_ref.id
+    );
     info!("moving channel: {url}");
     post_json_authed::<ServerChannelMove, Vec<ServerChannel>>(
         client,
@@ -139,14 +131,11 @@ pub async fn update(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    channel_id: ServerChannelId,
+    channel_ref: &ServerChannelRef,
     update: &runelink_types::channel::ServerChannelUpdate,
-    target_host: Option<&str>,
 ) -> Result<ServerChannel> {
-    let mut url = format!("{api_url}/channels/{channel_id}");
-    if let Some(host) = target_host {
-        url = format!("{url}?target_host={host}");
-    }
+    let url =
+        format!("{api_url}/channels/{}/{}", channel_ref.host, channel_ref.id);
     super::patch_json_authed(
         client,
         &url,

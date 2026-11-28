@@ -4,15 +4,12 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use runelink_client::requests;
 use runelink_types::{
-    channel::{ServerChannelContent, ServerChannelId, TextChannelId},
-    message::{Message, MessageId, NewMessage},
+    channel::{ServerChannelId, TextChannelId, TextChannelRef},
+    message::{Message, MessageId, MessageRef, NewMessage},
     server::ServerId,
 };
 
-use crate::{
-    error::CliError,
-    util::{list_label, parse_optional_host_input},
-};
+use crate::{error::CliError, util::list_label};
 
 use super::{
     context::CliContext, input::unwrap_or_prompt,
@@ -115,16 +112,15 @@ pub async fn handle_message_commands(
         MessageCommands::Edit(edit_args) => {
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
-            let target_host = parse_optional_host_input(
-                edit_args.host.as_deref(),
-                ctx.strict_input,
-            )?;
+            let message_ref = MessageRef::new(
+                ctx.resource_host(edit_args.host.as_deref())?,
+                edit_args.message_id,
+            );
             let original = requests::messages::fetch_by_id(
                 ctx.client,
                 &api_url,
                 &access_token,
-                edit_args.message_id,
-                target_host.as_deref(),
+                &message_ref,
             )
             .await?;
             let update = runelink_types::message::MessageUpdate {
@@ -136,9 +132,8 @@ pub async fn handle_message_commands(
                 ctx.client,
                 &api_url,
                 &access_token,
-                edit_args.message_id,
+                &message_ref,
                 &update,
-                target_host.as_deref(),
             )
             .await?;
             ctx.output(&resource, || println!("Updated message: {resource}"))?;
@@ -147,7 +142,7 @@ pub async fn handle_message_commands(
         MessageCommands::List(list_args) => {
             let show_ids = list_args.show_ids && !list_args.hide_ids;
             ctx.account.ok_or(CliError::MissingAccount)?;
-            let (text_channel_id, target_host) =
+            let text_channel =
                 resolve_text_channel(ctx, &list_args.channel).await?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
@@ -155,8 +150,7 @@ pub async fn handle_message_commands(
                 ctx.client,
                 &api_url,
                 &access_token,
-                text_channel_id,
-                target_host.as_deref(),
+                &text_channel,
             )
             .await?;
             // Oldest first, as people read them
@@ -200,16 +194,15 @@ pub async fn handle_message_commands(
             ctx.account.ok_or(CliError::MissingAccount)?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
-            let target_host = parse_optional_host_input(
-                get_args.host.as_deref(),
-                ctx.strict_input,
-            )?;
+            let message_ref = MessageRef::new(
+                ctx.resource_host(get_args.host.as_deref())?,
+                get_args.message_id,
+            );
             let message = requests::messages::fetch_by_id(
                 ctx.client,
                 &api_url,
                 &access_token,
-                get_args.message_id,
-                target_host.as_deref(),
+                &message_ref,
             )
             .await?;
             ctx.output(&message, || println!("{message}"))?;
@@ -217,7 +210,7 @@ pub async fn handle_message_commands(
 
         MessageCommands::Send(send_args) => {
             let account = ctx.account.ok_or(CliError::MissingAccount)?;
-            let (text_channel_id, target_host) =
+            let text_channel =
                 resolve_text_channel(ctx, &send_args.channel).await?;
             let body =
                 unwrap_or_prompt(send_args.body.clone(), "Message", "--body")?;
@@ -233,9 +226,8 @@ pub async fn handle_message_commands(
                 ctx.client,
                 &api_url,
                 &access_token,
-                text_channel_id,
+                &text_channel,
                 &new_message,
-                target_host.as_deref(),
             )
             .await?;
             ctx.output(&message, || println!("Sent message: {message}"))?;
@@ -245,16 +237,15 @@ pub async fn handle_message_commands(
             // TODO: Interactive message selection
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
-            let target_host = parse_optional_host_input(
-                delete_args.host.as_deref(),
-                ctx.strict_input,
-            )?;
+            let message_ref = MessageRef::new(
+                ctx.resource_host(delete_args.host.as_deref())?,
+                delete_args.message_id,
+            );
             requests::messages::delete(
                 ctx.client,
                 &api_url,
                 &access_token,
-                delete_args.message_id,
-                target_host.as_deref(),
+                &message_ref,
             )
             .await?;
             ctx.message(format!("Deleted message: {}", delete_args.message_id));
@@ -263,37 +254,30 @@ pub async fn handle_message_commands(
     Ok(())
 }
 
-// Resolve the text channel and its target host, which is `None` for the home
-// host, prompting for whatever is missing
+// Resolve the text channel, prompting for whatever is missing
 async fn resolve_text_channel(
     ctx: &mut CliContext<'_>,
     args: &TextChannelArgs,
-) -> Result<(TextChannelId, Option<String>), CliError> {
-    let home_host = ctx.home_host()?.to_string();
-    let target_host = |host: String| (host != home_host).then_some(host);
-    let host =
-        parse_optional_host_input(args.host.as_deref(), ctx.strict_input)?;
+) -> Result<TextChannelRef, CliError> {
     if let Some(text_channel_id) = args.text_channel_id {
-        return Ok((text_channel_id, host.and_then(target_host)));
+        let host = ctx.resource_host(args.host.as_deref())?;
+        return Ok(TextChannelRef::new(host, text_channel_id));
     }
-    let selection = get_channel_selection_with_inputs(
+    let channel = get_channel_selection_with_inputs(
         ctx,
         args.channel_id,
         args.server_id,
-        host.as_deref(),
+        args.host.as_deref(),
         true,
         "--channel-id or --text-channel-id",
     )
     .await?;
-    let ServerChannelContent::Text { text_channel_id } =
-        selection.channel.content
-    else {
-        return Err(CliError::InvalidArgument(format!(
+    channel.text_channel_ref().ok_or_else(|| {
+        CliError::InvalidArgument(format!(
             "{} is not a text channel.",
-            selection.channel.verbose()
-        )));
-    };
-    Ok((text_channel_id, target_host(selection.host)))
+            channel.verbose()
+        ))
+    })
 }
 
 fn author_label(message: &Message, show_ids: bool) -> String {
@@ -381,12 +365,14 @@ mod tests {
     use time::OffsetDateTime;
 
     fn original(body: &str) -> Message {
+        let host = runelink_types::host::Host::parse("localhost").unwrap();
         Message {
             id: MessageId::new(),
+            host: host.clone(),
             text_channel_id: TextChannelId::new(),
             author: Some(User {
                 name: "mandar".into(),
-                host: "localhost".into(),
+                host,
                 role: UserRole::User,
                 created_at: OffsetDateTime::UNIX_EPOCH,
                 updated_at: OffsetDateTime::UNIX_EPOCH,

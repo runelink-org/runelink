@@ -10,12 +10,12 @@ use axum::{
     response::IntoResponse,
 };
 use log::debug;
-use runelink_types::{NewUser, UserRef};
+use runelink_types::{Host, NewUser, UserRef};
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
 pub struct UserQueryParams {
-    pub target_host: Option<String>,
+    pub target_host: Option<Host>,
 }
 
 /// POST /users
@@ -42,7 +42,7 @@ pub async fn get_all(
 ) -> ApiResult<impl IntoResponse> {
     debug!("GET /users?target_host={:?}", params.target_host);
     let users =
-        ops::users::get_all(&state, params.target_host.as_deref()).await?;
+        ops::users::get_all(&state, params.target_host.as_ref()).await?;
     Ok((StatusCode::OK, Json(users)))
 }
 
@@ -58,7 +58,7 @@ pub async fn get_by_ref(
     );
     let user_ref = UserRef::new(name, host)?;
     let user =
-        ops::users::get_by_ref(&state, user_ref, params.target_host.as_deref())
+        ops::users::get_by_ref(&state, user_ref, params.target_host.as_ref())
             .await?;
     Ok((StatusCode::OK, Json(user)))
 }
@@ -77,7 +77,7 @@ pub async fn get_associated_hosts(
     let hosts = ops::users::get_associated_hosts(
         &state,
         user_ref,
-        params.target_host.as_deref(),
+        params.target_host.as_ref(),
     )
     .await?;
     Ok((StatusCode::OK, Json(hosts)))

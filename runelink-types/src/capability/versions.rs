@@ -35,19 +35,19 @@ pub mod auth {
 pub mod channels {
     use crate::capability::CapabilityVersion;
     pub const UPDATE_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 11, 13);
+        CapabilityVersion::new(2026, 11, 27);
     pub const UPDATE_VERSIONS: &[CapabilityVersion] = &[UPDATE_VERSION];
 
     pub const CREATE_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 11, 13);
+        CapabilityVersion::new(2026, 11, 27);
     pub const DELETE_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 10, 22);
+        CapabilityVersion::new(2026, 11, 27);
     pub const EVENTS_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 11, 13);
+        CapabilityVersion::new(2026, 11, 27);
     pub const MOVE_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 11, 13);
+        CapabilityVersion::new(2026, 11, 27);
     pub const READ_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 11, 13);
+        CapabilityVersion::new(2026, 11, 27);
 
     pub const CREATE_VERSIONS: &[CapabilityVersion] = &[CREATE_VERSION];
     pub const DELETE_VERSIONS: &[CapabilityVersion] = &[DELETE_VERSION];
@@ -60,11 +60,11 @@ pub mod memberships {
     use crate::capability::CapabilityVersion;
 
     pub const EVENTS_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 11, 13);
+        CapabilityVersion::new(2026, 11, 27);
     pub const READ_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 11, 13);
+        CapabilityVersion::new(2026, 11, 27);
     pub const WRITE_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 11, 13);
+        CapabilityVersion::new(2026, 11, 27);
 
     pub const EVENTS_VERSIONS: &[CapabilityVersion] = &[EVENTS_VERSION];
     pub const READ_VERSIONS: &[CapabilityVersion] = &[READ_VERSION];
@@ -74,17 +74,17 @@ pub mod memberships {
 pub mod messages {
     use crate::capability::CapabilityVersion;
     pub const UPDATE_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 11, 13);
+        CapabilityVersion::new(2026, 11, 27);
     pub const UPDATE_VERSIONS: &[CapabilityVersion] = &[UPDATE_VERSION];
 
     pub const CREATE_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 11, 13);
+        CapabilityVersion::new(2026, 11, 27);
     pub const DELETE_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 10, 19);
+        CapabilityVersion::new(2026, 11, 27);
     pub const EVENTS_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 10, 19);
+        CapabilityVersion::new(2026, 11, 27);
     pub const READ_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 10, 19);
+        CapabilityVersion::new(2026, 11, 27);
 
     pub const CREATE_VERSIONS: &[CapabilityVersion] = &[CREATE_VERSION];
     pub const DELETE_VERSIONS: &[CapabilityVersion] = &[DELETE_VERSION];
@@ -95,17 +95,17 @@ pub mod messages {
 pub mod servers {
     use crate::capability::CapabilityVersion;
     pub const UPDATE_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 11, 13);
+        CapabilityVersion::new(2026, 11, 27);
     pub const UPDATE_VERSIONS: &[CapabilityVersion] = &[UPDATE_VERSION];
 
     pub const CREATE_VERSION: CapabilityVersion =
         CapabilityVersion::new(2026, 11, 26);
     pub const DELETE_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 10, 16);
+        CapabilityVersion::new(2026, 11, 27);
     pub const EVENTS_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 11, 13);
+        CapabilityVersion::new(2026, 11, 27);
     pub const READ_VERSION: CapabilityVersion =
-        CapabilityVersion::new(2026, 11, 13);
+        CapabilityVersion::new(2026, 11, 27);
 
     pub const CREATE_VERSIONS: &[CapabilityVersion] = &[CREATE_VERSION];
     pub const DELETE_VERSIONS: &[CapabilityVersion] = &[DELETE_VERSION];

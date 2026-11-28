@@ -1,14 +1,14 @@
 use axum::{
-    extract::{Json, Path, Query, State},
+    extract::{Json, Path, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
 use log::debug;
 use runelink_types::{
-    server::{NewServerMembership, ServerId},
+    host::Host,
+    server::{NewServerMembership, ServerId, ServerRef},
     user::UserRef,
 };
-use serde::Deserialize;
 
 use crate::{
     auth::{Principal, authorize},
@@ -17,64 +17,46 @@ use crate::{
     state::AppState,
 };
 
-#[derive(Deserialize, Debug)]
-pub struct MembershipQueryParams {
-    pub target_host: Option<String>,
-}
-
-/// GET /servers/{server_id}/users
+/// GET /servers/{host}/{id}/users
 pub async fn get_members_by_server(
     State(state): State<AppState>,
-    Path(server_id): Path<ServerId>,
-    Query(params): Query<MembershipQueryParams>,
+    Path(server_ref): Path<ServerRef>,
 ) -> ApiResult<impl IntoResponse> {
-    debug!(
-        "GET /servers/{server_id}/users?target_host={:?}",
-        params.target_host
-    );
-    let members = ops::memberships::get_members_by_server(
-        &state,
-        server_id,
-        params.target_host.as_deref(),
-    )
-    .await?;
+    debug!("GET /servers/{}/{}/users", server_ref.host, server_ref.id);
+    let members =
+        ops::memberships::get_members_by_server(&state, &server_ref).await?;
     Ok((StatusCode::OK, Json(members)))
 }
 
-/// GET /servers/{server_id}/users/{host}/{name}
+/// GET /servers/{host}/{id}/users/{user_host}/{name}
 pub async fn get_by_user_and_server(
     State(state): State<AppState>,
-    Path((server_id, host, name)): Path<(ServerId, String, String)>,
-    Query(params): Query<MembershipQueryParams>,
+    Path((host, id, user_host, name)): Path<(Host, ServerId, String, String)>,
 ) -> ApiResult<impl IntoResponse> {
-    debug!(
-        "GET /servers/{server_id}/users/{host}/{name}?target_host={:?}",
-        params.target_host
-    );
+    debug!("GET /servers/{host}/{id}/users/{user_host}/{name}");
     let member = ops::memberships::get_member_by_user_and_server(
         &state,
-        server_id,
-        UserRef::new(name, host)?,
-        params.target_host.as_deref(),
+        &ServerRef::new(host, id),
+        UserRef::new(name, user_host)?,
     )
     .await?;
     Ok((StatusCode::OK, Json(member)))
 }
 
-/// POST /servers/{server_id}/users
+/// POST /servers/{host}/{id}/users
 pub async fn create(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path(server_id): Path<ServerId>,
+    Path(server_ref): Path<ServerRef>,
     Json(new_membership): Json<NewServerMembership>,
 ) -> ApiResult<impl IntoResponse> {
     debug!(
-        "POST /servers/{server_id}/users\nnew_membership = {:#?}",
-        new_membership
+        "POST /servers/{}/{}/users\nnew_membership = {:#?}",
+        server_ref.host, server_ref.id, new_membership
     );
-    if server_id != new_membership.server_id {
+    if server_ref != new_membership.server_ref {
         return Err(ApiError::BadRequest(
-            "Server ID in path does not match server ID in membership".into(),
+            "Server in path does not match server in membership".into(),
         ));
     }
     let mut session = authorize(
@@ -100,31 +82,22 @@ pub async fn get_by_user(
     Ok((StatusCode::OK, Json(memberships)))
 }
 
-/// DELETE /servers/{server_id}/users/{host}/{name}
+/// DELETE /servers/{host}/{id}/users/{user_host}/{name}
 pub async fn delete(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((server_id, host, name)): Path<(ServerId, String, String)>,
-    Query(params): Query<MembershipQueryParams>,
+    Path((host, id, user_host, name)): Path<(Host, ServerId, String, String)>,
 ) -> ApiResult<impl IntoResponse> {
-    debug!(
-        "DELETE /servers/{server_id}/users/{host}/{name}?target_host={:?}",
-        params.target_host
-    );
-    let user_ref = UserRef::new(name, host)?;
+    debug!("DELETE /servers/{host}/{id}/users/{user_host}/{name}");
+    let server_ref = ServerRef::new(host, id);
+    let user_ref = UserRef::new(name, user_host)?;
     let mut session = authorize(
         &state,
         Principal::from_client_headers(&headers, &state)?,
-        ops::memberships::auth::delete(server_id, user_ref.clone()),
+        ops::memberships::auth::delete(&server_ref, user_ref.clone()),
     )
     .await?;
-    ops::memberships::delete(
-        &state,
-        &mut session,
-        server_id,
-        user_ref,
-        params.target_host.as_deref(),
-    )
-    .await?;
+    ops::memberships::delete(&state, &mut session, &server_ref, user_ref)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }

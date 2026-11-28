@@ -4,7 +4,7 @@ use axum::http::HeaderMap;
 use runelink_client::util::get_api_url;
 use runelink_types::{
     auth::FederationClaims,
-    server::{ServerId, ServerMembership, ServerRole},
+    server::{ServerMembership, ServerRef, ServerRole},
     user::{User, UserRef},
 };
 
@@ -77,9 +77,9 @@ pub enum Requirement {
     /// Must be a host admin.
     HostAdmin,
     /// Must be a member of the referenced server.
-    ServerMember(ServerId),
+    ServerMember(ServerRef),
     /// Must be an admin of the referenced server.
-    ServerAdmin(ServerId),
+    ServerAdmin(ServerRef),
     /// A requirement that will always be satisfied.
     Always,
     /// A requirement that will never be satisfied.
@@ -160,15 +160,15 @@ impl Requirement {
                 }
             }
 
-            Requirement::ServerMember(server_id) => {
-                let role = auth.server_role(facts, *server_id).await?;
+            Requirement::ServerMember(server) => {
+                let role = auth.server_role(facts, server).await?;
                 if role.is_none() {
                     return Ok(Some("Server member only".into()));
                 }
             }
 
-            Requirement::ServerAdmin(server_id) => {
-                let role = auth.server_role(facts, *server_id).await?;
+            Requirement::ServerAdmin(server) => {
+                let role = auth.server_role(facts, server).await?;
                 if role != Some(ServerRole::Admin) {
                     return Ok(Some("Server admin only".into()));
                 }
@@ -232,7 +232,7 @@ pub trait Facts: Send {
     /// The user's role in a server, if they are a member.
     fn server_role(
         &mut self,
-        server_id: ServerId,
+        server_ref: &ServerRef,
         user_ref: &UserRef,
     ) -> impl Future<Output = ApiResult<Option<ServerRole>>> + Send;
 }
@@ -278,10 +278,10 @@ impl Authorization {
     async fn server_role(
         &self,
         facts: &mut impl Facts,
-        server_id: ServerId,
+        server_ref: &ServerRef,
     ) -> ApiResult<Option<ServerRole>> {
         match &self.user_ref {
-            Some(user_ref) => facts.server_role(server_id, user_ref).await,
+            Some(user_ref) => facts.server_role(server_ref, user_ref).await,
             None => Ok(None),
         }
     }
@@ -322,7 +322,7 @@ impl Facts for DbFacts<'_> {
 
     async fn server_role(
         &mut self,
-        server_id: ServerId,
+        server_ref: &ServerRef,
         user_ref: &UserRef,
     ) -> ApiResult<Option<ServerRole>> {
         if self.memberships.is_none() {
@@ -334,7 +334,10 @@ impl Facts for DbFacts<'_> {
         Ok(self.memberships.as_ref().and_then(|memberships| {
             memberships
                 .iter()
-                .find(|membership| membership.server.id == server_id)
+                .find(|membership| {
+                    membership.server.id == server_ref.id
+                        && membership.server.host == server_ref.host
+                })
                 .map(|membership| membership.role)
         }))
     }

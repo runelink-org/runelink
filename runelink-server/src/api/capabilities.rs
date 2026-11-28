@@ -125,58 +125,58 @@ fn required_capability(
             required(Capability::UsersDelete, users::DELETE_VERSIONS)
         }
         (&Method::GET, "/users/{host}/{name}/servers")
-        | (&Method::GET, "/servers/{server_id}/users")
-        | (&Method::GET, "/servers/{server_id}/users/{host}/{name}") => {
+        | (&Method::GET, "/servers/{host}/{id}/users")
+        | (&Method::GET, "/servers/{host}/{id}/users/{user_host}/{name}") => {
             required(Capability::MembershipsRead, memberships::READ_VERSIONS)
         }
-        (&Method::POST, "/servers/{server_id}/users")
-        | (&Method::DELETE, "/servers/{server_id}/users/{host}/{name}") => {
+        (&Method::POST, "/servers/{host}/{id}/users")
+        | (&Method::DELETE, "/servers/{host}/{id}/users/{user_host}/{name}") => {
             required(Capability::MembershipsWrite, memberships::WRITE_VERSIONS)
         }
         (&Method::GET, "/servers")
-        | (&Method::GET, "/servers/{server_id}")
-        | (&Method::GET, "/servers/{server_id}/with_channels") => {
+        | (&Method::GET, "/servers/{host}/{id}")
+        | (&Method::GET, "/servers/{host}/{id}/with_channels") => {
             required(Capability::ServersRead, servers::READ_VERSIONS)
         }
         (&Method::POST, "/servers") => {
             required(Capability::ServersCreate, servers::CREATE_VERSIONS)
         }
-        (&Method::PATCH, "/servers/{server_id}") => {
+        (&Method::PATCH, "/servers/{host}/{id}") => {
             required(Capability::ServersUpdate, servers::UPDATE_VERSIONS)
         }
-        (&Method::DELETE, "/servers/{server_id}") => {
+        (&Method::DELETE, "/servers/{host}/{id}") => {
             required(Capability::ServersDelete, servers::DELETE_VERSIONS)
         }
         (&Method::GET, "/channels")
-        | (&Method::GET, "/servers/{server_id}/channels")
-        | (&Method::GET, "/channels/{channel_id}") => {
+        | (&Method::GET, "/servers/{host}/{id}/channels")
+        | (&Method::GET, "/channels/{host}/{id}") => {
             required(Capability::ChannelsRead, channels::READ_VERSIONS)
         }
-        (&Method::POST, "/servers/{server_id}/channels") => {
+        (&Method::POST, "/servers/{host}/{id}/channels") => {
             required(Capability::ChannelsCreate, channels::CREATE_VERSIONS)
         }
-        (&Method::PATCH, "/channels/{channel_id}") => {
+        (&Method::PATCH, "/channels/{host}/{id}") => {
             required(Capability::ChannelsUpdate, channels::UPDATE_VERSIONS)
         }
-        (&Method::DELETE, "/channels/{channel_id}") => {
+        (&Method::DELETE, "/channels/{host}/{id}") => {
             required(Capability::ChannelsDelete, channels::DELETE_VERSIONS)
         }
-        (&Method::POST, "/channels/{channel_id}/move") => {
+        (&Method::POST, "/channels/{host}/{id}/move") => {
             required(Capability::ChannelsMove, channels::MOVE_VERSIONS)
         }
         (&Method::GET, "/messages")
-        | (&Method::GET, "/servers/{server_id}/messages")
-        | (&Method::GET, "/text_channels/{text_channel_id}/messages")
-        | (&Method::GET, "/messages/{message_id}") => {
+        | (&Method::GET, "/servers/{host}/{id}/messages")
+        | (&Method::GET, "/text_channels/{host}/{id}/messages")
+        | (&Method::GET, "/messages/{host}/{id}") => {
             required(Capability::MessagesRead, messages::READ_VERSIONS)
         }
-        (&Method::POST, "/text_channels/{text_channel_id}/messages") => {
+        (&Method::POST, "/text_channels/{host}/{id}/messages") => {
             required(Capability::MessagesCreate, messages::CREATE_VERSIONS)
         }
-        (&Method::PATCH, "/messages/{message_id}") => {
+        (&Method::PATCH, "/messages/{host}/{id}") => {
             required(Capability::MessagesUpdate, messages::UPDATE_VERSIONS)
         }
-        (&Method::DELETE, "/messages/{message_id}") => {
+        (&Method::DELETE, "/messages/{host}/{id}") => {
             required(Capability::MessagesDelete, messages::DELETE_VERSIONS)
         }
         _ => None,
@@ -255,23 +255,23 @@ mod tests {
         assert_eq!(
             required_capability(
                 &Method::GET,
-                "/text_channels/{text_channel_id}/messages",
+                "/text_channels/{host}/{id}/messages",
             ),
             required(Capability::MessagesRead, messages::READ_VERSIONS)
         );
         assert_eq!(
             required_capability(
                 &Method::POST,
-                "/text_channels/{text_channel_id}/messages",
+                "/text_channels/{host}/{id}/messages",
             ),
             required(Capability::MessagesCreate, messages::CREATE_VERSIONS)
         );
         assert_eq!(
-            required_capability(&Method::DELETE, "/messages/{message_id}"),
+            required_capability(&Method::DELETE, "/messages/{host}/{id}"),
             required(Capability::MessagesDelete, messages::DELETE_VERSIONS)
         );
         assert_eq!(
-            required_capability(&Method::POST, "/channels/{channel_id}/move"),
+            required_capability(&Method::POST, "/channels/{host}/{id}/move"),
             required(Capability::ChannelsMove, channels::MOVE_VERSIONS)
         );
     }
