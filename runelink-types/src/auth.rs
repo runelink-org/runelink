@@ -190,9 +190,8 @@ impl ClientAccessClaims {
 
 /// JWT claims used for server-to-server federation requests.
 ///
-/// This token authenticates the **calling server** (`iss` and `sub`).
-/// It may optionally include a delegated user identity (`user_ref`)
-/// for operations performed "on behalf of" a user.
+/// This token authenticates the **calling server** (`iss` and `sub`). Users a
+/// peer acts for are named per request on its websocket instead.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FederationClaims {
     /// Calling server (canonical ServerId / base URL)
@@ -205,14 +204,10 @@ pub struct FederationClaims {
     pub exp: i64,
     /// Issued-at time as a UNIX timestamp
     pub iat: i64,
-    /// Optional: Delegated user reference (present when token represents user delegation)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_ref: Option<UserRef>,
 }
 
 impl FederationClaims {
-    /// Create a server-only federation token (no user delegation).
-    pub fn new_server_only(
+    pub fn new(
         issuer_server_id: String,
         audience_server_id: String,
         lifetime: Duration,
@@ -224,7 +219,6 @@ impl FederationClaims {
             aud: vec![audience_server_id],
             exp: now + lifetime.whole_seconds(),
             iat: now,
-            user_ref: None,
         }
     }
 }

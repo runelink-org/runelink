@@ -108,13 +108,15 @@ pub async fn delete_home_user(
         .await
 }
 
-/// Delete a remote user record from a foreign server.
+/// Delete the record of the remote user a peer acts for, which only their
+/// home host can do (see `FederationAuth::new`).
 pub async fn delete_remote_user_record(
     state: &AppState,
     session: &Session,
-    user_ref: &UserRef,
 ) -> ApiResult<()> {
-    // The requirement checks that the user's home host sent this.
+    let user_ref = session.user_ref.as_ref().ok_or_else(|| {
+        ApiError::AuthError("A delegated user is required".into())
+    })?;
     if state.config.locality(&user_ref.host).is_local() {
         return Err(ApiError::BadRequest(
             "Cannot delete local users via federation".into(),

@@ -134,8 +134,9 @@ fn select_public_key_bytes<'a>(
     ))
 }
 
-/// Validate a federation JWT (server-to-server delegated authority) by
-/// discovering the issuer's JWKS via `{iss}/.well-known/jwks.json`.
+/// Validate a federation JWT, which authenticates the calling host, by
+/// discovering the issuer's JWKS via `{iss}/.well-known/jwks.json`. Returns
+/// the issuing host.
 ///
 /// Notes:
 /// - This does an **unverified** parse of `iss` from the JWT payload solely to
@@ -146,7 +147,7 @@ pub async fn decode_federation_jwt(
     state: &AppState,
     token: &str,
     expected_audience: &str,
-) -> ApiResult<(Host, FederationClaims)> {
+) -> ApiResult<Host> {
     let header = jsonwebtoken::decode_header(token)
         .map_err(|e| ApiError::AuthError(format!("invalid JWT header: {e}")))?;
     let iss = parse_iss_unverified(token)?;
@@ -172,11 +173,7 @@ pub async fn decode_federation_jwt(
     validation.set_audience(&[expected_audience]);
     validation.set_issuer(&[iss.as_str()]);
 
-    let data = jsonwebtoken::decode::<FederationClaims>(
-        token,
-        &decoding_key,
-        &validation,
-    )
-    .map_err(|_| ApiError::AuthError("invalid or expired token".into()))?;
-    Ok((issuer, data.claims))
+    jsonwebtoken::decode::<FederationClaims>(token, &decoding_key, &validation)
+        .map_err(|_| ApiError::AuthError("invalid or expired token".into()))?;
+    Ok(issuer)
 }

@@ -80,13 +80,17 @@ impl FederationAuth {
     ) -> ApiResult<Self> {
         let token = extract_bearer_token(headers)?;
         let expected_audience = state.config.api_url();
-        let (host, claims) = jwks_resolver::decode_federation_jwt(
+        let host = jwks_resolver::decode_federation_jwt(
             state,
             &token,
             &expected_audience,
         )
         .await?;
-        Self::new(host, claims.user_ref)
+        // Tokens name only the peer, so it acts for no user yet.
+        Ok(Self {
+            host,
+            user_ref: None,
+        })
     }
 
     pub fn host(&self) -> &Host {
