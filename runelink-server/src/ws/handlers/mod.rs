@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use runelink_types::{
     capability::{Capability, CapabilityVersion, preferred_version},
+    host::Host,
     ids::RequestId,
     user::UserRef,
     ws::{
@@ -87,7 +88,7 @@ async fn handle_client_request(
                 unsupported_capability(
                     &capability,
                     None,
-                    &state.config.public_host_with_explicit_port(),
+                    state.config.public_host(),
                 ),
             )
             .await;
@@ -106,7 +107,7 @@ async fn handle_client_request(
                 unsupported_capability(
                     &capability,
                     version,
-                    &state.config.public_host_with_explicit_port(),
+                    state.config.public_host(),
                 ),
             )
             .await;
@@ -263,7 +264,7 @@ async fn handle_federation_request(
                 unsupported_capability(
                     &capability,
                     None,
-                    &state.config.public_host_with_explicit_port(),
+                    state.config.public_host(),
                 ),
             )
             .await;
@@ -283,7 +284,7 @@ async fn handle_federation_request(
                 unsupported_capability(
                     &capability,
                     version,
-                    &state.config.public_host_with_explicit_port(),
+                    state.config.public_host(),
                 ),
             )
             .await;
@@ -325,7 +326,7 @@ async fn handle_federation_request(
 fn unsupported_capability(
     capability: &Capability,
     version: Option<CapabilityVersion>,
-    server: &str,
+    host: &Host,
 ) -> WsError {
     let message = match version {
         Some(version) => format!(
@@ -333,7 +334,7 @@ fn unsupported_capability(
             capability.with_version(version)
         ),
         None => {
-            format!("{server} does not support the {capability} capability")
+            format!("{host} does not support the {capability} capability")
         }
     };
     WsError {
