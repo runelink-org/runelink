@@ -16,9 +16,14 @@ const CONFIG_FILENAME: &str = "config.json";
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct AppConfig {
     /// Read from `default_account` in configs saved before the rename
-    #[serde(alias = "default_account")]
+    #[serde(
+        default,
+        alias = "default_account",
+        deserialize_with = "deserialize_active_account"
+    )]
     pub active_account: Option<UserRef>,
     pub default_server: Option<Uuid>,
+    #[serde(default, deserialize_with = "deserialize_accounts")]
     pub accounts: Vec<AccountConfig>,
     #[serde(default, deserialize_with = "deserialize_hosts")]
     pub hosts: HashMap<Host, HostConfig>,
@@ -208,6 +213,51 @@ fn confirm_insecure_host(host: &Host) -> Result<(), CliError> {
         return Err(CliError::Cancellation);
     }
     Ok(())
+}
+
+/// A stored value, or nothing if it no longer parses, such as an account saved
+/// with a host spelling that was accepted before hosts were canonical.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Stored<T> {
+    Valid(T),
+    Invalid(serde::de::IgnoredAny),
+}
+
+impl<T> Stored<T> {
+    fn valid(self) -> Option<T> {
+        match self {
+            Self::Valid(value) => Some(value),
+            Self::Invalid(_) => None,
+        }
+    }
+}
+
+fn deserialize_active_account<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<UserRef>, D::Error> {
+    Ok(Option::<Stored<UserRef>>::deserialize(deserializer)?
+        .and_then(Stored::valid))
+}
+
+/// Drops accounts that no longer parse, and merges accounts saved with other
+/// spellings of one host.
+fn deserialize_accounts<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<AccountConfig>, D::Error> {
+    let mut accounts = Vec::<AccountConfig>::new();
+    for account in Vec::<Stored<AccountConfig>>::deserialize(deserializer)?
+        .into_iter()
+        .filter_map(Stored::valid)
+    {
+        if !accounts
+            .iter()
+            .any(|saved| saved.user_ref == account.user_ref)
+        {
+            accounts.push(account);
+        }
+    }
+    Ok(accounts)
 }
 
 /// Reads hosts saved before they were canonical, which may name the default

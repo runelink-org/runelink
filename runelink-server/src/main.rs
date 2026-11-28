@@ -81,7 +81,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let app_state = AppState {
             config: config.clone(),
             db_pool: db_pool.clone(),
-            http_client: reqwest::Client::new(),
+            // Keys are fetched from an issuer's exact API URL, never from
+            // where it redirects.
+            http_client: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()?,
             client_ws_manager,
             federation_ws_manager,
             key_manager: KeyManager::load_or_generate(config.key_dir.clone())?,
