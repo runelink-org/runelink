@@ -57,11 +57,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if server_configs.len() > 1 {
         log::info!(
-            "Cluster mode inferred from config: starting {} server instances",
+            "Cluster mode inferred from config: starting {} hosts",
             server_configs.len()
         );
     } else {
-        log::info!("Starting single server instance");
+        log::info!("Starting a single host");
     }
 
     let mut join_set = JoinSet::new();

@@ -20,9 +20,7 @@ pub struct AppConfig {
     pub active_account: Option<UserRef>,
     pub default_server: Option<Uuid>,
     pub accounts: Vec<AccountConfig>,
-    /// Read from either spelling of the default port in configs saved before
-    /// hosts were canonical
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_hosts")]
     pub hosts: HashMap<Host, HostConfig>,
     /// Hosts approved for HTTP by `--dangerously-allow-http` for this run
     #[serde(skip)]
@@ -184,7 +182,7 @@ pub async fn resolve_api_url(
     }
 
     Err(if transport_failed {
-        CliError::HostUnreachable(host.to_string())
+        CliError::HostUnreachable(host.clone())
     } else {
         CliError::ConfigError(format!(
             "Unable to resolve API URL for host `{host}`"
@@ -210,6 +208,30 @@ fn confirm_insecure_host(host: &Host) -> Result<(), CliError> {
         return Err(CliError::Cancellation);
     }
     Ok(())
+}
+
+/// Reads hosts saved before they were canonical, which may name the default
+/// port. Spellings of one host keep HTTP approval only if all of them had it,
+/// and keys that aren't hosts are dropped rather than failing the config.
+fn deserialize_hosts<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<HashMap<Host, HostConfig>, D::Error> {
+    let mut hosts = HashMap::<Host, HostConfig>::new();
+    for (key, config) in
+        HashMap::<String, HostConfig>::deserialize(deserializer)?
+    {
+        let Ok(host) = Host::parse(&key) else {
+            continue;
+        };
+        hosts
+            .entry(host)
+            .and_modify(|merged| {
+                merged.secure |= config.secure;
+                merged.allow_insecure &= config.allow_insecure;
+            })
+            .or_insert(config);
+    }
+    Ok(hosts)
 }
 
 fn default_secure() -> bool {

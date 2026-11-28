@@ -230,6 +230,10 @@ mod tests {
             ("localhost/path", None),
             ("alice@localhost", None),
             ("http://localhost", None),
+            ("example.com\u{1}", None),
+            ("exam\tple.com", None),
+            ("a\u{FEFF}b.com", Some("ab.com")),
+            ("ΟΣ", Some("xn--0xai")),
         ] {
             assert_eq!(
                 canonical_host(host).ok().as_deref(),

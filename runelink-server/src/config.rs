@@ -173,7 +173,9 @@ impl RawServerConfig {
             public_host.rsplit_once(']').unwrap_or(("", public_host));
         if after_address.contains(':') {
             return Err(invalid(
-                "public_host must not include a port; set public_port".into(),
+                "public_host must be a host name or IP address, without a \
+                 scheme or port (set public_port)"
+                    .into(),
             ));
         }
         let host = Host::parse(&format!("{public_host}:{}", self.public_port))

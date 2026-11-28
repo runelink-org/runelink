@@ -1,6 +1,6 @@
 use reqwest::StatusCode;
 use runelink_client::Error as ClientError;
-use runelink_types::UserRef;
+use runelink_types::{Host, UserRef};
 use std::process::ExitCode;
 
 #[allow(dead_code)]
@@ -40,7 +40,7 @@ pub enum CliError {
     NotFound(String),
 
     #[error("Could not reach host: {0}")]
-    HostUnreachable(String),
+    HostUnreachable(Host),
 
     #[error("No Action Possible: {0}")]
     NoActionPossible(String),
