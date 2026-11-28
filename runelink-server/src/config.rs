@@ -167,19 +167,18 @@ impl RawServerConfig {
     fn resolve(self, index: usize) -> ConfigResult<ServerConfig> {
         let invalid =
             |reason: String| ConfigError::InvalidServerEntry { index, reason };
-        let public_host = self.public_host.trim();
-        // An IPv6 address has colons inside its brackets.
-        let (_, after_address) =
-            public_host.rsplit_once(']').unwrap_or(("", public_host));
-        if after_address.contains(':') {
-            return Err(invalid(
-                "public_host must be a host name or IP address, without a \
-                 scheme or port (set public_port)"
+        let host = Host::parse(&format!(
+            "{}:{}",
+            self.public_host.trim(),
+            self.public_port
+        ))
+        .map_err(|_| {
+            invalid(
+                "public_host must be a host name or IP address, \
+                         without a scheme or port (set public_port)"
                     .into(),
-            ));
-        }
-        let host = Host::parse(&format!("{public_host}:{}", self.public_port))
-            .map_err(|error| invalid(error.to_string()))?;
+            )
+        })?;
         let database_url = self.database_url.trim().to_string();
         if database_url.is_empty() {
             return Err(ConfigError::InvalidServerEntry {

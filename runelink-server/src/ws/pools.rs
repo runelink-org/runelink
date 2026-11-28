@@ -297,12 +297,13 @@ pub enum HostSend {
 /// Tracks active federation websocket connections and provides safe send
 /// helpers.
 ///
-/// Each host has one connection that messages to it are sent on. Two hosts may connect to each other at once, so a host can have
-/// other connections too, which stay open and are read. The most recently
-/// authenticated connection sends: a host only connects again once it has
-/// lost its connection, which may not have closed on this side yet. When the
-/// sending connection closes, the most recently authenticated remaining one
-/// takes over.
+/// Each host has one connection that messages to it are sent on. Two hosts
+/// may connect to each other at once, so a host can have other connections
+/// too, which stay open and are read. The most recently authenticated
+/// connection sends: a host only connects again once it has lost its
+/// connection, which may not have closed on this side yet. When the sending
+/// connection closes, the most recently authenticated remaining one takes
+/// over.
 ///
 /// Messages already queued on a connection that stops sending can arrive
 /// after later ones sent on its replacement. Between two working connections,
@@ -332,7 +333,6 @@ impl FederationPoolState {
 pub struct FederationConn {
     pub sender: mpsc::UnboundedSender<FederationWsEnvelope>,
     pub host: Option<Host>,
-    pub issuer: Option<String>,
     /// When the connection authenticated, from the pool's count.
     authenticated: u64,
     pub capabilities: NegotiatedCapabilities,
@@ -358,7 +358,6 @@ impl FederationWsPool {
             FederationConn {
                 sender,
                 host: None,
-                issuer: None,
                 authenticated: 0,
                 capabilities,
             },
@@ -370,7 +369,6 @@ impl FederationWsPool {
         &self,
         conn_id: ConnId,
         host: Host,
-        issuer: String,
     ) -> bool {
         let mut state = self.inner.write().await;
         let previous_host_for_conn = match state.connections.get(&conn_id) {
@@ -387,7 +385,6 @@ impl FederationWsPool {
         state.by_host.insert(host.clone(), conn_id);
         if let Some(conn) = state.connections.get_mut(&conn_id) {
             conn.host = Some(host);
-            conn.issuer = Some(issuer);
             conn.authenticated = authenticated;
         }
         true
@@ -438,17 +435,6 @@ impl FederationWsPool {
             .connections
             .get(&conn_id)
             .and_then(|conn| conn.host.clone())
-    }
-
-    pub async fn authenticated_issuer(
-        &self,
-        conn_id: ConnId,
-    ) -> Option<String> {
-        let state = self.inner.read().await;
-        state
-            .connections
-            .get(&conn_id)
-            .and_then(|conn| conn.issuer.clone())
     }
 
     pub async fn supports_capability(
@@ -656,14 +642,7 @@ mod tests {
             let conn_id = ConnId::new();
             pool.register_connection(conn_id, sender, BTreeMap::new())
                 .await;
-            assert!(
-                pool.authenticate_connection(
-                    conn_id,
-                    host.clone(),
-                    "issuer".into()
-                )
-                .await
-            );
+            assert!(pool.authenticate_connection(conn_id, host.clone()).await);
             connections.push((conn_id, receiver));
         }
         let (older, older_receiver) = &connections[0];
@@ -691,12 +670,7 @@ mod tests {
             let conn_id = ConnId::new();
             pool.register_connection(conn_id, sender, BTreeMap::new())
                 .await;
-            pool.authenticate_connection(
-                conn_id,
-                host.clone(),
-                "issuer".into(),
-            )
-            .await;
+            pool.authenticate_connection(conn_id, host.clone()).await;
             receivers.push(receiver);
         }
         let envelope = FederationWsEnvelope::Error {

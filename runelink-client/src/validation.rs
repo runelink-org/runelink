@@ -1,4 +1,4 @@
-use runelink_types::host::{Host, InvalidHost};
+use runelink_types::host::Host;
 use std::{error::Error, fmt};
 
 pub const MAX_USERNAME_LENGTH: usize = 32;
@@ -7,6 +7,7 @@ pub const MAX_USERNAME_LENGTH: usize = 32;
 pub enum ValidationError {
     UsernameEmpty,
     UsernameTooLong,
+    InvalidHost,
 }
 
 impl fmt::Display for ValidationError {
@@ -16,6 +17,11 @@ impl fmt::Display for ValidationError {
             Self::UsernameTooLong => write!(
                 f,
                 "Username cannot be longer than {MAX_USERNAME_LENGTH} characters."
+            ),
+            // Without the input, since a pasted URL may hold credentials
+            Self::InvalidHost => write!(
+                f,
+                "Expected a host name or IP address, with an optional port."
             ),
         }
     }
@@ -59,15 +65,15 @@ pub fn validate_username(input: &str) -> Result<String, ValidationError> {
 }
 
 /// Parses a host that a person entered, which may also have a URL scheme or
-/// a trailing slash.
-pub fn validate_host(input: &str) -> Result<Host, InvalidHost> {
+/// trailing slashes.
+pub fn validate_host(input: &str) -> Result<Host, ValidationError> {
     let input = input.trim().to_ascii_lowercase();
     let host = input
         .strip_prefix("https://")
         .or_else(|| input.strip_prefix("http://"))
         .unwrap_or(&input);
-    Host::parse(host.strip_suffix('/').unwrap_or(host))
-        .map_err(|_| InvalidHost(input.clone()))
+    Host::parse(host.trim_end_matches('/'))
+        .map_err(|_| ValidationError::InvalidHost)
 }
 
 #[cfg(test)]
@@ -103,7 +109,7 @@ mod tests {
     fn validates_entered_hosts() {
         for (input, host) in [
             (" HTTPS://Example.COM:7000/ ", "example.com"),
-            ("http://localhost:7001", "localhost:7001"),
+            ("http://localhost:7001//", "localhost:7001"),
             ("[::1]:7000", "[::1]"),
         ] {
             assert_eq!(validate_host(input).unwrap().as_str(), host, "{input}");

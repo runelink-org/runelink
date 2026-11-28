@@ -25,12 +25,6 @@ struct JwksResponse {
     keys: Vec<PublicJwk>,
 }
 
-fn jwks_url_for_iss(iss: &str) -> String {
-    // Avoid double slashes if issuer ever includes a trailing '/'
-    let iss = iss.trim_end_matches('/');
-    format!("{iss}/.well-known/jwks.json")
-}
-
 #[derive(Deserialize)]
 struct IssOnly {
     iss: String,
@@ -51,8 +45,11 @@ fn parse_iss_unverified(token: &str) -> ApiResult<String> {
     Ok(parsed.iss)
 }
 
-async fn fetch_jwks(state: &AppState, iss: &str) -> ApiResult<CachedJwks> {
-    let url = jwks_url_for_iss(iss);
+async fn fetch_jwks(state: &AppState, issuer: &Host) -> ApiResult<CachedJwks> {
+    let url = format!(
+        "{}/.well-known/jwks.json",
+        issuer.api_url(state.config.secure)
+    );
     let response =
         state.http_client.get(url).send().await.map_err(|e| {
             ApiError::Internal(format!("jwks fetch error: {e}"))
@@ -89,24 +86,26 @@ async fn fetch_jwks(state: &AppState, iss: &str) -> ApiResult<CachedJwks> {
     })
 }
 
-async fn get_cached_jwks(state: &AppState, iss: &str) -> ApiResult<CachedJwks> {
-    let iss_key = iss.trim_end_matches('/');
+async fn get_cached_jwks(
+    state: &AppState,
+    issuer: &Host,
+) -> ApiResult<CachedJwks> {
     // Simple time-based cache. This will be expanded later with better
     // negative caching and rotation support.
     let ttl = Duration::minutes(10);
     {
         let cache = state.jwks_cache.read().await;
-        if let Some(entry) = cache.get(iss_key)
+        if let Some(entry) = cache.get(issuer)
             && entry.fetched_at + ttl > OffsetDateTime::now_utc()
         {
             return Ok(entry.clone());
         }
     }
 
-    let fetched = fetch_jwks(state, iss_key).await?;
+    let fetched = fetch_jwks(state, issuer).await?;
     {
         let mut cache = state.jwks_cache.write().await;
-        cache.insert(iss_key.to_string(), fetched.clone());
+        cache.insert(issuer.clone(), fetched.clone());
     }
     Ok(fetched)
 }
@@ -144,18 +143,19 @@ pub async fn decode_federation_jwt(
     state: &AppState,
     token: &str,
     expected_audience: &str,
-) -> ApiResult<FederationClaims> {
+) -> ApiResult<(Host, FederationClaims)> {
     let header = jsonwebtoken::decode_header(token)
         .map_err(|e| ApiError::AuthError(format!("invalid JWT header: {e}")))?;
     let iss = parse_iss_unverified(token)?;
     // Keys are only fetched from a host's exact API URL.
-    if Host::from_api_url(&iss, state.config.secure).is_none() {
-        return Err(ApiError::AuthError(
-            "federation issuer is not a host's API URL".into(),
-        ));
-    }
+    let issuer =
+        Host::from_api_url(&iss, state.config.secure).ok_or_else(|| {
+            ApiError::AuthError(
+                "federation issuer is not a host's API URL".into(),
+            )
+        })?;
 
-    let cached = get_cached_jwks(state, &iss).await?;
+    let cached = get_cached_jwks(state, &issuer).await?;
     let pub_bytes = select_public_key_bytes(&cached, header.kid.as_deref())?;
 
     if pub_bytes.len() != 32 {
@@ -178,15 +178,14 @@ pub async fn decode_federation_jwt(
     let claims = data.claims;
 
     // Verify delegation policy: issuer can only delegate users from their own host
-    if let Some(user_ref) = &claims.user_ref {
-        let expected_iss = user_ref.host.api_url(state.config.secure);
-        if claims.iss != expected_iss {
-            return Err(ApiError::AuthError(format!(
-                "Federation delegation mismatch: token from {} cannot delegate user from {}",
-                claims.iss, user_ref.host
-            )));
-        }
+    if let Some(user_ref) = &claims.user_ref
+        && user_ref.host != issuer
+    {
+        return Err(ApiError::AuthError(format!(
+            "Federation delegation mismatch: token from {issuer} cannot delegate user from {}",
+            user_ref.host
+        )));
     }
 
-    Ok(claims)
+    Ok((issuer, claims))
 }

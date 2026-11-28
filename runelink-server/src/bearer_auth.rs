@@ -6,7 +6,7 @@ use crate::{
 use axum::http::HeaderMap;
 use axum::http::header;
 use jsonwebtoken::{Algorithm, Validation};
-use runelink_types::{ClientAccessClaims, FederationClaims};
+use runelink_types::{ClientAccessClaims, FederationClaims, Host};
 
 fn extract_bearer_token(headers: &HeaderMap) -> ApiResult<String> {
     let auth_header = headers
@@ -56,6 +56,8 @@ impl ClientAuth {
 
 #[derive(Clone, Debug)]
 pub struct FederationAuth {
+    /// The host that issued the claims
+    pub host: Host,
     pub claims: FederationClaims,
 }
 
@@ -67,13 +69,13 @@ impl FederationAuth {
     ) -> ApiResult<Self> {
         let token = extract_bearer_token(headers)?;
         let expected_audience = state.config.api_url();
-        let claims = jwks_resolver::decode_federation_jwt(
+        let (host, claims) = jwks_resolver::decode_federation_jwt(
             state,
             &token,
             &expected_audience,
         )
         .await?;
-        Ok(Self { claims })
+        Ok(Self { host, claims })
     }
 }
 

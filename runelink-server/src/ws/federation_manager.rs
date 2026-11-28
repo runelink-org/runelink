@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap},
     fmt,
     future::Future,
     pin::Pin,
@@ -77,16 +77,16 @@ fn cached_by(request: &FederationWsRequest) -> &'static [Capability] {
 pub struct FederationWsManager {
     pool: FederationWsPool,
     pending: Arc<Mutex<HashMap<RequestId, PendingFederationReplySender>>>,
-    /// Connection attempts in progress, by host. Concurrent
-    /// requests to a host share one attempt, since each new connection would
-    /// take over sending to that host, and messages sent before and after a
-    /// switch can arrive out of order.
+    /// Connection attempts in progress, by host. Concurrent requests to a
+    /// host share one attempt, since each new connection would take over
+    /// sending to that host, and messages sent before and after a switch can
+    /// arrive out of order.
     connecting: Arc<Mutex<HashMap<Host, Shared<BoxFuture<'static, ()>>>>>,
     /// Updates waiting for a connection to their host, and the responses sent
-    /// after them, by host, in order. Every message to a host is
-    /// queued on a connection, and every connection authenticated, under this
-    /// lock, so that a new connection is given the waiting messages before
-    /// any others. It is never held across a connection attempt.
+    /// after them, by host, in order. Every message to a host is queued on a
+    /// connection, and every connection authenticated, under this lock, so
+    /// that a new connection is given the waiting messages before any others.
+    /// It is never held across a connection attempt.
     waiting: Arc<Mutex<HashMap<Host, Vec<FederationWsEnvelope>>>>,
     /// This host's state, for connecting to the hosts updates are sent to.
     state: Arc<OnceLock<AppState>>,
@@ -144,12 +144,11 @@ impl FederationWsManager {
         &self,
         conn_id: ConnId,
         host: Host,
-        issuer: String,
     ) -> bool {
         let mut waiting = self.waiting.lock().await;
         if !self
             .pool
-            .authenticate_connection(conn_id, host.clone(), issuer)
+            .authenticate_connection(conn_id, host.clone())
             .await
         {
             return false;
@@ -185,13 +184,6 @@ impl FederationWsManager {
 
     pub async fn authenticated_host(&self, conn_id: ConnId) -> Option<Host> {
         self.pool.authenticated_host(conn_id).await
-    }
-
-    pub async fn authenticated_issuer(
-        &self,
-        conn_id: ConnId,
-    ) -> Option<String> {
-        self.pool.authenticated_issuer(conn_id).await
     }
 
     pub async fn supports_capability(
@@ -294,19 +286,15 @@ impl FederationWsManager {
     /// host without a connection, such as one that restarted, is connected to
     /// in the background and sent its waiting updates in order once it is
     /// connected, or they are dropped if it cannot be reached.
-    pub async fn send_update_to_hosts<'a>(
+    pub async fn send_update_to_hosts(
         &self,
-        hosts: impl IntoIterator<Item = &'a Host>,
+        hosts: &BTreeSet<Host>,
         update: FederationWsUpdate,
     ) {
         let envelope = FederationWsEnvelope::Update {
             event_id: EventId::new(),
             update,
         };
-        let hosts = hosts.into_iter().collect::<HashSet<_>>();
-        if hosts.is_empty() {
-            return;
-        }
         let mut waiting = self.waiting.lock().await;
         for host in hosts {
             if let Some(envelopes) = waiting.get_mut(host) {
@@ -605,10 +593,7 @@ impl FederationWsManager {
             let (sender, outbound_rx) =
                 mpsc::unbounded_channel::<FederationWsEnvelope>();
             let conn_id = self.register_connection(sender, capabilities).await;
-            let issuer = host.api_url(state.config.secure);
-            let _ = self
-                .authenticate_connection(conn_id, host.clone(), issuer)
-                .await;
+            let _ = self.authenticate_connection(conn_id, host.clone()).await;
             let state = state.clone();
             let host = host.clone();
 
@@ -663,9 +648,7 @@ mod tests {
         manager
             .send_error(conn_id, Some(&host), None, error("queued"))
             .await;
-        manager
-            .authenticate_connection(conn_id, host.clone(), "issuer".into())
-            .await;
+        manager.authenticate_connection(conn_id, host.clone()).await;
         manager
             .send_error(conn_id, Some(&host), None, error("direct"))
             .await;

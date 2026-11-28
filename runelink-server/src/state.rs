@@ -5,8 +5,10 @@ use crate::{
     ws,
 };
 
-pub type JwksCache =
-    std::collections::HashMap<String, crate::jwks_resolver::CachedJwks>;
+pub type JwksCache = std::collections::HashMap<
+    runelink_types::Host,
+    crate::jwks_resolver::CachedJwks,
+>;
 
 #[derive(Clone, Debug)]
 pub struct AppState {
