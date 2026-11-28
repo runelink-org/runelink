@@ -81,6 +81,7 @@ define_capabilities! {
     MessagesEvents => "messages.events",
     MessagesRead => "messages.read",
     Ping => "ping",
+    PresenceStatus => "presence.status",
     ServersUpdate => "servers.update",
     ServersCreate => "servers.create",
     ServersDelete => "servers.delete",

@@ -10,6 +10,7 @@ use runelink_types::{
 
 use super::shared::authorize_client;
 use crate::{
+    auth::Requirement,
     auth_service,
     error::{ApiError, ApiResult},
     ids::ConnId,
@@ -498,6 +499,16 @@ pub(super) async fn handle_client_request(
             let message =
                 ops::messages::delete(state, &session, target).await?;
             Ok(ClientWsReply::MessagesDelete(message))
+        }
+
+        ClientWsRequest::PresenceStatusUpdate { status } => {
+            let session =
+                authorize_client(state, conn_id, Requirement::Client).await?;
+            let user_ref = session.user_ref.ok_or_else(|| {
+                ApiError::AuthError("Only users have presence statuses".into())
+            })?;
+            state.presence.choose(user_ref, status);
+            Ok(ClientWsReply::PresenceStatusUpdate)
         }
     }
 }

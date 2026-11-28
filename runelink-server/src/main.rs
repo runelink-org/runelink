@@ -29,6 +29,7 @@ mod jwks_resolver;
 mod key_manager;
 mod ops;
 mod peer_policy;
+mod presence;
 mod queries;
 mod state;
 mod ws;
@@ -72,7 +73,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let config = Arc::new(config);
         let db_pool = Arc::new(db::get_pool(&config).await?);
 
-        let client_ws_manager = ws::ClientWsManager::new();
+        let (presence, presence_events) = presence::Presence::new();
+        let client_ws_manager = ws::ClientWsManager::new(presence.clone());
         let federation_ws_manager = ws::FederationWsManager::new();
         let peer_policy =
             PeerPolicy::for_public_host(config.public_host()).await;
@@ -106,8 +108,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             key_manager: KeyManager::load_or_generate(config.key_dir.clone())?,
             jwks_cache: Arc::new(RwLock::new(HashMap::new())),
             actors,
+            presence,
         };
         app_state.federation_ws_manager.set_state(app_state.clone());
+        tokio::spawn(presence::run(app_state.clone(), presence_events));
 
         MIGRATOR.run(db_pool.as_ref()).await?;
         log::info!("Migrations are up to date for {}.", config.public_host());

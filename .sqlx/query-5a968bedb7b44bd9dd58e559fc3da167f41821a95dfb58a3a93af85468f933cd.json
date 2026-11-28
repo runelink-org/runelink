@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT DISTINCT\n            member.user_name,\n            member.user_host AS \"user_host: Host\",\n            peer.user_name AS peer_name,\n            peer.user_host AS \"peer_host: Host\"\n        FROM server_users peer\n        JOIN server_users member ON member.server_id = peer.server_id\n        WHERE peer.user_host = $1\n            AND NOT (\n                member.user_name = peer.user_name\n                AND member.user_host = peer.user_host\n            )\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "server_users",
+            "name": "user_name"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "user_host: Host",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "server_users",
+            "name": "user_host"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "peer_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "server_users",
+            "name": "user_name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "peer_host: Host",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "server_users",
+            "name": "user_host"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5a968bedb7b44bd9dd58e559fc3da167f41821a95dfb58a3a93af85468f933cd"
+}

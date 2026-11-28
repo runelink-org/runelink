@@ -659,7 +659,7 @@ mod tests {
         .await
         .unwrap();
 
-        let clients = ClientWsManager::new();
+        let clients = ClientWsManager::new(crate::presence::Presence::new().0);
         let (sender, updates) = mpsc::unbounded_channel();
         let capabilities: NegotiatedCapabilities = [
             Capability::ServersEvents,

@@ -42,6 +42,7 @@ RuneLink separates **user authentication** from **server-to-server federation**:
 - Remote hosts validate those JWTs by discovering public keys via **JWKS** published at `/.well-known/jwks.json`.
 - A host refuses to connect to peers at loopback, private, or link-local addresses, unless its own `public_host` is itself one of those or resolves only to those, as in local development.
 - Every server, channel, and message is owned by one host, and is identified by that host together with an ID that is only unique on it. Resources and references to them include the host unless it's implied, such as in requests sent to the owning host itself, and hosts only accept updates and replies from a peer about that peer's own resources.
+- A user's presence status (online, do not disturb, or offline, which invisible users also appear as) is decided only by their home host, which sends it to the hosts of the servers the user is in. Those hosts cache it in memory and send it on to the users who share one of their servers, through those users' home hosts.
 
 More detailed federation/authentication documentation is planned.
 
@@ -174,7 +175,8 @@ curl "http://localhost:7000/ping"
 ## Roadmap (high level)
 
 - Direct messages: user-to-user direct messages and group chats.
-- Presence updates: typing indicators, user statuses, and message notifications.
+- Presence typing indicators.
+- Message notifications.
 - Calls: group audio + video calls with WebRTC.
 - For more detailed and up-to-date plans, see the [project board](https://github.com/orgs/runelink-org/projects/1).
 

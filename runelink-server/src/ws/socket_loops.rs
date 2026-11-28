@@ -534,6 +534,7 @@ pub async fn federation_socket_loop(
     mut socket: FederationSocket,
     mut outbound_rx: mpsc::UnboundedReceiver<FederationWsEnvelope>,
 ) {
+    state.presence.peer_connected(host.clone());
     let mut handling: Option<Handling<'_>> = None;
     let mut pings = ping_interval();
     let mut receive_deadline = Instant::now() + RECEIVE_TIMEOUT;
@@ -606,6 +607,7 @@ pub async fn federation_socket_loop(
         .federation_ws_manager
         .deregister_connection(conn_id)
         .await;
+    state.presence.peer_disconnected(host);
 }
 
 #[cfg(test)]

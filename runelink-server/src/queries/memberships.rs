@@ -428,3 +428,111 @@ pub async fn delete_remote(
     }
     Ok(())
 }
+
+/// The other members of the local servers a user is in, or of only the given
+/// ones.
+pub async fn get_local_co_members(
+    executor: impl PgExecutor<'_>,
+    user_ref: &UserRef,
+    server_ids: Option<&[ServerId]>,
+) -> ApiResult<Vec<UserRef>> {
+    let server_ids = server_ids
+        .map(|ids| ids.iter().map(ServerId::as_uuid).collect::<Vec<_>>());
+    let rows = sqlx::query!(
+        r#"
+        SELECT DISTINCT
+            other.user_name,
+            other.user_host AS "user_host: Host"
+        FROM server_users own
+        JOIN server_users other ON other.server_id = own.server_id
+        WHERE own.user_name = $1 AND own.user_host = $2
+            AND ($3::UUID[] IS NULL OR own.server_id = ANY($3))
+            AND NOT (other.user_name = $1 AND other.user_host = $2)
+        "#,
+        user_ref.name,
+        user_ref.host.as_str(),
+        server_ids.as_deref(),
+    )
+    .fetch_all(executor)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| UserRef::new(row.user_name, row.user_host))
+        .collect())
+}
+
+/// The hosts of the cached remote servers a local user is in.
+pub async fn get_remote_server_hosts_for_user(
+    executor: impl PgExecutor<'_>,
+    user_ref: &UserRef,
+) -> ApiResult<Vec<Host>> {
+    let hosts = sqlx::query_scalar!(
+        r#"
+        SELECT DISTINCT remote_server_host AS "host: Host"
+        FROM user_remote_server_memberships
+        WHERE user_name = $1 AND user_host = $2
+        "#,
+        user_ref.name,
+        user_ref.host.as_str(),
+    )
+    .fetch_all(executor)
+    .await?;
+    Ok(hosts)
+}
+
+/// The local users who are in a cached remote server on `host`.
+pub async fn get_local_users_in_servers_on(
+    executor: impl PgExecutor<'_>,
+    host: &Host,
+) -> ApiResult<Vec<UserRef>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT DISTINCT user_name, user_host AS "user_host: Host"
+        FROM user_remote_server_memberships
+        WHERE remote_server_host = $1
+        "#,
+        host.as_str(),
+    )
+    .fetch_all(executor)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| UserRef::new(row.user_name, row.user_host))
+        .collect())
+}
+
+/// Each local user or member of a local server, and each member from `host`
+/// who shares a local server with them.
+pub async fn get_local_co_members_from(
+    executor: impl PgExecutor<'_>,
+    host: &Host,
+) -> ApiResult<Vec<(UserRef, UserRef)>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT DISTINCT
+            member.user_name,
+            member.user_host AS "user_host: Host",
+            peer.user_name AS peer_name,
+            peer.user_host AS "peer_host: Host"
+        FROM server_users peer
+        JOIN server_users member ON member.server_id = peer.server_id
+        WHERE peer.user_host = $1
+            AND NOT (
+                member.user_name = peer.user_name
+                AND member.user_host = peer.user_host
+            )
+        "#,
+        host.as_str(),
+    )
+    .fetch_all(executor)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            (
+                UserRef::new(row.user_name, row.user_host),
+                UserRef::new(row.peer_name, row.peer_host),
+            )
+        })
+        .collect())
+}

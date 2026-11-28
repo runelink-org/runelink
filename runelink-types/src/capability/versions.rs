@@ -92,6 +92,15 @@ pub mod messages {
     pub const READ_VERSIONS: &[CapabilityVersion] = &[READ_VERSION];
 }
 
+pub mod presence {
+    use crate::capability::CapabilityVersion;
+
+    pub const STATUS_VERSION: CapabilityVersion =
+        CapabilityVersion::new(2026, 11, 28);
+
+    pub const STATUS_VERSIONS: &[CapabilityVersion] = &[STATUS_VERSION];
+}
+
 pub mod servers {
     use crate::capability::CapabilityVersion;
     pub const UPDATE_VERSION: CapabilityVersion =

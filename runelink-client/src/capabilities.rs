@@ -1,6 +1,8 @@
 use runelink_types::capability::{
     Capability, CapabilityVersion, preferred_version,
-    versions::{auth, channels, memberships, messages, servers, system, users},
+    versions::{
+        auth, channels, memberships, messages, presence, servers, system, users,
+    },
 };
 
 use crate::error::{Error, Result};
@@ -29,6 +31,7 @@ pub const fn http(capability: &Capability) -> &'static [CapabilityVersion] {
         Capability::MessagesEvents => &[],
         Capability::MessagesRead => messages::READ_VERSIONS,
         Capability::Ping => &[],
+        Capability::PresenceStatus => &[],
         Capability::ServersUpdate => servers::UPDATE_VERSIONS,
         Capability::ServersCreate => servers::CREATE_VERSIONS,
         Capability::ServersDelete => servers::DELETE_VERSIONS,
@@ -69,6 +72,7 @@ pub const fn client_websocket(
         Capability::MessagesEvents => messages::EVENTS_VERSIONS,
         Capability::MessagesRead => messages::READ_VERSIONS,
         Capability::Ping => system::PING_VERSIONS,
+        Capability::PresenceStatus => presence::STATUS_VERSIONS,
         Capability::ServersUpdate => servers::UPDATE_VERSIONS,
         Capability::ServersCreate => servers::CREATE_VERSIONS,
         Capability::ServersDelete => servers::DELETE_VERSIONS,

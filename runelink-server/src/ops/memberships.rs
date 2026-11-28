@@ -80,14 +80,18 @@ pub async fn upsert(
     } else {
         None
     };
-    state
+    let membership = state
         .actors
         .upsert_membership(
             new_membership.clone(),
             remote_user,
             session.authorization(),
         )
-        .await
+        .await?;
+    state
+        .presence
+        .joined(membership.user.as_ref(), membership.server.to_ref());
+    Ok(membership)
 }
 
 /// Get all members of a server (public).
@@ -176,10 +180,12 @@ pub async fn delete(
                 .actors
                 .delete_membership(
                     server_ref.id,
-                    user_ref,
+                    user_ref.clone(),
                     session.authorization(),
                 )
-                .await
+                .await?;
+            state.presence.left(user_ref);
+            Ok(())
         }
         // The peer's update for this change removes it from the cache.
         Locality::Remote(host) => federation::request!(
