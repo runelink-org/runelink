@@ -1,7 +1,5 @@
 use clap::Parser;
 use cli::handle_cli;
-use reqwest::Client;
-use runelink_client::{requests, util::get_api_url};
 use std::process::ExitCode;
 use storage::AppConfig;
 use storage_auth::AuthCache;
@@ -14,18 +12,6 @@ mod storage;
 mod storage_auth;
 mod transport;
 mod util;
-
-#[allow(dead_code)]
-async fn test_connectivities(client: &Client, hosts: Vec<&str>) {
-    println!("Hosts:");
-    for host in hosts {
-        let api_url = get_api_url(host, false);
-        match requests::ping(client, &api_url).await {
-            Ok(_) => println!("{} (ready)", host),
-            Err(_) => println!("{} (down)", host),
-        }
-    }
-}
 
 #[tokio::main]
 async fn main() -> ExitCode {

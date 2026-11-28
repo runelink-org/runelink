@@ -1,9 +1,6 @@
 use directories::ProjectDirs;
 use reqwest::Client;
-use runelink_client::{
-    Error as ClientError, requests,
-    util::{get_api_url, pad_host},
-};
+use runelink_client::{Error as ClientError, requests};
 use runelink_types::{Host, UserRef};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -23,11 +20,13 @@ pub struct AppConfig {
     pub active_account: Option<UserRef>,
     pub default_server: Option<Uuid>,
     pub accounts: Vec<AccountConfig>,
+    /// Read from either spelling of the default port in configs saved before
+    /// hosts were canonical
     #[serde(default)]
-    pub hosts: HashMap<String, HostConfig>,
+    pub hosts: HashMap<Host, HostConfig>,
     /// Hosts approved for HTTP by `--dangerously-allow-http` for this run
     #[serde(skip)]
-    pub http_approved_hosts: Vec<String>,
+    pub http_approved_hosts: Vec<Host>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -109,19 +108,16 @@ impl AppConfig {
         }
     }
 
-    pub fn host_config(&self, host: &str) -> Option<HostConfig> {
-        self.hosts
-            .get(&transport_host(host))
-            .or_else(|| self.hosts.get(host))
-            .copied()
+    pub fn host_config(&self, host: &Host) -> Option<HostConfig> {
+        self.hosts.get(host).copied()
     }
 
-    pub fn set_host_secure(&mut self, host: &str, secure: bool) {
+    pub fn set_host_secure(&mut self, host: &Host, secure: bool) {
         let allow_insecure = self
             .host_config(host)
             .is_some_and(|config| config.allow_insecure);
         self.hosts.insert(
-            transport_host(host),
+            host.clone(),
             HostConfig {
                 secure,
                 allow_insecure,
@@ -144,11 +140,11 @@ impl TryGetHost for Option<&AccountConfig> {
 pub async fn resolve_api_url(
     client: &Client,
     config: &mut AppConfig,
-    host: &str,
+    host: &Host,
 ) -> Result<String, CliError> {
     let mut transport_failed = false;
     for secure in [true, false] {
-        let api_url = get_api_url(host, secure);
+        let api_url = host.api_url(secure);
         match requests::ping(client, &api_url).await {
             Ok(_) => {
                 if !secure
@@ -156,13 +152,11 @@ pub async fn resolve_api_url(
                         .host_config(host)
                         .is_some_and(|config| config.allow_insecure)
                 {
-                    if !config.http_approved_hosts.iter().any(|approved| {
-                        transport_host(approved) == transport_host(host)
-                    }) {
+                    if !config.http_approved_hosts.contains(host) {
                         confirm_insecure_host(host)?;
                     }
                     config.hosts.insert(
-                        transport_host(host),
+                        host.clone(),
                         HostConfig {
                             secure: false,
                             allow_insecure: true,
@@ -198,7 +192,7 @@ pub async fn resolve_api_url(
     })
 }
 
-fn confirm_insecure_host(host: &str) -> Result<(), CliError> {
+fn confirm_insecure_host(host: &Host) -> Result<(), CliError> {
     if !can_prompt() {
         return Err(CliError::ConfigError(format!(
             "HTTP for `{host}` requires approval. Pass `--dangerously-allow-http {host}`, or run in a terminal without `--non-interactive` to confirm."
@@ -216,16 +210,6 @@ fn confirm_insecure_host(host: &str) -> Result<(), CliError> {
         return Err(CliError::Cancellation);
     }
     Ok(())
-}
-
-fn transport_host(host: &str) -> String {
-    let padded = pad_host(host);
-    if let Some((name, port)) = padded.rsplit_once(':')
-        && let Ok(port) = port.parse::<u16>()
-    {
-        return format!("{name}:{port}");
-    }
-    padded
 }
 
 fn default_secure() -> bool {
@@ -298,32 +282,25 @@ mod tests {
             r#"{"accounts":[],"hosts":{"localhost":{"secure":false}}}"#,
         )
         .unwrap();
-        assert!(!config.host_config("localhost").unwrap().allow_insecure);
+        let host = Host::parse("localhost").unwrap();
+        assert!(!config.host_config(&host).unwrap().allow_insecure);
     }
 
     #[test]
-    fn approval_is_per_endpoint_and_survives_secure_discovery() {
-        let mut config = AppConfig::default();
-        config.hosts.insert(
-            "localhost:7000".into(),
-            HostConfig {
-                secure: false,
-                allow_insecure: true,
-            },
-        );
-        assert!(config.host_config("localhost").unwrap().allow_insecure);
-        assert!(
-            config
-                .host_config("localhost:07000")
-                .unwrap()
-                .allow_insecure
-        );
-        assert!(config.host_config("localhost:7001").is_none());
-        config.set_host_secure("localhost", true);
+    fn approval_is_per_host_and_survives_secure_discovery() {
+        let mut config: AppConfig = serde_json::from_str(
+            r#"{"accounts":[],"hosts":{"localhost:7000":{"secure":false,"allow_insecure":true}}}"#,
+        )
+        .unwrap();
+        let localhost = Host::parse("localhost").unwrap();
+        assert!(config.host_config(&localhost).unwrap().allow_insecure);
+        let other_port = Host::parse("localhost:7001").unwrap();
+        assert!(config.host_config(&other_port).is_none());
+        config.set_host_secure(&localhost, true);
         let restored: AppConfig =
             serde_json::from_str(&serde_json::to_string(&config).unwrap())
                 .unwrap();
-        let host = restored.host_config("localhost:7000").unwrap();
+        let host = restored.host_config(&localhost).unwrap();
         assert!(host.secure && host.allow_insecure);
     }
 }

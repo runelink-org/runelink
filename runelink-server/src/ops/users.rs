@@ -1,4 +1,3 @@
-use runelink_client::util::get_api_url;
 use runelink_types::{
     host::Host,
     user::{NewUser, User, UserRef},
@@ -136,7 +135,7 @@ pub async fn delete_remote_user_record(
     }
 
     let expected_home_server_url =
-        get_api_url(&session_user_ref.host, state.config.secure);
+        session_user_ref.host.api_url(state.config.secure);
     let federation_claims = session.federation.as_ref().ok_or_else(|| {
         ApiError::AuthError("Federation claims required".into())
     })?;

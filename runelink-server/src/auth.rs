@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use axum::http::HeaderMap;
-use runelink_client::util::get_api_url;
 use runelink_types::{
     auth::FederationClaims,
     server::{ServerMembership, ServerRef, ServerRole},
@@ -134,7 +133,7 @@ impl Requirement {
                         "Federated delegated user required".into(),
                     ));
                 };
-                let expected_iss = get_api_url(&expected.host, config.secure);
+                let expected_iss = expected.host.api_url(config.secure);
                 if federation.claims.iss != expected_iss {
                     return Ok(Some(
                         "Federation issuer does not match delegated user host"

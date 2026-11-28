@@ -15,7 +15,6 @@ use futures_util::{
 };
 use jsonwebtoken::{Algorithm, Header};
 use log::{debug, info, warn};
-use runelink_client::util::{get_api_url, get_federation_ws_url, pad_host};
 use runelink_types::{
     FederationClaims,
     capability::{
@@ -45,10 +44,7 @@ use super::{
         federation_socket_loop,
     },
 };
-use crate::{
-    capabilities::federation_websocket, config::canonical_host, ids::ConnId,
-    state::AppState,
-};
+use crate::{capabilities::federation_websocket, ids::ConnId, state::AppState};
 
 type PendingFederationReplySender =
     oneshot::Sender<Result<FederationWsReply, WsError>>;
@@ -81,17 +77,17 @@ fn cached_by(request: &FederationWsRequest) -> &'static [Capability] {
 pub struct FederationWsManager {
     pool: FederationWsPool,
     pending: Arc<Mutex<HashMap<RequestId, PendingFederationReplySender>>>,
-    /// Connection attempts in progress, by canonical host. Concurrent
+    /// Connection attempts in progress, by host. Concurrent
     /// requests to a host share one attempt, since each new connection would
     /// take over sending to that host, and messages sent before and after a
     /// switch can arrive out of order.
-    connecting: Arc<Mutex<HashMap<String, Shared<BoxFuture<'static, ()>>>>>,
+    connecting: Arc<Mutex<HashMap<Host, Shared<BoxFuture<'static, ()>>>>>,
     /// Updates waiting for a connection to their host, and the responses sent
-    /// after them, by canonical host, in order. Every message to a host is
+    /// after them, by host, in order. Every message to a host is
     /// queued on a connection, and every connection authenticated, under this
     /// lock, so that a new connection is given the waiting messages before
     /// any others. It is never held across a connection attempt.
-    waiting: Arc<Mutex<HashMap<String, Vec<FederationWsEnvelope>>>>,
+    waiting: Arc<Mutex<HashMap<Host, Vec<FederationWsEnvelope>>>>,
     /// This host's state, for connecting to the hosts updates are sent to.
     state: Arc<OnceLock<AppState>>,
 }
@@ -147,12 +143,9 @@ impl FederationWsManager {
     pub async fn authenticate_connection(
         &self,
         conn_id: ConnId,
-        host: String,
+        host: Host,
         issuer: String,
     ) -> bool {
-        let Ok(host) = canonical_host(&host) else {
-            return false;
-        };
         let mut waiting = self.waiting.lock().await;
         if !self
             .pool
@@ -169,7 +162,7 @@ impl FederationWsManager {
 
     /// Sends messages that waited for `host`, in order, or drops them if it
     /// has no connection. The caller holds the `waiting` lock.
-    async fn send_queue(&self, host: &str, queue: Vec<FederationWsEnvelope>) {
+    async fn send_queue(&self, host: &Host, queue: Vec<FederationWsEnvelope>) {
         let mut dropped = 0;
         for envelope in queue {
             if self.pool.send_to_host(host, envelope).await
@@ -213,14 +206,15 @@ impl FederationWsManager {
     pub async fn send_request_to_host(
         &self,
         state: &AppState,
-        host: &str,
+        host: &Host,
         delegated_user_ref: Option<UserRef>,
         request: FederationWsRequest,
         timeout: StdDuration,
     ) -> FederationRequestResult<FederationWsReply> {
-        let host = pad_host(host);
-        if !self.ensure_connection(state, &host).await {
-            return Err(FederationRequestError::HostUnavailable { host });
+        if !self.ensure_connection(state, host).await {
+            return Err(FederationRequestError::HostUnavailable {
+                host: host.clone(),
+            });
         }
 
         for capability in std::iter::once(request.capability())
@@ -232,13 +226,13 @@ impl FederationWsManager {
             )
             .map(|version| capability.with_version(version)) else {
                 return Err(FederationRequestError::UnsupportedCapability {
-                    host,
+                    host: host.clone(),
                     capability: capability.to_string(),
                 });
             };
-            if !self.pool.host_supports_capability(&host, &capability).await {
+            if !self.pool.host_supports_capability(host, &capability).await {
                 return Err(FederationRequestError::UnsupportedCapability {
-                    host,
+                    host: host.clone(),
                     capability: capability.capability.to_string(),
                 });
             }
@@ -260,13 +254,15 @@ impl FederationWsManager {
 
         let sent = {
             let _waiting = self.waiting.lock().await;
-            self.pool.send_to_host(&host, envelope).await
+            self.pool.send_to_host(host, envelope).await
         };
         if sent != HostSend::Sent {
             warn!("Failed to send federation request to {host}");
             let mut pending = self.pending.lock().await;
             pending.remove(&request_id);
-            return Err(FederationRequestError::HostUnavailable { host });
+            return Err(FederationRequestError::HostUnavailable {
+                host: host.clone(),
+            });
         }
         // The request is now queued on the peer's connection in order, so
         // later requests on the caller's connection may be read.
@@ -286,7 +282,10 @@ impl FederationWsManager {
             Err(_) => {
                 let mut pending = self.pending.lock().await;
                 pending.remove(&request_id);
-                Err(FederationRequestError::Timeout { host, request_id })
+                Err(FederationRequestError::Timeout {
+                    host: host.clone(),
+                    request_id,
+                })
             }
         }
     }
@@ -295,37 +294,33 @@ impl FederationWsManager {
     /// host without a connection, such as one that restarted, is connected to
     /// in the background and sent its waiting updates in order once it is
     /// connected, or they are dropped if it cannot be reached.
-    pub async fn send_update_to_hosts<I, S>(
+    pub async fn send_update_to_hosts<'a>(
         &self,
-        hosts: I,
+        hosts: impl IntoIterator<Item = &'a Host>,
         update: FederationWsUpdate,
-    ) where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
+    ) {
         let envelope = FederationWsEnvelope::Update {
             event_id: EventId::new(),
             update,
         };
-        let hosts = hosts
-            .into_iter()
-            .filter_map(|host| canonical_host(host.as_ref()).ok())
-            .collect::<HashSet<_>>();
+        let hosts = hosts.into_iter().collect::<HashSet<_>>();
         if hosts.is_empty() {
             return;
         }
         let mut waiting = self.waiting.lock().await;
         for host in hosts {
-            if let Some(envelopes) = waiting.get_mut(&host) {
+            if let Some(envelopes) = waiting.get_mut(host) {
                 envelopes.push(envelope.clone());
                 continue;
             }
-            if self.pool.send_to_host(&host, envelope.clone()).await
+            if self.pool.send_to_host(host, envelope.clone()).await
                 == HostSend::NotConnected
                 && let Some(state) = self.state.get()
             {
                 waiting.insert(host.clone(), vec![envelope.clone()]);
-                tokio::spawn(self.clone().connect_waiting(state.clone(), host));
+                tokio::spawn(
+                    self.clone().connect_waiting(state.clone(), host.clone()),
+                );
             }
         }
     }
@@ -333,8 +328,8 @@ impl FederationWsManager {
     /// Connects to `host` and sends it the messages waiting for it, or drops
     /// them if it can't be reached. A connection that authenticates meanwhile
     /// is given them first (see [`Self::authenticate_connection`]).
-    async fn connect_waiting(self, state: AppState, host: String) {
-        self.ensure_connection(&state, &pad_host(&host)).await;
+    async fn connect_waiting(self, state: AppState, host: Host) {
+        self.ensure_connection(&state, &host).await;
         let mut waiting = self.waiting.lock().await;
         if let Some(queue) = waiting.remove(&host) {
             self.send_queue(&host, queue).await;
@@ -346,7 +341,7 @@ impl FederationWsManager {
     pub async fn send_reply(
         &self,
         conn_id: ConnId,
-        host: Option<&str>,
+        host: Option<&Host>,
         request_id: RequestId,
         reply: FederationWsReply,
     ) -> bool {
@@ -367,7 +362,7 @@ impl FederationWsManager {
     pub async fn send_error(
         &self,
         conn_id: ConnId,
-        host: Option<&str>,
+        host: Option<&Host>,
         request_id: Option<RequestId>,
         error: WsError,
     ) -> bool {
@@ -388,13 +383,11 @@ impl FederationWsManager {
     async fn send_response(
         &self,
         conn_id: ConnId,
-        host: Option<&str>,
+        host: Option<&Host>,
         envelope: FederationWsEnvelope,
     ) -> bool {
         let mut waiting = self.waiting.lock().await;
-        if let Some(queue) =
-            host.and_then(|host| waiting.get_mut(&canonical_host(host).ok()?))
-        {
+        if let Some(queue) = host.and_then(|host| waiting.get_mut(host)) {
             queue.push(envelope);
             return true;
         }
@@ -445,16 +438,13 @@ impl FederationWsManager {
             .await
     }
 
-    async fn ensure_connection(&self, state: &AppState, host: &str) -> bool {
+    async fn ensure_connection(&self, state: &AppState, host: &Host) -> bool {
         if self.pool.has_host(host).await {
             return true;
         }
-        let Ok(key) = canonical_host(host) else {
-            return false;
-        };
         let attempt = {
             let mut connecting = self.connecting.lock().await;
-            match connecting.get(&key) {
+            match connecting.get(host) {
                 Some(attempt) => attempt.clone(),
                 None => {
                     // An attempt registers its connection before it leaves
@@ -464,16 +454,15 @@ impl FederationWsManager {
                     }
                     let manager = self.clone();
                     let state = state.clone();
-                    let host = host.to_owned();
-                    let attempt_key = key.clone();
+                    let attempt_host = host.clone();
                     // Spawned, so that it finishes and leaves the map even if
                     // every caller waiting on it gives up.
                     let task = tokio::spawn(async move {
-                        manager.connect_to_host(&state, &host).await;
-                        manager.connecting.lock().await.remove(&attempt_key);
+                        manager.connect_to_host(&state, &attempt_host).await;
+                        manager.connecting.lock().await.remove(&attempt_host);
                     });
                     let connecting_map = self.connecting.clone();
-                    let panicked_key = key.clone();
+                    let panicked_key = host.clone();
                     let attempt = async move {
                         // A panic skipped the removal above.
                         if task.await.is_err() {
@@ -482,7 +471,7 @@ impl FederationWsManager {
                     }
                     .boxed()
                     .shared();
-                    connecting.insert(key, attempt.clone());
+                    connecting.insert(host.clone(), attempt.clone());
                     attempt
                 }
             }
@@ -495,13 +484,13 @@ impl FederationWsManager {
     fn connect_to_host<'a>(
         &'a self,
         state: &'a AppState,
-        host: &'a str,
+        host: &'a Host,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
             info!("Opening federation websocket to {host}");
             let claims = FederationClaims::new_server_only(
                 state.config.api_url(),
-                get_api_url(host, state.config.secure),
+                host.api_url(state.config.secure),
                 Duration::minutes(5),
             );
             let token = match jsonwebtoken::encode(
@@ -517,7 +506,7 @@ impl FederationWsManager {
                     return;
                 }
             };
-            let ws_url = get_federation_ws_url(host, state.config.secure);
+            let ws_url = host.federation_ws_url(state.config.secure);
             let mut request = match ws_url.as_str().into_client_request() {
                 Ok(request) => request,
                 Err(error) => {
@@ -616,12 +605,12 @@ impl FederationWsManager {
             let (sender, outbound_rx) =
                 mpsc::unbounded_channel::<FederationWsEnvelope>();
             let conn_id = self.register_connection(sender, capabilities).await;
-            let issuer = get_api_url(host, state.config.secure);
+            let issuer = host.api_url(state.config.secure);
             let _ = self
-                .authenticate_connection(conn_id, host.to_string(), issuer)
+                .authenticate_connection(conn_id, host.clone(), issuer)
                 .await;
             let state = state.clone();
-            let host = host.to_string();
+            let host = host.clone();
 
             let loop_task: Pin<Box<dyn Future<Output = ()> + Send>> =
                 Box::pin(async move {
@@ -639,6 +628,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use runelink_types::{
+        host::Host,
         ids::EventId,
         ws::{FederationWsEnvelope, WsError},
     };
@@ -657,11 +647,12 @@ mod tests {
     #[tokio::test]
     async fn new_connections_send_waiting_messages_first() {
         let manager = FederationWsManager::new();
+        let host = Host::parse("example.com").unwrap();
         let (sender, mut receiver) = mpsc::unbounded_channel();
         let conn_id =
             manager.register_connection(sender, BTreeMap::new()).await;
         manager.waiting.lock().await.insert(
-            "example.com".into(),
+            host.clone(),
             vec![FederationWsEnvelope::Error {
                 request_id: None,
                 event_id: EventId::new(),
@@ -670,17 +661,13 @@ mod tests {
         );
         // A response waits behind the waiting messages.
         manager
-            .send_error(conn_id, Some("example.com"), None, error("queued"))
+            .send_error(conn_id, Some(&host), None, error("queued"))
             .await;
         manager
-            .authenticate_connection(
-                conn_id,
-                "example.com".into(),
-                "issuer".into(),
-            )
+            .authenticate_connection(conn_id, host.clone(), "issuer".into())
             .await;
         manager
-            .send_error(conn_id, Some("example.com"), None, error("direct"))
+            .send_error(conn_id, Some(&host), None, error("direct"))
             .await;
         for code in ["waiting", "queued", "direct"] {
             let Ok(FederationWsEnvelope::Error { error, .. }) =

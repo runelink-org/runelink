@@ -44,15 +44,15 @@ pub fn parse_username_input(
     Ok(normalized)
 }
 
-pub fn parse_host_input(input: &str, strict: bool) -> Result<String, CliError> {
-    let normalized = validate_host(input)
+pub fn parse_host_input(input: &str, strict: bool) -> Result<Host, CliError> {
+    let host = validate_host(input)
         .map_err(|error| CliError::InvalidArgument(error.to_string()))?;
-    if strict && normalized != input {
+    if strict && host.as_str() != input {
         return Err(CliError::InvalidArgument(format!(
-            "Host must already be normalized in strict mode: `{normalized}`"
+            "Host must already be canonical in strict mode: `{host}`"
         )));
     }
-    Ok(normalized)
+    Ok(host)
 }
 
 pub fn parse_optional_host_input(
@@ -60,10 +60,7 @@ pub fn parse_optional_host_input(
     strict: bool,
 ) -> Result<Option<Host>, CliError> {
     input
-        .map(|value| {
-            Host::parse(&parse_host_input(value, strict)?)
-                .map_err(|error| CliError::InvalidArgument(error.to_string()))
-        })
+        .map(|value| parse_host_input(value, strict))
         .transpose()
 }
 

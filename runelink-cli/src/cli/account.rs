@@ -1,8 +1,5 @@
 use reqwest::StatusCode;
-use runelink_client::{
-    requests,
-    util::{pad_host, strip_default_port},
-};
+use runelink_client::requests;
 use runelink_types::{SignupRequest, UserRef};
 use serde::Serialize;
 use time::OffsetDateTime;
@@ -503,10 +500,10 @@ pub async fn handle_account_commands(
                 account.user_ref.clone()
             };
 
-            let host = strip_default_port(&user_ref.host);
+            // Also accepted with the default port
             let accepted = [
-                format!("{}@{host}", user_ref.name),
-                format!("{}@{}", user_ref.name, pad_host(&host)),
+                user_ref.to_string(),
+                format!("{}@{}", user_ref.name, user_ref.host.authority()),
             ];
             if let Some(confirmation) = &delete_args.dangerously_confirm_delete
             {

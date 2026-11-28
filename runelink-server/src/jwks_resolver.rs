@@ -12,7 +12,6 @@ use crate::{
     error::{ApiError, ApiResult},
     state::AppState,
 };
-use runelink_client::util::get_api_url;
 
 #[derive(Debug, Clone)]
 pub struct CachedJwks {
@@ -174,7 +173,7 @@ pub async fn decode_federation_jwt(
 
     // Verify delegation policy: issuer can only delegate users from their own host
     if let Some(user_ref) = &claims.user_ref {
-        let expected_iss = get_api_url(&user_ref.host, state.config.secure);
+        let expected_iss = user_ref.host.api_url(state.config.secure);
         if claims.iss != expected_iss {
             return Err(ApiError::AuthError(format!(
                 "Federation delegation mismatch: token from {} cannot delegate user from {}",

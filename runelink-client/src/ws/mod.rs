@@ -4,10 +4,14 @@
 //!
 //! ```no_run
 //! use runelink_client::ws::{Connection, ConnectionOptions};
-//! use runelink_types::ws::{ClientWsReply, ClientWsRequest};
+//! use runelink_types::{
+//!     host::Host,
+//!     ws::{ClientWsReply, ClientWsRequest},
+//! };
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let connection = Connection::new(ConnectionOptions::host("localhost"))?;
+//! let host = Host::parse("localhost")?;
+//! let connection = Connection::new(ConnectionOptions::host(host))?;
 //! let mut updates = connection.updates();
 //! tokio::spawn(async move {
 //!     while let Some(update) = updates.recv().await {
@@ -21,7 +25,8 @@
 //! # }
 //! ```
 //!
-//! [`ConnectionOptions::host`] connects to `wss://host:7000/ws/client`. Set
+//! [`ConnectionOptions::host`] connects to the host's
+//! [`client_ws_url`](runelink_types::host::Host::client_ws_url). Set
 //! [`ConnectionOptions::transport_security`] to
 //! [`TransportSecurity::PreferSecure`] to fall back to `ws://` if the secure
 //! socket never opens, or use [`ConnectionOptions::url`] for a websocket URL.
@@ -62,7 +67,7 @@ use runelink_types::{
         SupportedCapabilities, supported_capabilities,
         versions::NEGOTIATION_VERSION,
     },
-    host::canonical_host,
+    host::Host,
     ids::RequestId,
     ws::{
         ClientWsEnvelope, ClientWsReply, ClientWsRequest, ClientWsUpdate,
@@ -89,9 +94,8 @@ use tokio_tungstenite::{
 pub use error::*;
 pub use issues::*;
 
-use crate::{
-    capabilities::{client_websocket, preferred_client_websocket_version},
-    util::get_client_ws_url,
+use crate::capabilities::{
+    client_websocket, preferred_client_websocket_version,
 };
 
 const DEFAULT_RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(1);
@@ -140,7 +144,7 @@ pub enum TransportSecurity {
 pub enum Target {
     /// Connects to the host's client websocket over `wss`, or `ws` as set by
     /// [`ConnectionOptions::transport_security`].
-    Host(String),
+    Host(Host),
     /// Connects to this websocket URL directly.
     Url(String),
 }
@@ -164,8 +168,8 @@ pub struct ConnectionOptions {
 }
 
 impl ConnectionOptions {
-    pub fn host(host: impl Into<String>) -> Self {
-        Self::new(Target::Host(host.into()))
+    pub fn host(host: Host) -> Self {
+        Self::new(Target::Host(host))
     }
 
     pub fn url(url: impl Into<String>) -> Self {
@@ -345,18 +349,12 @@ impl Connection {
             }
         };
         let (url, insecure_url, host) = match options.target {
-            Target::Host(host) => {
-                let host = canonical_host(&host).map_err(|error| {
-                    OptionsError(format!("Invalid host: {error}"))
-                })?;
-                (
-                    get_client_ws_url(&host, true),
-                    (options.transport_security
-                        == TransportSecurity::PreferSecure)
-                        .then(|| get_client_ws_url(&host, false)),
-                    host,
-                )
-            }
+            Target::Host(host) => (
+                host.client_ws_url(true),
+                (options.transport_security == TransportSecurity::PreferSecure)
+                    .then(|| host.client_ws_url(false)),
+                host.to_string(),
+            ),
             Target::Url(url) => {
                 let invalid = |error: &dyn std::fmt::Display| {
                     OptionsError(format!("Invalid websocket URL: {error}"))
@@ -1499,8 +1497,8 @@ mod tests {
         for url in ["ws://localhost", "ws://[::1]:7000", "WSS://a.b:1/ws"] {
             assert!(Connection::new(ConnectionOptions::url(url)).is_ok());
         }
-        assert!(Connection::new(ConnectionOptions::host("localhost")).is_ok());
-        assert!(Connection::new(ConnectionOptions::host("a.b/path")).is_err());
+        let host = Host::parse("localhost").unwrap();
+        assert!(Connection::new(ConnectionOptions::host(host)).is_ok());
         let url = "wss://user:pass@a.b:1/ws?token=secret#x";
         assert_eq!(
             redact(url, url::Url::parse(url).unwrap()),

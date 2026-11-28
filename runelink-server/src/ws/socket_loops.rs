@@ -12,13 +12,12 @@ use axum::{
     response::IntoResponse,
 };
 use futures_util::{SinkExt, StreamExt};
-use runelink_client::util::{get_api_url, host_from_issuer};
 use runelink_types::{
     capability::{
         CapabilityWelcome, NegotiatedCapabilities, negotiate_capabilities,
         supported_capabilities, versions::NEGOTIATION_VERSION,
     },
-    host::canonical_host,
+    host::Host,
     ids::RequestId,
     user::UserRef,
     ws::{ClientWsEnvelope, FederationWsEnvelope, WsError},
@@ -272,13 +271,6 @@ fn parse_error_reply(
     Some((request_id, error.into()))
 }
 
-/// The host named by a federation issuer, which must be that host's exact
-/// canonical API URL.
-fn issuer_host(iss: &str, secure: bool) -> Option<String> {
-    let host = canonical_host(&host_from_issuer(iss)).ok()?;
-    (iss == get_api_url(&host, secure)).then_some(host)
-}
-
 async fn federation_ws_upgrade_loop(
     state: AppState,
     headers: HeaderMap,
@@ -298,7 +290,9 @@ async fn federation_ws_upgrade_loop(
             return;
         }
     };
-    let Some(host) = issuer_host(&auth.claims.iss, state.config.secure) else {
+    // Issuers are the host's exact API URL.
+    let Some(host) = Host::from_api_url(&auth.claims.iss, state.config.secure)
+    else {
         log::warn!(
             "Rejected federation websocket with non-canonical issuer {}",
             auth.claims.iss
@@ -418,7 +412,7 @@ async fn close_axum_protocol_error(socket: &mut WebSocket, reason: &str) {
 }
 
 async fn negotiate_federation_socket(
-    host: &str,
+    host: &Host,
     socket: &mut FederationSocket,
 ) -> Option<NegotiatedCapabilities> {
     let event = tokio::time::timeout(HELLO_TIMEOUT, socket.recv_event()).await;
@@ -518,7 +512,7 @@ pub async fn federation_socket_loop(
                                 log::warn!("Failed to parse federation websocket message: {error}");
                                 if let Some((request_id, error)) = parse_error_reply(&payload, &error) {
                                     let host = state.federation_ws_manager.authenticated_host(conn_id).await;
-                                    let _ = state.federation_ws_manager.send_error(conn_id, host.as_deref(), Some(request_id), error).await;
+                                    let _ = state.federation_ws_manager.send_error(conn_id, host.as_ref(), Some(request_id), error).await;
                                 }
                             }
                         }
@@ -545,29 +539,7 @@ pub async fn federation_socket_loop(
 
 #[cfg(test)]
 mod tests {
-    use super::{hello_rejection, issuer_host, parse_error_reply};
-
-    #[test]
-    fn issuer_host_requires_canonical_issuers() {
-        assert_eq!(
-            issuer_host("http://example.com:7000", false).as_deref(),
-            Some("example.com")
-        );
-        assert_eq!(
-            issuer_host("https://example.com:7001", true).as_deref(),
-            Some("example.com:7001")
-        );
-        for iss in [
-            "http://http://example.com:7000",
-            "http://example.com:7000@evil.com",
-            "http://evil.com:7000/path",
-            "http://example.com:7000/",
-            "http://Example.com:7000",
-        ] {
-            assert_eq!(issuer_host(iss, false), None, "{iss}");
-        }
-        assert_eq!(issuer_host("http://example.com:7000", true), None);
-    }
+    use super::{hello_rejection, parse_error_reply};
 
     #[tokio::test]
     async fn client_and_federation_welcomes_resolve_every_offer() {
@@ -580,7 +552,8 @@ mod tests {
                         upgrade.on_upgrade(move |mut socket| async move {
                             if federation {
                                 super::negotiate_federation_socket(
-                                    "test",
+                                    &runelink_types::host::Host::parse("test")
+                                        .unwrap(),
                                     &mut super::FederationSocket::Inbound(
                                         Box::new(socket),
                                     ),

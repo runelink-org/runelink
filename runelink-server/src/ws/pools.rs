@@ -19,7 +19,7 @@ use tokio::sync::{RwLock, mpsc};
 
 use runelink_types::host::Host;
 
-use crate::{config::canonical_host, ids::ConnId};
+use crate::ids::ConnId;
 
 /// Tracks active client websocket connections and provides safe send helpers.
 #[derive(Clone, Debug, Default)]
@@ -297,9 +297,7 @@ pub enum HostSend {
 /// Tracks active federation websocket connections and provides safe send
 /// helpers.
 ///
-/// Each host has one connection that messages to it are sent on, keyed by its
-/// canonical host name so that every way of spelling a host finds the same
-/// connection. Two hosts may connect to each other at once, so a host can have
+/// Each host has one connection that messages to it are sent on. Two hosts may connect to each other at once, so a host can have
 /// other connections too, which stay open and are read. The most recently
 /// authenticated connection sends: a host only connects again once it has
 /// lost its connection, which may not have closed on this side yet. When the
@@ -317,7 +315,7 @@ pub struct FederationWsPool {
 #[derive(Debug, Default)]
 struct FederationPoolState {
     connections: HashMap<ConnId, FederationConn>,
-    by_host: HashMap<String, ConnId>,
+    by_host: HashMap<Host, ConnId>,
     /// Counts authentications, to order connections by when they
     /// authenticated.
     authentications: u64,
@@ -325,8 +323,8 @@ struct FederationPoolState {
 
 impl FederationPoolState {
     /// The connection that a host is sent messages on, if any.
-    fn host_conn(&self, host: &str) -> Option<ConnId> {
-        self.by_host.get(&canonical_host(host).ok()?).copied()
+    fn host_conn(&self, host: &Host) -> Option<ConnId> {
+        self.by_host.get(host).copied()
     }
 }
 
@@ -371,25 +369,22 @@ impl FederationWsPool {
     pub async fn authenticate_connection(
         &self,
         conn_id: ConnId,
-        host: String,
+        host: Host,
         issuer: String,
     ) -> bool {
-        let Ok(host) = Host::parse(&host) else {
-            return false;
-        };
         let mut state = self.inner.write().await;
         let previous_host_for_conn = match state.connections.get(&conn_id) {
             Some(conn) => conn.host.clone(),
             None => return false,
         };
 
-        if let Some(previous_host) = previous_host_for_conn.as_deref() {
+        if let Some(previous_host) = &previous_host_for_conn {
             Self::release_host(&mut state, previous_host, conn_id);
         }
 
         state.authentications += 1;
         let authenticated = state.authentications;
-        state.by_host.insert(host.to_string(), conn_id);
+        state.by_host.insert(host.clone(), conn_id);
         if let Some(conn) = state.connections.get_mut(&conn_id) {
             conn.host = Some(host);
             conn.issuer = Some(issuer);
@@ -410,7 +405,7 @@ impl FederationWsPool {
     pub async fn send_response(
         &self,
         conn_id: ConnId,
-        host: Option<&str>,
+        host: Option<&Host>,
         envelope: FederationWsEnvelope,
     ) -> bool {
         let target = {
@@ -469,7 +464,7 @@ impl FederationWsPool {
     }
 
     /// Returns whether the given host currently has an authenticated connection.
-    pub async fn has_host(&self, host: &str) -> bool {
+    pub async fn has_host(&self, host: &Host) -> bool {
         let state = self.inner.read().await;
         let Some(conn_id) = state.host_conn(host) else {
             return false;
@@ -479,7 +474,7 @@ impl FederationWsPool {
 
     pub async fn host_supports_capability(
         &self,
-        host: &str,
+        host: &Host,
         capability: &VersionedCapability,
     ) -> bool {
         let state = self.inner.read().await;
@@ -496,7 +491,7 @@ impl FederationWsPool {
     /// the next one while that has closed.
     pub async fn send_to_host(
         &self,
-        host: &str,
+        host: &Host,
         mut envelope: FederationWsEnvelope,
     ) -> HostSend {
         loop {
@@ -549,7 +544,7 @@ impl FederationWsPool {
     /// recently authenticated other connection if it has one.
     fn release_host(
         state: &mut FederationPoolState,
-        host: &str,
+        host: &Host,
         conn_id: ConnId,
     ) {
         if state.by_host.get(host) != Some(&conn_id) {
@@ -559,12 +554,12 @@ impl FederationWsPool {
             .connections
             .iter()
             .filter(|(id, conn)| {
-                **id != conn_id && conn.host.as_deref() == Some(host)
+                **id != conn_id && conn.host.as_ref() == Some(host)
             })
             .max_by_key(|(_, conn)| conn.authenticated)
             .map(|(id, _)| *id);
         match next {
-            Some(next) => state.by_host.insert(host.to_owned(), next),
+            Some(next) => state.by_host.insert(host.clone(), next),
             None => state.by_host.remove(host),
         };
     }
@@ -649,12 +644,14 @@ mod tests {
 
     use super::{ClientWsPool, FederationWsPool, HostSend};
     use crate::ids::ConnId;
+    use runelink_types::host::Host;
 
     #[tokio::test]
-    async fn federation_connections_share_one_canonical_host() {
+    async fn newer_federation_connections_send_for_their_host() {
         let pool = FederationWsPool::new();
+        let host = Host::parse("example.com").unwrap();
         let mut connections = Vec::new();
-        for spelling in ["Example.com:7000", "example.com"] {
+        for _ in 0..2 {
             let (sender, receiver) = mpsc::unbounded_channel();
             let conn_id = ConnId::new();
             pool.register_connection(conn_id, sender, BTreeMap::new())
@@ -662,7 +659,7 @@ mod tests {
             assert!(
                 pool.authenticate_connection(
                     conn_id,
-                    spelling.into(),
+                    host.clone(),
                     "issuer".into()
                 )
                 .await
@@ -671,10 +668,9 @@ mod tests {
         }
         let (older, older_receiver) = &connections[0];
         let (newer, _) = &connections[1];
-        let sending = || async {
-            pool.inner.read().await.by_host.get("example.com").copied()
-        };
-        assert!(pool.has_host("example.com:7000").await);
+        let sending =
+            || async { pool.inner.read().await.by_host.get(&host).copied() };
+        assert!(pool.has_host(&host).await);
         assert_eq!(sending().await, Some(*newer));
         // The older connection stays open.
         assert!(!older_receiver.is_closed());
@@ -682,12 +678,13 @@ mod tests {
         pool.deregister_connection(*newer).await;
         assert_eq!(sending().await, Some(*older));
         pool.deregister_connection(*older).await;
-        assert!(!pool.has_host("example.com").await);
+        assert!(!pool.has_host(&host).await);
     }
 
     #[tokio::test]
     async fn federation_sends_skip_closed_connections() {
         let pool = FederationWsPool::new();
+        let host = Host::parse("example.com").unwrap();
         let mut receivers = Vec::new();
         for _ in 0..2 {
             let (sender, receiver) = mpsc::unbounded_channel();
@@ -696,7 +693,7 @@ mod tests {
                 .await;
             pool.authenticate_connection(
                 conn_id,
-                "example.com".into(),
+                host.clone(),
                 "issuer".into(),
             )
             .await;
@@ -714,16 +711,16 @@ mod tests {
         // The newer connection sends, but has closed.
         drop(receivers.pop());
         assert_eq!(
-            pool.send_to_host("example.com", envelope.clone()).await,
+            pool.send_to_host(&host, envelope.clone()).await,
             HostSend::Sent
         );
         assert_eq!(receivers[0].try_recv(), Ok(envelope.clone()));
         drop(receivers.pop());
         assert_eq!(
-            pool.send_to_host("example.com", envelope).await,
+            pool.send_to_host(&host, envelope).await,
             HostSend::NotConnected
         );
-        assert!(!pool.has_host("example.com").await);
+        assert!(!pool.has_host(&host).await);
     }
 
     #[tokio::test]

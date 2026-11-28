@@ -1,8 +1,9 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use runelink_client::util::get_api_url;
-use runelink_client::validation::validate_config_host;
-use runelink_types::{host::Host, ids::ResourceRef};
+use runelink_types::{
+    host::{DEFAULT_PORT, Host},
+    ids::ResourceRef,
+};
 use serde::Deserialize;
 
 pub type ConfigResult<T> = std::result::Result<T, ConfigError>;
@@ -52,10 +53,8 @@ pub enum ConfigError {
 
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
-    pub public_host_raw: String,
     host: Host,
     pub database_url: String,
-    pub public_port: u16,
     pub bind_host: String,
     pub bind_port: u16,
     pub secure: bool,
@@ -82,7 +81,7 @@ impl ServerConfig {
     }
 
     /// This host, as resources and peers name it: with its port, unless it
-    /// is the default port (7000).
+    /// is the default port.
     pub fn public_host(&self) -> &Host {
         &self.host
     }
@@ -91,10 +90,8 @@ impl ServerConfig {
     #[cfg(test)]
     pub fn for_test(database_url: String) -> Self {
         Self {
-            public_host_raw: "localhost".into(),
             host: Host::parse("localhost").unwrap(),
             database_url,
-            public_port: 7000,
             bind_host: "127.0.0.1".into(),
             bind_port: 7000,
             secure: false,
@@ -107,33 +104,12 @@ impl ServerConfig {
         ResourceRef::new(self.host.clone(), id)
     }
 
-    /// Always includes port for machine-to-machine communication
-    pub fn public_host_with_explicit_port(&self) -> String {
-        format!("{}:{}", self.public_host_raw, self.public_port)
-    }
-
     pub fn api_url(&self) -> String {
-        get_api_url(self.public_host_with_explicit_port().as_str(), self.secure)
+        self.host.api_url(self.secure)
     }
 
     pub fn bind_addr(&self) -> String {
         format!("{}:{}", self.bind_host, self.bind_port)
-    }
-
-    #[allow(dead_code)]
-    pub fn client_ws_url(&self) -> String {
-        runelink_client::util::get_client_ws_url(
-            self.public_host_with_explicit_port().as_str(),
-            self.secure,
-        )
-    }
-
-    #[allow(dead_code)]
-    pub fn federation_ws_url(&self) -> String {
-        runelink_client::util::get_federation_ws_url(
-            self.public_host_with_explicit_port().as_str(),
-            self.secure,
-        )
     }
 
     /// Whether a host is this host or a remote one.
@@ -167,8 +143,6 @@ impl Locality<'_> {
     }
 }
 
-pub use runelink_types::host::canonical_host;
-
 #[derive(Deserialize, Debug)]
 struct RootConfig {
     #[serde(default)]
@@ -193,11 +167,15 @@ impl RawServerConfig {
     fn resolve(self, index: usize) -> ConfigResult<ServerConfig> {
         let invalid =
             |reason: String| ConfigError::InvalidServerEntry { index, reason };
-        let public_host = validate_config_host(&self.public_host)
-            .map_err(|error| invalid(error.to_string()))?;
-        // In the spelling that hosts in requests are canonicalized to.
-        let public_host = canonical_host(&public_host)
-            .map_err(|error| invalid(error.to_string()))?;
+        let public_host = self.public_host.trim();
+        // An IPv6 address has colons inside its brackets.
+        let (_, after_address) =
+            public_host.rsplit_once(']').unwrap_or(("", public_host));
+        if after_address.contains(':') {
+            return Err(invalid(
+                "public_host must not include a port; set public_port".into(),
+            ));
+        }
         let host = Host::parse(&format!("{public_host}:{}", self.public_port))
             .map_err(|error| invalid(error.to_string()))?;
         let database_url = self.database_url.trim().to_string();
@@ -219,10 +197,8 @@ impl RawServerConfig {
             .key_dir
             .unwrap_or_else(|| default_key_dir(self.public_port));
         Ok(ServerConfig {
-            public_host_raw: public_host,
             host,
             database_url,
-            public_port: self.public_port,
             bind_host,
             bind_port,
             secure: self.secure,
@@ -232,7 +208,7 @@ impl RawServerConfig {
 }
 
 fn default_public_port() -> u16 {
-    7000
+    DEFAULT_PORT
 }
 
 fn default_secure() -> bool {
@@ -250,16 +226,15 @@ fn default_key_dir(port: u16) -> PathBuf {
 }
 
 fn validate_unique_resources(configs: &[ServerConfig]) -> ConfigResult<()> {
-    let mut index_by_public_addr = HashMap::<String, usize>::new();
+    let mut index_by_public_host = HashMap::<&Host, usize>::new();
     let mut index_by_bind_addr = HashMap::<String, usize>::new();
     let mut index_by_database_url = HashMap::<String, usize>::new();
     for (index, config) in configs.iter().enumerate() {
-        let public_address = config.public_host_with_explicit_port();
         if let Some(first_index) =
-            index_by_public_addr.insert(public_address.clone(), index)
+            index_by_public_host.insert(config.public_host(), index)
         {
             return Err(ConfigError::DuplicatePublicAddress {
-                public_address,
+                public_address: config.public_host().to_string(),
                 first_index,
                 second_index: index,
             });
