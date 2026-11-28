@@ -11,11 +11,7 @@ use runelink_types::{
 use super::federation;
 
 use crate::{
-    auth::Session,
-    config::Locality,
-    error::{ApiError, ApiResult},
-    queries,
-    state::AppState,
+    auth::Session, config::Locality, error::ApiResult, queries, state::AppState,
 };
 
 /// Create a new channel in a server.
@@ -36,30 +32,16 @@ pub async fn create(
                 )
                 .await
         }
-        Locality::Remote(host) => {
-            let user_ref = session.user_ref.clone().ok_or_else(|| {
-                ApiError::Internal(
-                    "User reference required for federated channel creation"
-                        .to_string(),
-                )
-            })?;
-            let reply = federation::request(
-                state,
-                host,
-                Some(user_ref),
-                FederationWsRequest::ChannelsCreate {
-                    server_id: server_ref.id,
-                    new_channel: new_channel.clone(),
-                },
-            )
-            .await?;
-            let FederationWsReply::ChannelsCreate(channel) = reply else {
-                return Err(ApiError::Internal(format!(
-                    "Unexpected federation reply from {host} for channels.create"
-                )));
-            };
-            Ok(channel)
-        }
+        Locality::Remote(host) => federation::request!(
+            state,
+            host,
+            Some(session),
+            FederationWsRequest::ChannelsCreate {
+                server_id: server_ref.id,
+                new_channel: new_channel.clone(),
+            },
+            FederationWsReply::ChannelsCreate(channel) => channel
+        ),
     }
 }
 
@@ -79,27 +61,13 @@ pub async fn get_all(
             .await?;
             Ok(channels)
         }
-        Locality::Remote(host) => {
-            let user_ref = session.user_ref.clone().ok_or_else(|| {
-                ApiError::Internal(
-                    "User reference required for federated channel fetching"
-                        .to_string(),
-                )
-            })?;
-            let reply = federation::request(
-                state,
-                host,
-                Some(user_ref),
-                FederationWsRequest::ChannelsGetAll,
-            )
-            .await?;
-            let FederationWsReply::ChannelsGetAll(channels) = reply else {
-                return Err(ApiError::Internal(format!(
-                    "Unexpected federation reply from {host} for channels.get_all"
-                )));
-            };
-            Ok(channels)
-        }
+        Locality::Remote(host) => federation::request!(
+            state,
+            host,
+            Some(session),
+            FederationWsRequest::ChannelsGetAll,
+            FederationWsReply::ChannelsGetAll(channels) => channels
+        ),
     }
 }
 
@@ -118,29 +86,15 @@ pub async fn get_by_server(
             )
             .await
         }
-        Locality::Remote(host) => {
-            let user_ref = session.user_ref.clone().ok_or_else(|| {
-                ApiError::Internal(
-                    "User reference required for federated channel fetching"
-                        .to_string(),
-                )
-            })?;
-            let reply = federation::request(
-                state,
-                host,
-                Some(user_ref),
-                FederationWsRequest::ChannelsGetByServer {
-                    server_id: server_ref.id,
-                },
-            )
-            .await?;
-            let FederationWsReply::ChannelsGetByServer(channels) = reply else {
-                return Err(ApiError::Internal(format!(
-                    "Unexpected federation reply from {host} for channels.get_by_server"
-                )));
-            };
-            Ok(channels)
-        }
+        Locality::Remote(host) => federation::request!(
+            state,
+            host,
+            Some(session),
+            FederationWsRequest::ChannelsGetByServer {
+                server_id: server_ref.id,
+            },
+            FederationWsReply::ChannelsGetByServer(channels) => channels
+        ),
     }
 }
 
@@ -159,29 +113,15 @@ pub async fn get_by_id(
             )
             .await
         }
-        Locality::Remote(host) => {
-            let user_ref = session.user_ref.clone().ok_or_else(|| {
-                ApiError::Internal(
-                    "User reference required for federated channel fetching"
-                        .to_string(),
-                )
-            })?;
-            let reply = federation::request(
-                state,
-                host,
-                Some(user_ref),
-                FederationWsRequest::ChannelsGetById {
-                    channel_id: channel_ref.id,
-                },
-            )
-            .await?;
-            let FederationWsReply::ChannelsGetById(channel) = reply else {
-                return Err(ApiError::Internal(format!(
-                    "Unexpected federation reply from {host} for channels.get_by_id"
-                )));
-            };
-            Ok(channel)
-        }
+        Locality::Remote(host) => federation::request!(
+            state,
+            host,
+            Some(session),
+            FederationWsRequest::ChannelsGetById {
+                channel_id: channel_ref.id,
+            },
+            FederationWsReply::ChannelsGetById(channel) => channel
+        ),
     }
 }
 
@@ -207,29 +147,15 @@ pub async fn delete(
                 )
                 .await
         }
-        Locality::Remote(host) => {
-            let user_ref = session.user_ref.clone().ok_or_else(|| {
-                ApiError::Internal(
-                    "User reference required for federated channel deletion"
-                        .to_string(),
-                )
-            })?;
-            let reply = federation::request(
-                state,
-                host,
-                Some(user_ref),
-                FederationWsRequest::ChannelsDelete {
-                    channel_id: channel_ref.id,
-                },
-            )
-            .await?;
-            let FederationWsReply::ChannelsDelete = reply else {
-                return Err(ApiError::Internal(format!(
-                    "Unexpected federation reply from {host} for channels.delete"
-                )));
-            };
-            Ok(())
-        }
+        Locality::Remote(host) => federation::request!(
+            state,
+            host,
+            Some(session),
+            FederationWsRequest::ChannelsDelete {
+                channel_id: channel_ref.id,
+            },
+            FederationWsReply::ChannelsDelete => ()
+        ),
     }
 }
 
@@ -259,30 +185,16 @@ pub async fn move_channel(
                 )
                 .await
         }
-        Locality::Remote(host) => {
-            let user_ref = session.user_ref.clone().ok_or_else(|| {
-                ApiError::Internal(
-                    "User reference required for federated channel moves"
-                        .to_string(),
-                )
-            })?;
-            let reply = federation::request(
-                state,
-                host,
-                Some(user_ref),
-                FederationWsRequest::ChannelsMove {
-                    channel_id: channel_ref.id,
-                    channel_move: channel_move.clone(),
-                },
-            )
-            .await?;
-            let FederationWsReply::ChannelsMove(channels) = reply else {
-                return Err(ApiError::Internal(format!(
-                    "Unexpected federation reply from {host} for channels.move"
-                )));
-            };
-            Ok(channels)
-        }
+        Locality::Remote(host) => federation::request!(
+            state,
+            host,
+            Some(session),
+            FederationWsRequest::ChannelsMove {
+                channel_id: channel_ref.id,
+                channel_move: channel_move.clone(),
+            },
+            FederationWsReply::ChannelsMove(channels) => channels
+        ),
     }
 }
 
@@ -406,23 +318,16 @@ pub async fn update(
     channel_update: &runelink_types::channel::ServerChannelUpdate,
 ) -> ApiResult<ServerChannel> {
     if let Locality::Remote(host) = state.config.locality(&channel_ref.host) {
-        let user_ref = session.user_ref.clone().ok_or_else(|| {
-            ApiError::AuthError("User identity required".into())
-        })?;
-        let reply = federation::request(
+        return federation::request!(
             state,
             host,
-            Some(user_ref),
+            Some(session),
             FederationWsRequest::ChannelsUpdate {
                 channel_id: channel_ref.id,
                 channel_update: channel_update.clone(),
             },
-        )
-        .await?;
-        let FederationWsReply::ChannelsUpdate(resource) = reply else {
-            return Err(ApiError::Internal("Unexpected edit reply".into()));
-        };
-        return Ok(resource);
+            FederationWsReply::ChannelsUpdate(channel) => channel
+        );
     }
     let server_id =
         queries::channels::get_server_id(&*state.db_pool, channel_ref.id)
