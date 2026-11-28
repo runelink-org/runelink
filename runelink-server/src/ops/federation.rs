@@ -22,8 +22,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 ///     state,
 ///     host,
 ///     Some(session),
-///     FederationWsRequest::ServersGetById { server_id },
-///     FederationWsReply::ServersGetById(server) => server
+///     FederationWsRequest::ServersDelete { server_id },
+///     FederationWsReply::ServersDelete => ()
 /// )
 /// ```
 macro_rules! request {
@@ -40,7 +40,8 @@ macro_rules! request {
         {
             Ok($reply) => Ok($value),
             Ok(_) => Err($crate::error::ApiError::Internal(format!(
-                "Unexpected federation reply from {host}"
+                "Unexpected federation reply from {host}, expected {}",
+                stringify!($reply)
             ))),
             Err(error) => Err(error),
         }

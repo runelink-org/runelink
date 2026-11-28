@@ -163,6 +163,7 @@ pub async fn delete(
     server_ref: &ServerRef,
     user_ref: UserRef,
 ) -> ApiResult<()> {
+    // For local servers too, whose actor needs to know who is leaving
     if session.user_ref.is_none() {
         return Err(ApiError::AuthError(
             "User reference required for leaving server".into(),
