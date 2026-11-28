@@ -128,9 +128,17 @@ impl From<ApiError> for WsError {
             | ApiError::Unknown(_)
             | ApiError::Client(_) => "internal_error",
         };
+        // The code already names the kind of error, which a peer adds back
+        // when it passes the error on.
+        let message = match error {
+            ApiError::AuthError(message)
+            | ApiError::BadRequest(message)
+            | ApiError::Conflict(message) => message,
+            error => error.to_string(),
+        };
         WsError {
             code: code.to_string(),
-            message: error.to_string(),
+            message,
             details: None,
         }
     }
