@@ -40,28 +40,17 @@ pub async fn upsert(
         }
         let user =
             users::get_by_ref(state, new_membership.user_ref.clone()).await?;
-        let session_user_ref = session.user_ref.clone().ok_or_else(|| {
-            ApiError::AuthError(
-                "User reference required for remote memberships".into(),
-            )
-        })?;
-        let reply = federation::request(
+        // The peer's update for this change, which arrived before the reply,
+        // is what caches it here.
+        return federation::request!(
             state,
             host,
-            Some(session_user_ref),
+            Some(&*session),
             FederationWsRequest::MembershipsUpsert {
                 new_membership: new_membership.clone().as_full(user),
             },
-        )
-        .await?;
-        let FederationWsReply::MembershipsUpsert(membership) = reply else {
-            return Err(ApiError::Internal(format!(
-                "Unexpected federation reply from {host} for memberships.upsert"
-            )));
-        };
-        // The peer's update for this change, which arrived before the reply,
-        // is what caches it here.
-        return Ok(membership);
+            FederationWsReply::MembershipsUpsert(membership) => membership
+        );
     }
 
     // Fetching a remote user waits on the network, so it stays out of the actor.
@@ -115,26 +104,15 @@ pub async fn get_members_by_server(
             .await?;
             Ok(members)
         }
-        Locality::Remote(host) => {
-            // Fetch from remote host (public endpoint, no auth needed)
-            let reply = federation::request(
-                state,
-                host,
-                None,
-                FederationWsRequest::MembershipsGetMembersByServer {
-                    server_id: server_ref.id,
-                },
-            )
-            .await?;
-            let FederationWsReply::MembershipsGetMembersByServer(members) =
-                reply
-            else {
-                return Err(ApiError::Internal(format!(
-                    "Unexpected federation reply from {host} for memberships.get_members_by_server"
-                )));
-            };
-            Ok(members)
-        }
+        Locality::Remote(host) => federation::request!(
+            state,
+            host,
+            None,
+            FederationWsRequest::MembershipsGetMembersByServer {
+                server_id: server_ref.id,
+            },
+            FederationWsReply::MembershipsGetMembersByServer(members) => members
+        ),
     }
 }
 
@@ -155,27 +133,16 @@ pub async fn get_member_by_user_and_server(
                 .await?;
             Ok(member)
         }
-        Locality::Remote(host) => {
-            // Fetch from remote host (public endpoint, no auth needed)
-            let reply = federation::request(
-                state,
-                host,
-                None,
-                FederationWsRequest::MembershipsGetByUserAndServer {
-                    server_id: server_ref.id,
-                    user_ref,
-                },
-            )
-            .await?;
-            let FederationWsReply::MembershipsGetByUserAndServer(member) =
-                reply
-            else {
-                return Err(ApiError::Internal(format!(
-                    "Unexpected federation reply from {host} for memberships.get_by_user_and_server"
-                )));
-            };
-            Ok(member)
-        }
+        Locality::Remote(host) => federation::request!(
+            state,
+            host,
+            None,
+            FederationWsRequest::MembershipsGetByUserAndServer {
+                server_id: server_ref.id,
+                user_ref,
+            },
+            FederationWsReply::MembershipsGetByUserAndServer(member) => member
+        ),
     }
 }
 
@@ -196,9 +163,11 @@ pub async fn delete(
     server_ref: &ServerRef,
     user_ref: UserRef,
 ) -> ApiResult<()> {
-    let session_user_ref = session.user_ref.clone().ok_or_else(|| {
-        ApiError::AuthError("User reference required for leaving server".into())
-    })?;
+    if session.user_ref.is_none() {
+        return Err(ApiError::AuthError(
+            "User reference required for leaving server".into(),
+        ));
+    }
 
     match state.config.locality(&server_ref.host) {
         Locality::Local => {
@@ -211,25 +180,17 @@ pub async fn delete(
                 )
                 .await
         }
-        Locality::Remote(host) => {
-            let reply = federation::request(
-                state,
-                host,
-                Some(session_user_ref),
-                FederationWsRequest::MembershipsDelete {
-                    server_id: server_ref.id,
-                    user_ref: user_ref.clone(),
-                },
-            )
-            .await?;
-            let FederationWsReply::MembershipsDelete = reply else {
-                return Err(ApiError::Internal(format!(
-                    "Unexpected federation reply from {host} for memberships.delete"
-                )));
-            };
-            // The peer's update for this change removes it from the cache.
-            Ok(())
-        }
+        // The peer's update for this change removes it from the cache.
+        Locality::Remote(host) => federation::request!(
+            state,
+            host,
+            Some(&*session),
+            FederationWsRequest::MembershipsDelete {
+                server_id: server_ref.id,
+                user_ref,
+            },
+            FederationWsReply::MembershipsDelete => ()
+        ),
     }
 }
 

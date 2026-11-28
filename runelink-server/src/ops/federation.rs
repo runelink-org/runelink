@@ -2,11 +2,11 @@ use std::time::Duration;
 
 use runelink_types::{
     host::Host,
-    user::UserRef,
     ws::{FederationWsReply, FederationWsRequest},
 };
 
 use crate::{
+    auth::Session,
     error::{ApiError, ApiResult},
     state::AppState,
 };
@@ -14,14 +14,57 @@ use crate::{
 // Leave room for the peer's database acquisition timeout and query execution.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Send a request to a peer host and take the value out of the reply it
+/// expects, on behalf of the session's user if there is a session:
+///
+/// ```ignore
+/// federation::request!(
+///     state,
+///     host,
+///     Some(session),
+///     FederationWsRequest::ServersGetById { server_id },
+///     FederationWsReply::ServersGetById(server) => server
+/// )
+/// ```
+macro_rules! request {
+    (
+        $state:expr,
+        $host:expr,
+        $session:expr,
+        $request:expr,
+        $reply:pat => $value:expr $(,)?
+    ) => {{
+        let host = $host;
+        match $crate::ops::federation::send($state, host, $session, $request)
+            .await
+        {
+            Ok($reply) => Ok($value),
+            Ok(_) => Err($crate::error::ApiError::Internal(format!(
+                "Unexpected federation reply from {host}"
+            ))),
+            Err(error) => Err(error),
+        }
+    }};
+}
+pub(super) use request;
+
 /// Send a request to a peer host, which may only reply with its own
-/// resources.
-pub(super) async fn request(
+/// resources. Use [`request!`] to take the expected reply.
+pub(super) async fn send(
     state: &AppState,
     host: &Host,
-    delegated_user_ref: Option<UserRef>,
+    session: Option<&Session>,
     request: FederationWsRequest,
 ) -> ApiResult<FederationWsReply> {
+    let delegated_user_ref = session
+        .map(|session| {
+            session.user_ref.clone().ok_or_else(|| {
+                ApiError::Internal(
+                    "User reference required for federated requests".into(),
+                )
+            })
+        })
+        .transpose()?;
     let request_future =
         Box::pin(state.federation_ws_manager.send_request_to_host(
             state,

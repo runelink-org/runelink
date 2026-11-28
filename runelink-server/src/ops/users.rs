@@ -46,21 +46,13 @@ pub async fn get_all(
             let users = queries::users::get_all(&state.db_pool).await?;
             Ok(users)
         }
-        Locality::Remote(host) => {
-            let reply = federation::request(
-                state,
-                host,
-                None,
-                FederationWsRequest::UsersGetAll,
-            )
-            .await?;
-            let FederationWsReply::UsersGetAll(users) = reply else {
-                return Err(ApiError::Internal(format!(
-                    "Unexpected federation reply from {host} for users.get_all"
-                )));
-            };
-            Ok(users)
-        }
+        Locality::Remote(host) => federation::request!(
+            state,
+            host,
+            None,
+            FederationWsRequest::UsersGetAll,
+            FederationWsReply::UsersGetAll(users) => users
+        ),
     }
 }
 
@@ -75,19 +67,13 @@ pub async fn get_by_ref(
         Ok(user)
     } else {
         let host = user_ref.host.clone();
-        let reply = federation::request(
+        federation::request!(
             state,
             &host,
             None,
             FederationWsRequest::UsersGetByRef { user_ref },
+            FederationWsReply::UsersGetByRef(user) => user
         )
-        .await?;
-        let FederationWsReply::UsersGetByRef(user) = reply else {
-            return Err(ApiError::Internal(format!(
-                "Unexpected federation reply from {host} for users.get_by_ref"
-            )));
-        };
-        Ok(user)
     }
 }
 
@@ -142,22 +128,13 @@ pub async fn get_associated_hosts(
                     .await?;
             Ok(hosts)
         }
-        Locality::Remote(host) => {
-            let reply = federation::request(
-                state,
-                host,
-                None,
-                FederationWsRequest::UsersGetAssociatedHosts { user_ref },
-            )
-            .await?;
-            let FederationWsReply::UsersGetAssociatedHosts(hosts) = reply
-            else {
-                return Err(ApiError::Internal(format!(
-                    "Unexpected federation reply from {host} for users.get_associated_hosts"
-                )));
-            };
-            Ok(hosts)
-        }
+        Locality::Remote(host) => federation::request!(
+            state,
+            host,
+            None,
+            FederationWsRequest::UsersGetAssociatedHosts { user_ref },
+            FederationWsReply::UsersGetAssociatedHosts(hosts) => hosts
+        ),
     }
 }
 

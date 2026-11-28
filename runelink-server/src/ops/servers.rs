@@ -39,29 +39,15 @@ pub async fn create(
                 )
                 .await
         }
-        Locality::Remote(host) => {
-            let user_ref = session.user_ref.clone().ok_or_else(|| {
-                ApiError::Internal(
-                    "User reference required for federated server creation"
-                        .to_string(),
-                )
-            })?;
-            let reply = federation::request(
-                state,
-                host,
-                Some(user_ref.clone()),
-                FederationWsRequest::ServersCreate(new_server.clone()),
-            )
-            .await?;
-            let FederationWsReply::ServersCreate(server) = reply else {
-                return Err(ApiError::Internal(format!(
-                    "Unexpected federation reply from {host} for servers.create"
-                )));
-            };
-            // The peer's updates for the server and its creator's membership
-            // cache them here.
-            Ok(server)
-        }
+        // The peer's updates for the server and its creator's membership
+        // cache them here.
+        Locality::Remote(host) => federation::request!(
+            state,
+            host,
+            Some(session),
+            FederationWsRequest::ServersCreate(new_server.clone()),
+            FederationWsReply::ServersCreate(server) => server
+        ),
     }
 }
 
@@ -78,22 +64,13 @@ pub async fn get_all(
                     .await?;
             Ok(servers)
         }
-        Locality::Remote(host) => {
-            // Fetch from remote host
-            let reply = federation::request(
-                state,
-                host,
-                None,
-                FederationWsRequest::ServersGetAll,
-            )
-            .await?;
-            let FederationWsReply::ServersGetAll(servers) = reply else {
-                return Err(ApiError::Internal(format!(
-                    "Unexpected federation reply from {host} for servers.get_all"
-                )));
-            };
-            Ok(servers)
-        }
+        Locality::Remote(host) => federation::request!(
+            state,
+            host,
+            None,
+            FederationWsRequest::ServersGetAll,
+            FederationWsReply::ServersGetAll(servers) => servers
+        ),
     }
 }
 
@@ -113,24 +90,15 @@ pub async fn get_by_id(
             .await?;
             Ok(server)
         }
-        Locality::Remote(host) => {
-            // Fetch from remote host
-            let reply = federation::request(
-                state,
-                host,
-                None,
-                FederationWsRequest::ServersGetById {
-                    server_id: server_ref.id,
-                },
-            )
-            .await?;
-            let FederationWsReply::ServersGetById(server) = reply else {
-                return Err(ApiError::Internal(format!(
-                    "Unexpected federation reply from {host} for servers.get_by_id"
-                )));
-            };
-            Ok(server)
-        }
+        Locality::Remote(host) => federation::request!(
+            state,
+            host,
+            None,
+            FederationWsRequest::ServersGetById {
+                server_id: server_ref.id,
+            },
+            FederationWsReply::ServersGetById(server) => server
+        ),
     }
 }
 
@@ -158,31 +126,16 @@ pub async fn get_with_channels(
             .await?;
             Ok(ServerWithChannels { server, channels })
         }
-        Locality::Remote(host) => {
-            let user_ref = session.user_ref.clone().ok_or_else(|| {
-                ApiError::Internal(
-                    "User reference required for federated server fetching"
-                        .to_string(),
-                )
-            })?;
-            let reply = federation::request(
-                state,
-                host,
-                Some(user_ref),
-                FederationWsRequest::ServersGetWithChannels {
-                    server_id: server_ref.id,
-                },
-            )
-            .await?;
-            let FederationWsReply::ServersGetWithChannels(server_with_channels) =
-                reply
-            else {
-                return Err(ApiError::Internal(format!(
-                    "Unexpected federation reply from {host} for servers.get_with_channels"
-                )));
-            };
-            Ok(server_with_channels)
-        }
+        Locality::Remote(host) => federation::request!(
+            state,
+            host,
+            Some(session),
+            FederationWsRequest::ServersGetWithChannels {
+                server_id: server_ref.id,
+            },
+            FederationWsReply::ServersGetWithChannels(server_with_channels) =>
+                server_with_channels
+        ),
     }
 }
 
@@ -199,29 +152,15 @@ pub async fn delete(
                 .delete_server(server_ref.id, session.authorization())
                 .await
         }
-        Locality::Remote(host) => {
-            let user_ref = session.user_ref.clone().ok_or_else(|| {
-                ApiError::Internal(
-                    "User reference required for federated server deletion"
-                        .to_string(),
-                )
-            })?;
-            let reply = federation::request(
-                state,
-                host,
-                Some(user_ref),
-                FederationWsRequest::ServersDelete {
-                    server_id: server_ref.id,
-                },
-            )
-            .await?;
-            let FederationWsReply::ServersDelete = reply else {
-                return Err(ApiError::Internal(format!(
-                    "Unexpected federation reply from {host} for servers.delete"
-                )));
-            };
-            Ok(())
-        }
+        Locality::Remote(host) => federation::request!(
+            state,
+            host,
+            Some(session),
+            FederationWsRequest::ServersDelete {
+                server_id: server_ref.id,
+            },
+            FederationWsReply::ServersDelete => ()
+        ),
     }
 }
 
@@ -280,23 +219,16 @@ pub async fn update(
     server_update: &runelink_types::server::ServerUpdate,
 ) -> ApiResult<Server> {
     if let Locality::Remote(host) = state.config.locality(&server_ref.host) {
-        let user_ref = session.user_ref.clone().ok_or_else(|| {
-            ApiError::AuthError("User identity required".into())
-        })?;
-        let reply = federation::request(
+        return federation::request!(
             state,
             host,
-            Some(user_ref),
+            Some(session),
             FederationWsRequest::ServersUpdate {
                 server_id: server_ref.id,
                 server_update: server_update.clone(),
             },
-        )
-        .await?;
-        let FederationWsReply::ServersUpdate(resource) = reply else {
-            return Err(ApiError::Internal("Unexpected edit reply".into()));
-        };
-        return Ok(resource);
+            FederationWsReply::ServersUpdate(server) => server
+        );
     }
     state
         .actors
