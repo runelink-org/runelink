@@ -20,11 +20,14 @@ pub enum PeerPolicy {
 
 impl PeerPolicy {
     /// The policy for a host with this public host: private peers are allowed
-    /// only if it is itself a private address, or resolves to one.
+    /// only if it is itself a private address, or resolves only to those.
     pub async fn for_public_host(public_host: &Host) -> Self {
         match lookup_host(public_host.authority()).await {
-            Ok(mut addrs) => {
-                if addrs.any(|addr| !is_public(addr.ip())) {
+            Ok(addrs) => {
+                let addrs: Vec<_> = addrs.collect();
+                if !addrs.is_empty()
+                    && addrs.iter().all(|addr| !is_public(addr.ip()))
+                {
                     Self::AnyAddress
                 } else {
                     Self::PublicOnly
@@ -54,7 +57,10 @@ impl PeerPolicy {
     }
 
     /// Resolves `host` to the addresses this policy allows connecting to.
-    pub async fn resolve(self, host: &Host) -> io::Result<Vec<SocketAddr>> {
+    pub async fn allowed_addrs(
+        self,
+        host: &Host,
+    ) -> io::Result<Vec<SocketAddr>> {
         self.lookup(host.authority()).await
     }
 
@@ -176,5 +182,15 @@ mod tests {
                 "{host}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn public_hosts_refuse_names_that_resolve_to_private_addresses() {
+        let host = Host::parse("localhost").unwrap();
+        let refused = PeerPolicy::PublicOnly.allowed_addrs(&host).await;
+        assert_eq!(
+            refused.unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
     }
 }
