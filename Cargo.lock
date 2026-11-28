@@ -2310,7 +2310,7 @@ dependencies = [
 
 [[package]]
 name = "runelink-cli"
-version = "0.5.15"
+version = "0.6.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2334,7 +2334,7 @@ dependencies = [
 
 [[package]]
 name = "runelink-client"
-version = "0.5.15"
+version = "0.6.0"
 dependencies = [
  "futures-util",
  "log",
@@ -2355,7 +2355,7 @@ dependencies = [
 
 [[package]]
 name = "runelink-server"
-version = "0.5.15"
+version = "0.6.0"
 dependencies = [
  "argon2",
  "axum",
@@ -2385,7 +2385,7 @@ dependencies = [
 
 [[package]]
 name = "runelink-types"
-version = "0.5.15"
+version = "0.6.0"
 dependencies = [
  "base64 0.23.1",
  "rand 0.10.3",

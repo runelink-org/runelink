@@ -1,6 +1,6 @@
 [package]
 name = "runelink-types"
-version = "0.5.15"
+version = "0.6.0"
 edition = "2024"
 repository.workspace = true
 
