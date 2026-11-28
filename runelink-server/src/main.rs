@@ -9,6 +9,7 @@ use crate::{
     actors::{ActorCtx, Actors},
     config::ServerConfig,
     key_manager::KeyManager,
+    peer_policy::PeerPolicy,
     state::AppState,
 };
 
@@ -27,6 +28,7 @@ mod ids;
 mod jwks_resolver;
 mod key_manager;
 mod ops;
+mod peer_policy;
 mod queries;
 mod state;
 mod ws;
@@ -72,6 +74,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let client_ws_manager = ws::ClientWsManager::new();
         let federation_ws_manager = ws::FederationWsManager::new();
+        let peer_policy =
+            PeerPolicy::for_public_host(config.public_host()).await;
+        if peer_policy == PeerPolicy::AnyAddress {
+            log::info!(
+                "Host {} is private, so it federates with private peers too",
+                config.public_host()
+            );
+        }
         let actors = Actors::new(ActorCtx::new(
             db_pool.clone(),
             config.clone(),
@@ -82,10 +92,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             config: config.clone(),
             db_pool: db_pool.clone(),
             // Keys are fetched from an issuer's exact API URL, never from
-            // where it redirects.
+            // where it redirects or through a proxy, and only at addresses
+            // the peer policy allows.
             http_client: reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
+                .no_proxy()
+                .dns_resolver(peer_policy)
                 .build()?,
+            peer_policy,
             client_ws_manager,
             federation_ws_manager,
             key_manager: KeyManager::load_or_generate(config.key_dir.clone())?,
