@@ -248,7 +248,7 @@ pub(super) async fn handle_federation_request(
             if state.config.locality(&user_ref.host).is_remote() {
                 return Err(ApiError::NotFound);
             }
-            let user = ops::users::get_by_ref(state, user_ref, None).await?;
+            let user = ops::users::get_by_ref(state, user_ref).await?;
             Ok(FederationWsReply::UsersGetByRef(user))
         }
 
