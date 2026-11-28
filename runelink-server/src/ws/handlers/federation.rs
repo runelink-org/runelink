@@ -11,7 +11,7 @@ use runelink_types::{
 
 use super::shared::authorize_federation;
 use crate::{
-    auth::Authorization,
+    auth::{Authorization, Requirement},
     error::{ApiError, ApiResult},
     ids::ConnId,
     ops, queries,
@@ -53,10 +53,11 @@ pub(super) async fn handle_federation_update(
             "Federation updates cannot come from the local host".into(),
         ));
     }
-    if update.owner() != sender {
+    if let Some(owner) = update.owner()
+        && owner != sender
+    {
         return Err(ApiError::AuthError(format!(
-            "{sender} cannot send updates about resources on {}",
-            update.owner()
+            "{sender} cannot send updates about resources on {owner}"
         )));
     }
     match update {
@@ -87,6 +88,10 @@ pub(super) async fn handle_federation_update(
                             ),
                         )
                         .await;
+                    state.presence.joined(
+                        membership.user.as_ref(),
+                        membership.server.to_ref(),
+                    );
                 }
             } else {
                 queries::servers::update_remote(
@@ -207,8 +212,17 @@ pub(super) async fn handle_federation_update(
             // Removes the record and its memberships, then tells clients.
             state
                 .actors
-                .delete_remote_user(user_ref, Authorization::host())
+                .delete_remote_user(user_ref.clone(), Authorization::host())
                 .await?;
+            state.presence.left(user_ref);
+        }
+
+        FederationWsUpdate::PresenceStatusUpdated(status) => {
+            state.presence.home_status_updated(status);
+        }
+
+        FederationWsUpdate::PresenceStatusesRelayed(relayed) => {
+            state.presence.relayed(sender.clone(), relayed);
         }
     }
     Ok(())
@@ -267,6 +281,7 @@ pub(super) async fn handle_federation_request(
             )
             .await?;
             ops::users::delete_remote_user_record(state, &session).await?;
+            state.presence.left(user_ref);
             Ok(FederationWsReply::UsersDelete)
         }
 
@@ -729,6 +744,25 @@ pub(super) async fn handle_federation_request(
             )
             .await?;
             Ok(FederationWsReply::MessagesDelete(message))
+        }
+
+        FederationWsRequest::PresenceStatusesGet { server_ids } => {
+            let session = authorize_federation(
+                state,
+                conn_id,
+                delegated_user_ref,
+                Requirement::Federation,
+            )
+            .await?;
+            let user_ref = session.user_ref.ok_or_else(|| {
+                ApiError::BadRequest(
+                    "Presence statuses are only sent for a delegated user"
+                        .into(),
+                )
+            })?;
+            let statuses =
+                state.presence.statuses(user_ref, server_ids).await?;
+            Ok(FederationWsReply::PresenceStatusesGet(statuses))
         }
     }
 }

@@ -15,6 +15,9 @@ use crate::{
     },
     host::Host,
     message::{Message, MessageId, MessageRef, NewMessage},
+    presence::{
+        ChosenPresenceStatus, RelayedPresenceStatus, UserPresenceStatus,
+    },
     server::{
         FullServerMembership, NewServer, NewServerMembership,
         NewServerMembershipFull, Server, ServerId, ServerMember,
@@ -165,6 +168,10 @@ pub enum ClientWsRequest {
     MessagesDelete {
         message_ref: MessageRef,
     },
+    /// Chooses the authenticated user's presence status.
+    PresenceStatusUpdate {
+        status: ChosenPresenceStatus,
+    },
 }
 
 impl ClientWsRequest {
@@ -213,6 +220,7 @@ impl ClientWsRequest {
             | Self::MessagesGetByTextChannel { .. }
             | Self::MessagesGetById { .. } => Capability::MessagesRead,
             Self::MessagesDelete { .. } => Capability::MessagesDelete,
+            Self::PresenceStatusUpdate { .. } => Capability::PresenceStatus,
         }
     }
 
@@ -315,6 +323,9 @@ impl ClientWsRequest {
             Self::MessagesDelete { .. } => {
                 matches!(reply, Reply::MessagesDelete(_))
             }
+            Self::PresenceStatusUpdate { .. } => {
+                matches!(reply, Reply::PresenceStatusUpdate)
+            }
         }
     }
 }
@@ -360,6 +371,7 @@ pub enum ClientWsReply {
     MessagesGetByTextChannel(Vec<Message>),
     MessagesGetById(Message),
     MessagesDelete(Message),
+    PresenceStatusUpdate,
 }
 
 /// Request enum for federation websocket traffic.
@@ -449,6 +461,12 @@ pub enum FederationWsRequest {
     MessagesDelete {
         message_id: MessageId,
     },
+    /// The presence statuses of the users who share a server on this host
+    /// with the delegated user, leaving out offline users, or of those who
+    /// share one of the given servers, including offline users.
+    PresenceStatusesGet {
+        server_ids: Option<Vec<ServerId>>,
+    },
 }
 
 impl FederationWsRequest {
@@ -486,6 +504,7 @@ impl FederationWsRequest {
             | Self::MessagesGetByTextChannel { .. }
             | Self::MessagesGetById { .. } => Capability::MessagesRead,
             Self::MessagesDelete { .. } => Capability::MessagesDelete,
+            Self::PresenceStatusesGet { .. } => Capability::PresenceStatus,
         }
     }
 }
@@ -523,6 +542,7 @@ pub enum FederationWsReply {
     MessagesGetByTextChannel(Vec<Message>),
     MessagesGetById(Message),
     MessagesDelete(Message),
+    PresenceStatusesGet(Vec<UserPresenceStatus>),
 }
 
 impl FederationWsReply {
@@ -564,7 +584,9 @@ impl FederationWsReply {
             | Self::MessagesGetByTextChannel(list) => messages(list),
             // Peers answer for their own users only.
             Self::UsersGetByRef(user) => user.host == *host,
-            Self::ConnectionState(_)
+            // Peers answer for the members of their own servers.
+            Self::PresenceStatusesGet(_)
+            | Self::ConnectionState(_)
             | Self::UsersGetAll(_)
             | Self::UsersGetAssociatedHosts(_)
             | Self::UsersDelete
@@ -600,6 +622,12 @@ pub enum ClientWsUpdate {
         channel_id: ServerChannelId,
     },
     MessageUpserted(Message),
+    /// Another user's presence status.
+    PresenceStatusUpdated(UserPresenceStatus),
+    /// The presence status the authenticated user chose.
+    ChosenPresenceStatusUpdated {
+        status: ChosenPresenceStatus,
+    },
 }
 
 impl ClientWsUpdate {
@@ -618,6 +646,10 @@ impl ClientWsUpdate {
                 Capability::ChannelsEvents
             }
             Self::MessageUpserted(_) => Capability::MessagesEvents,
+            Self::PresenceStatusUpdated(_)
+            | Self::ChosenPresenceStatusUpdated { .. } => {
+                Capability::PresenceStatus
+            }
         }
     }
 }
@@ -648,13 +680,20 @@ pub enum FederationWsUpdate {
     RemoteUserDeleted {
         user_ref: UserRef,
     },
+    /// A user's presence status, sent by their home host to the hosts of the
+    /// servers they are in.
+    PresenceStatusUpdated(UserPresenceStatus),
+    /// Presence statuses of the members of the sending host's servers, for
+    /// users on the receiving host.
+    PresenceStatusesRelayed(Vec<RelayedPresenceStatus>),
 }
 
 impl FederationWsUpdate {
     /// The host that owns what the update is about, which is the only host
-    /// that may send it.
-    pub fn owner(&self) -> &Host {
-        match self {
+    /// that may send it, or `None` for updates any host may send about what
+    /// it relays.
+    pub fn owner(&self) -> Option<&Host> {
+        Some(match self {
             Self::MembershipUpserted(membership) => &membership.server.host,
             Self::MembershipDeleted { server_ref, .. }
             | Self::ServerDeleted { server_ref }
@@ -662,8 +701,13 @@ impl FederationWsUpdate {
             Self::ServerUpserted(server) => &server.host,
             Self::ChannelUpserted(channel) => &channel.host,
             Self::MessageUpserted { message, .. } => &message.host,
-            Self::RemoteUserDeleted { user_ref } => &user_ref.host,
-        }
+            Self::RemoteUserDeleted { user_ref }
+            | Self::PresenceStatusUpdated(UserPresenceStatus {
+                user_ref,
+                ..
+            }) => &user_ref.host,
+            Self::PresenceStatusesRelayed(_) => return None,
+        })
     }
 
     pub fn capability(&self) -> Capability {
@@ -679,6 +723,8 @@ impl FederationWsUpdate {
                 Capability::ChannelsEvents
             }
             Self::MessageUpserted { .. } => Capability::MessagesEvents,
+            Self::PresenceStatusUpdated(_)
+            | Self::PresenceStatusesRelayed(_) => Capability::PresenceStatus,
         }
     }
 }
@@ -856,12 +902,23 @@ mod tests {
             // Owned by the server's host, whoever the member is
             FederationWsUpdate::MembershipUpserted(membership(&a, &b)),
         ] {
-            assert_eq!(update.owner(), &a, "{update:?}");
+            assert_eq!(update.owner(), Some(&a), "{update:?}");
         }
-        // A user's deletion belongs to their home host.
+        // A user's deletion and presence status belong to their home host.
         assert_eq!(
-            FederationWsUpdate::RemoteUserDeleted { user_ref }.owner(),
-            &b
+            FederationWsUpdate::RemoteUserDeleted {
+                user_ref: user_ref.clone()
+            }
+            .owner(),
+            Some(&b)
+        );
+        assert_eq!(
+            FederationWsUpdate::PresenceStatusUpdated(UserPresenceStatus {
+                user_ref,
+                status: crate::presence::PresenceStatus::Online,
+            })
+            .owner(),
+            Some(&b)
         );
     }
 

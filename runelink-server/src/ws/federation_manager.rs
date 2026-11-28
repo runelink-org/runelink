@@ -185,6 +185,28 @@ impl FederationWsManager {
         self.pool.deregister_connection(conn_id).await
     }
 
+    /// Whether `host` has a connection that messages to it are sent on.
+    pub async fn is_connected(&self, host: &Host) -> bool {
+        self.pool.has_host(host).await
+    }
+
+    /// Whether `host`'s connection negotiated this host's preferred version
+    /// of `capability`.
+    pub async fn host_supports(
+        &self,
+        host: &Host,
+        capability: Capability,
+    ) -> bool {
+        let Some(version) =
+            preferred_version(federation_websocket, &capability)
+        else {
+            return false;
+        };
+        self.pool
+            .host_supports_capability(host, &capability.with_version(version))
+            .await
+    }
+
     pub async fn authenticated_host(&self, conn_id: ConnId) -> Option<Host> {
         self.pool.authenticated_host(conn_id).await
     }
@@ -283,6 +305,30 @@ impl FederationWsManager {
                 })
             }
         }
+    }
+
+    /// Sends an update to `host` only on a connection it already has, never
+    /// connecting to it or waiting for one.
+    pub async fn send_update_if_connected(
+        &self,
+        host: &Host,
+        update: FederationWsUpdate,
+    ) {
+        let waiting = self.waiting.lock().await;
+        // Messages waiting for a connection would be sent before it.
+        if waiting.contains_key(host) {
+            return;
+        }
+        let _ = self
+            .pool
+            .send_to_host(
+                host,
+                FederationWsEnvelope::Update {
+                    event_id: EventId::new(),
+                    update,
+                },
+            )
+            .await;
     }
 
     /// Sends an update to the given hosts without waiting on the network. A
@@ -433,7 +479,12 @@ impl FederationWsManager {
             .await
     }
 
-    async fn ensure_connection(&self, state: &AppState, host: &Host) -> bool {
+    /// Connects to `host` unless it is connected, returning whether it is.
+    pub async fn ensure_connection(
+        &self,
+        state: &AppState,
+        host: &Host,
+    ) -> bool {
         if self.pool.has_host(host).await {
             return true;
         }

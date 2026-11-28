@@ -3,7 +3,10 @@
 use std::borrow::Borrow;
 
 use runelink_types::{
-    capability::{NegotiatedCapabilities, VersionedCapability},
+    capability::{
+        Capability, NegotiatedCapabilities, VersionedCapability,
+        preferred_version,
+    },
     ids::{EventId, RequestId},
     user::UserRef,
     ws::{ClientWsEnvelope, ClientWsReply, ClientWsUpdate, WsError},
@@ -11,20 +14,23 @@ use runelink_types::{
 use tokio::sync::mpsc;
 
 use super::pools::ClientWsPool;
-use crate::ids::ConnId;
+use crate::{ids::ConnId, presence::Presence};
 
 /// High-level manager for client websocket connections.
 ///
 /// This wraps the low-level pool and exposes typed APIs so call sites do not
 /// need to construct websocket envelopes manually.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ClientWsManager {
     pool: ClientWsPool,
 }
 
 impl ClientWsManager {
-    pub fn new() -> Self {
-        Self::default()
+    /// A manager that tells `presence` when users connect and disconnect.
+    pub fn new(presence: Presence) -> Self {
+        Self {
+            pool: ClientWsPool::new(presence),
+        }
     }
 
     pub async fn register_connection(
@@ -76,6 +82,23 @@ impl ClientWsManager {
         self.pool.supports_capability(conn_id, capability).await
     }
 
+    /// Whether a connection negotiated this host's preferred version of
+    /// `capability`.
+    pub async fn supports(
+        &self,
+        conn_id: ConnId,
+        capability: Capability,
+    ) -> bool {
+        let Some(version) = preferred_version(
+            crate::capabilities::client_websocket,
+            &capability,
+        ) else {
+            return false;
+        };
+        self.supports_capability(conn_id, &capability.with_version(version))
+            .await
+    }
+
     pub async fn send_update_to_connection(
         &self,
         conn_id: ConnId,
@@ -84,6 +107,26 @@ impl ClientWsManager {
         self.pool
             .send_to_connection(
                 conn_id,
+                ClientWsEnvelope::Update {
+                    event_id: EventId::new(),
+                    update,
+                },
+            )
+            .await
+    }
+
+    /// Sends an update to a connection only while it is authenticated as
+    /// `user_ref`, so that it can't reach the connection's next user.
+    pub async fn send_update_to_connection_as(
+        &self,
+        conn_id: ConnId,
+        user_ref: &UserRef,
+        update: ClientWsUpdate,
+    ) -> bool {
+        self.pool
+            .send_to_connection_as(
+                conn_id,
+                user_ref,
                 ClientWsEnvelope::Update {
                     event_id: EventId::new(),
                     update,

@@ -19,12 +19,15 @@ use tokio::sync::{RwLock, mpsc};
 
 use runelink_types::host::Host;
 
-use crate::ids::ConnId;
+use crate::{ids::ConnId, presence::Presence};
 
 /// Tracks active client websocket connections and provides safe send helpers.
-#[derive(Clone, Debug, Default)]
+/// It tells presence whenever a connection starts or stops being
+/// authenticated as a user.
+#[derive(Clone, Debug)]
 pub struct ClientWsPool {
     inner: Arc<RwLock<ClientPoolState>>,
+    presence: Presence,
 }
 
 #[derive(Debug, Default)]
@@ -43,8 +46,11 @@ pub struct ClientConn {
 
 impl ClientWsPool {
     /// Creates a new client websocket pool.
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(presence: Presence) -> Self {
+        Self {
+            inner: Arc::default(),
+            presence,
+        }
     }
 
     /// Registers a new connection with the pool.
@@ -55,15 +61,7 @@ impl ClientWsPool {
         capabilities: NegotiatedCapabilities,
     ) {
         let mut state = self.inner.write().await;
-        if let Some(previous) = state.connections.remove(&conn_id)
-            && let Some(previous_user) = previous.user_ref
-        {
-            Self::remove_conn_from_user_index(
-                &mut state.by_user,
-                &previous_user,
-                conn_id,
-            );
-        }
+        self.remove_client_connection(&mut state, conn_id);
         state.connections.insert(
             conn_id,
             ClientConn {
@@ -86,21 +84,30 @@ impl ClientWsPool {
             Some(conn) => conn.user_ref.replace(user_ref.clone()),
             None => return false,
         };
+        if old_user.as_ref() == Some(&user_ref) {
+            return true;
+        }
         if let Some(previous_user) = old_user {
             Self::remove_conn_from_user_index(
                 &mut state.by_user,
                 &previous_user,
                 conn_id,
             );
+            self.presence.disconnected(conn_id, previous_user);
         }
-        state.by_user.entry(user_ref).or_default().insert(conn_id);
+        state
+            .by_user
+            .entry(user_ref.clone())
+            .or_default()
+            .insert(conn_id);
+        self.presence.connected(conn_id, user_ref);
         true
     }
 
     /// Deregisters a connection from the pool.
     pub async fn deregister_connection(&self, conn_id: ConnId) -> bool {
         let mut state = self.inner.write().await;
-        Self::remove_client_connection(&mut state, conn_id)
+        self.remove_client_connection(&mut state, conn_id)
     }
 
     /// Removes authentication from a connection.
@@ -116,6 +123,7 @@ impl ClientWsPool {
                 &user_ref,
                 conn_id,
             );
+            self.presence.disconnected(conn_id, user_ref);
         }
     }
 
@@ -127,6 +135,7 @@ impl ClientWsPool {
             if let Some(conn) = state.connections.get_mut(&conn_id) {
                 conn.user_ref = None;
             }
+            self.presence.disconnected(conn_id, user_ref.clone());
         }
     }
 
@@ -154,6 +163,26 @@ impl ClientWsPool {
         false
     }
 
+    /// Sends an envelope to a connection only while it is authenticated as
+    /// `user_ref`.
+    pub async fn send_to_connection_as(
+        &self,
+        conn_id: ConnId,
+        user_ref: &UserRef,
+        envelope: ClientWsEnvelope,
+    ) -> bool {
+        let state = self.inner.read().await;
+        state
+            .connections
+            .get(&conn_id)
+            .filter(|conn| {
+                conn.user_ref.as_ref() == Some(user_ref)
+                    && client_supports_envelope(conn, &envelope)
+            })
+            // A closed connection is deregistered as its loop ends.
+            .is_some_and(|conn| conn.sender.send(envelope).is_ok())
+    }
+
     /// Returns the authenticated user for a connection, if any.
     pub async fn authenticated_user_ref(
         &self,
@@ -178,7 +207,9 @@ impl ClientWsPool {
             .is_some_and(|conn| supports(&conn.capabilities, capability))
     }
 
-    /// Sends an envelope to the active connections for the given users.
+    /// Sends an envelope to the active connections for the given users. It is
+    /// queued while the pool is locked, so it can't reach a connection that
+    /// authenticates as someone else meanwhile.
     pub async fn send_to_users<I, S>(
         &self,
         users: I,
@@ -192,42 +223,65 @@ impl ClientWsPool {
             .into_iter()
             .map(|user| user.borrow().clone())
             .collect::<HashSet<UserRef>>();
-        let targets = {
+        let (sent, stale) = {
             let state = self.inner.read().await;
-            let mut conn_ids = HashSet::new();
-            for user in users {
-                if let Some(user_conn_ids) = state.by_user.get(&user) {
-                    conn_ids.extend(user_conn_ids.iter().copied());
-                }
-            }
-            conn_ids
-                .into_iter()
-                .filter_map(|conn_id| {
-                    state
-                        .connections
-                        .get(&conn_id)
-                        .filter(|conn| {
-                            client_supports_envelope(conn, &envelope)
-                        })
-                        .map(|conn| (conn_id, conn.sender.clone()))
-                })
-                .collect::<Vec<_>>()
+            let conn_ids = users
+                .iter()
+                .filter_map(|user| state.by_user.get(user))
+                .flatten()
+                .copied()
+                .collect::<HashSet<_>>();
+            Self::send_to_many(&state, conn_ids, &envelope)
         };
-        Self::send_to_many_client(targets, envelope, self).await
+        self.remove_stale(stale).await;
+        sent
     }
 
     /// Broadcasts an envelope to all active connections.
     pub async fn broadcast(&self, envelope: ClientWsEnvelope) -> usize {
-        let targets = {
+        let (sent, stale) = {
             let state = self.inner.read().await;
-            state
-                .connections
-                .iter()
-                .filter(|(_, conn)| client_supports_envelope(conn, &envelope))
-                .map(|(conn_id, conn)| (*conn_id, conn.sender.clone()))
-                .collect::<Vec<_>>()
+            let conn_ids =
+                state.connections.keys().copied().collect::<Vec<_>>();
+            Self::send_to_many(&state, conn_ids, &envelope)
         };
-        Self::send_to_many_client(targets, envelope, self).await
+        self.remove_stale(stale).await;
+        sent
+    }
+
+    /// Queues an envelope on the connections that support it, returning how
+    /// many it was queued on and the closed ones.
+    fn send_to_many(
+        state: &ClientPoolState,
+        conn_ids: impl IntoIterator<Item = ConnId>,
+        envelope: &ClientWsEnvelope,
+    ) -> (usize, Vec<ConnId>) {
+        let mut sent = 0;
+        let mut stale = Vec::new();
+        for conn_id in conn_ids {
+            let Some(conn) = state.connections.get(&conn_id) else {
+                continue;
+            };
+            if !client_supports_envelope(conn, envelope) {
+                continue;
+            }
+            if conn.sender.send(envelope.clone()).is_ok() {
+                sent += 1;
+            } else {
+                stale.push(conn_id);
+            }
+        }
+        (sent, stale)
+    }
+
+    async fn remove_stale(&self, stale: Vec<ConnId>) {
+        if stale.is_empty() {
+            return;
+        }
+        let mut state = self.inner.write().await;
+        for conn_id in stale {
+            let _ = self.remove_client_connection(&mut state, conn_id);
+        }
     }
 
     fn remove_conn_from_user_index(
@@ -244,6 +298,7 @@ impl ClientWsPool {
     }
 
     fn remove_client_connection(
+        &self,
         state: &mut ClientPoolState,
         conn_id: ConnId,
     ) -> bool {
@@ -256,32 +311,9 @@ impl ClientWsPool {
                 &user_ref,
                 conn_id,
             );
+            self.presence.disconnected(conn_id, user_ref);
         }
         true
-    }
-
-    async fn send_to_many_client(
-        targets: Vec<(ConnId, mpsc::UnboundedSender<ClientWsEnvelope>)>,
-        envelope: ClientWsEnvelope,
-        pool: &ClientWsPool,
-    ) -> usize {
-        let mut sent = 0usize;
-        let mut stale = Vec::<ConnId>::new();
-        for (conn_id, sender) in targets {
-            if sender.send(envelope.clone()).is_ok() {
-                sent += 1;
-            } else {
-                stale.push(conn_id);
-            }
-        }
-        if !stale.is_empty() {
-            let stale_set = stale.into_iter().collect::<HashSet<_>>();
-            let mut state = pool.inner.write().await;
-            for conn_id in stale_set {
-                let _ = Self::remove_client_connection(&mut state, conn_id);
-            }
-        }
-        sent
     }
 }
 
@@ -622,8 +654,13 @@ mod tests {
     use std::collections::BTreeMap;
 
     use runelink_types::{
-        capability::{Capability, versions::messages},
+        capability::{
+            Capability,
+            versions::{messages, presence},
+        },
         ids::{MessageId, TextChannelId},
+        presence::ChosenPresenceStatus,
+        user::UserRef,
         ws::{ClientWsEnvelope, ClientWsUpdate, FederationWsEnvelope, WsError},
     };
     use tokio::sync::mpsc;
@@ -699,7 +736,7 @@ mod tests {
 
     #[tokio::test]
     async fn client_updates_only_reach_negotiated_capabilities() {
-        let pool = ClientWsPool::new();
+        let pool = ClientWsPool::new(crate::presence::Presence::new().0);
         let (subscribed_tx, mut subscribed_rx) = mpsc::unbounded_channel();
         let (unsubscribed_tx, mut unsubscribed_rx) = mpsc::unbounded_channel();
         pool.register_connection(
@@ -748,5 +785,44 @@ mod tests {
         assert_eq!(pool.broadcast(envelope.clone()).await, 1);
         assert_eq!(subscribed_rx.recv().await, Some(envelope));
         assert!(unsubscribed_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn updates_for_a_user_never_reach_the_next_user_of_a_connection() {
+        let pool = ClientWsPool::new(crate::presence::Presence::new().0);
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let conn_id = ConnId::new();
+        pool.register_connection(
+            conn_id,
+            sender,
+            BTreeMap::from([(
+                Capability::PresenceStatus,
+                presence::STATUS_VERSION,
+            )]),
+        )
+        .await;
+        let user = |name: &str| {
+            UserRef::new(name.into(), Host::parse("localhost").unwrap())
+        };
+        let update = |status| ClientWsEnvelope::Update {
+            event_id: runelink_types::EventId::new(),
+            update: ClientWsUpdate::ChosenPresenceStatusUpdated { status },
+        };
+        pool.authenticate_connection(conn_id, user("alice")).await;
+        pool.authenticate_connection(conn_id, user("bob")).await;
+        let alices = update(ChosenPresenceStatus::Invisible);
+        assert!(
+            !pool
+                .send_to_connection_as(conn_id, &user("alice"), alices.clone())
+                .await
+        );
+        assert_eq!(pool.send_to_users([user("alice")], alices).await, 0);
+        let bobs = update(ChosenPresenceStatus::Online);
+        assert!(
+            pool.send_to_connection_as(conn_id, &user("bob"), bobs.clone())
+                .await
+        );
+        assert_eq!(receiver.try_recv().unwrap(), bobs);
+        assert!(receiver.try_recv().is_err());
     }
 }
