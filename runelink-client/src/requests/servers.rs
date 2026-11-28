@@ -2,7 +2,8 @@ use log::info;
 use reqwest::Client;
 use runelink_types::{
     capability::Capability,
-    server::{NewServer, Server, ServerId, ServerWithChannels},
+    host::Host,
+    server::{NewServer, Server, ServerRef, ServerWithChannels},
     user::UserRef,
 };
 
@@ -15,7 +16,7 @@ pub async fn create(
     api_url: &str,
     access_token: &str,
     new_server: &NewServer,
-    target_host: Option<&str>,
+    target_host: Option<&Host>,
 ) -> Result<Server> {
     let mut url = format!("{api_url}/servers");
     if let Some(host) = target_host {
@@ -35,7 +36,7 @@ pub async fn create(
 pub async fn fetch_all(
     client: &Client,
     api_url: &str,
-    target_host: Option<&str>,
+    target_host: Option<&Host>,
 ) -> Result<Vec<Server>> {
     let mut url = format!("{api_url}/servers");
     if let Some(host) = target_host {
@@ -48,13 +49,10 @@ pub async fn fetch_all(
 pub async fn fetch_by_id(
     client: &Client,
     api_url: &str,
-    server_id: ServerId,
-    target_host: Option<&str>,
+    server_ref: &ServerRef,
 ) -> Result<Server> {
-    let mut url = format!("{api_url}/servers/{server_id}");
-    if let Some(host) = target_host {
-        url = format!("{url}?target_host={host}");
-    }
+    let url =
+        format!("{api_url}/servers/{}/{}", server_ref.host, server_ref.id);
     info!("fetching server: {url}");
     fetch_json::<Server>(client, &url, Capability::ServersRead).await
 }
@@ -78,13 +76,12 @@ pub async fn fetch_with_channels(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: ServerId,
-    target_host: Option<&str>,
+    server_ref: &ServerRef,
 ) -> Result<ServerWithChannels> {
-    let mut url = format!("{api_url}/servers/{server_id}/with_channels");
-    if let Some(host) = target_host {
-        url = format!("{url}?target_host={host}");
-    }
+    let url = format!(
+        "{api_url}/servers/{}/{}/with_channels",
+        server_ref.host, server_ref.id
+    );
     info!("fetching server with channels (federation): {url}");
     fetch_json_authed::<ServerWithChannels>(
         client,
@@ -99,13 +96,10 @@ pub async fn delete(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: ServerId,
-    target_host: Option<&str>,
+    server_ref: &ServerRef,
 ) -> Result<()> {
-    let mut url = format!("{api_url}/servers/{server_id}");
-    if let Some(host) = target_host {
-        url = format!("{url}?target_host={host}");
-    }
+    let url =
+        format!("{api_url}/servers/{}/{}", server_ref.host, server_ref.id);
     info!("deleting server: {url}");
     delete_authed(client, &url, access_token, Capability::ServersDelete).await
 }
@@ -114,14 +108,11 @@ pub async fn update(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: ServerId,
+    server_ref: &ServerRef,
     update: &runelink_types::server::ServerUpdate,
-    target_host: Option<&str>,
 ) -> Result<Server> {
-    let mut url = format!("{api_url}/servers/{server_id}");
-    if let Some(host) = target_host {
-        url = format!("{url}?target_host={host}");
-    }
+    let url =
+        format!("{api_url}/servers/{}/{}", server_ref.host, server_ref.id);
     super::patch_json_authed(
         client,
         &url,

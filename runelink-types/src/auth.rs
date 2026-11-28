@@ -107,7 +107,7 @@ impl RefreshToken {
         Self {
             token: token_str,
             user_name: user_ref.name,
-            user_host: user_ref.host,
+            user_host: user_ref.host.into(),
             client_id,
             issued_at: now,
             expires_at: now + lifetime,

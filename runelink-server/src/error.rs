@@ -4,7 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use runelink_client::Error as ClientError;
-use runelink_types::{user::InvalidHost, ws::WsError};
+use runelink_types::{host::InvalidHost, ws::WsError};
 use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinError;

@@ -1,5 +1,5 @@
 use runelink_client::requests;
-use runelink_types::server::ServerId;
+use runelink_types::server::{ServerId, ServerRef};
 
 use crate::{
     error::CliError,
@@ -54,11 +54,14 @@ pub async fn handle_user_commands(
                 ctx.strict_input,
             )?;
             if let Some(server_id) = list_args.server_id {
+                let host = match target_host {
+                    Some(host) => host,
+                    None => ctx.home_host()?.clone(),
+                };
                 let members = requests::memberships::fetch_members_by_server(
                     ctx.client,
                     &api_url,
-                    server_id,
-                    target_host.as_deref(),
+                    &ServerRef::new(host, server_id),
                 )
                 .await?;
                 ctx.output(&members, || {
@@ -70,7 +73,7 @@ pub async fn handle_user_commands(
                 let users = requests::users::fetch_all(
                     ctx.client,
                     &api_url,
-                    target_host.as_deref(),
+                    target_host.as_ref(),
                 )
                 .await?;
                 ctx.output(&users, || {

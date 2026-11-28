@@ -1,6 +1,7 @@
 use log::debug;
 use runelink_types::{
-    server::ServerId,
+    host::Host,
+    server::ServerRef,
     user::UserRef,
     ws::{
         ClientWsUpdate, FederationWsConnectionState, FederationWsReply,
@@ -11,45 +12,24 @@ use runelink_types::{
 use super::shared::authorize_federation;
 use crate::{
     auth::Authorization,
-    config::hosts_match,
     error::{ApiError, ApiResult},
     ids::ConnId,
     ops, queries,
     state::AppState,
 };
 
-/// Get the cached members of a remote server, rejecting senders that do not
-/// own it. Returns `None` for servers that are not cached.
-async fn authorized_remote_server_users(
-    state: &AppState,
-    sender: &str,
-    server_id: ServerId,
-) -> ApiResult<Option<Vec<UserRef>>> {
-    let Some(members) = queries::memberships::get_remote_server_members(
-        &state.db_pool,
-        server_id,
-    )
-    .await?
-    else {
-        return Ok(None);
-    };
-    if !hosts_match(&members.host, sender) {
-        return Err(ApiError::Conflict(format!(
-            "{sender} does not own server {server_id}"
-        )));
-    }
-    Ok(Some(members.users))
-}
-
-/// Fanout a remote server update to the local users (best effort).
+/// Fanout a remote server update to the server's cached local members (best
+/// effort). Updates for servers that are not cached are dropped.
 async fn fanout_remote_server_update(
     state: &AppState,
-    sender: &str,
-    server_id: ServerId,
+    server_ref: &ServerRef,
     client_update: ClientWsUpdate,
 ) -> ApiResult<()> {
-    let Some(local_users) =
-        authorized_remote_server_users(state, sender, server_id).await?
+    let Some(local_users) = queries::memberships::get_remote_server_members(
+        &state.db_pool,
+        server_ref,
+    )
+    .await?
     else {
         return Ok(());
     };
@@ -60,11 +40,11 @@ async fn fanout_remote_server_update(
     Ok(())
 }
 
-/// Handle a federation websocket update from `sender`, which must own the
-/// resource that the update is about.
+/// Handle a federation websocket update from `sender`, which must own what
+/// the update is about.
 pub(super) async fn handle_federation_update(
     state: &AppState,
-    sender: &str,
+    sender: &Host,
     update: FederationWsUpdate,
 ) -> ApiResult<()> {
     debug!("WS federation: update from {sender}: {update:#?}");
@@ -73,22 +53,28 @@ pub(super) async fn handle_federation_update(
             "Federation updates cannot come from the local host".into(),
         ));
     }
+    if update.owner() != sender {
+        return Err(ApiError::AuthError(format!(
+            "{sender} cannot send updates about resources on {}",
+            update.owner()
+        )));
+    }
     match update {
         FederationWsUpdate::MembershipUpserted(membership) => {
-            queries::servers::upsert_remote(
-                &state.db_pool,
-                &membership.server,
-                sender,
-            )
-            .await?;
-            // Only local users' memberships are cached. Others may not even
-            // have a user record here, but members still hear about them.
+            // Only local users' memberships, and the servers they are in, are
+            // cached. Other users may not even have a user record here, but
+            // members still hear about them.
             if state.config.locality(&membership.user.host).is_local() {
+                // Together, so a membership that fails leaves no server
+                let mut tx = state.db_pool.begin().await?;
+                queries::servers::upsert_remote(&mut *tx, &membership.server)
+                    .await?;
                 let inserted = queries::memberships::insert_remote(
-                    &state.db_pool,
+                    &mut *tx,
                     &membership.clone().into(),
                 )
                 .await?;
+                tx.commit().await?;
                 // The server's own updates reach only members cached here, so
                 // a new member, such as its creator, may not have heard of it.
                 if inserted {
@@ -102,29 +88,37 @@ pub(super) async fn handle_federation_update(
                         )
                         .await;
                 }
+            } else {
+                queries::servers::update_remote(
+                    &state.db_pool,
+                    &membership.server,
+                )
+                .await?;
             }
             fanout_remote_server_update(
                 state,
-                sender,
-                membership.server.id,
+                &membership.server.to_ref(),
                 ClientWsUpdate::MembershipUpserted(membership),
             )
             .await?;
         }
 
         FederationWsUpdate::MembershipDeleted {
-            server_id,
+            server_ref,
             user_ref,
         } => {
             let Some(mut targets) =
-                authorized_remote_server_users(state, sender, server_id)
-                    .await?
+                queries::memberships::get_remote_server_members(
+                    &state.db_pool,
+                    &server_ref,
+                )
+                .await?
             else {
                 return Ok(());
             };
             match queries::memberships::delete_remote(
                 &state.db_pool,
-                server_id,
+                &server_ref,
                 user_ref.clone(),
             )
             .await
@@ -141,7 +135,7 @@ pub(super) async fn handle_federation_update(
                 .send_update_to_users(
                     targets,
                     ClientWsUpdate::MembershipDeleted {
-                        server_id,
+                        server_ref,
                         user_ref,
                     },
                 )
@@ -149,51 +143,51 @@ pub(super) async fn handle_federation_update(
         }
 
         FederationWsUpdate::ServerUpserted(server) => {
-            queries::servers::upsert_remote(&state.db_pool, &server, sender)
-                .await?;
+            // Stale or uncached servers are not worth telling anyone about.
+            if !queries::servers::update_remote(&state.db_pool, &server).await?
+            {
+                return Ok(());
+            }
             fanout_remote_server_update(
                 state,
-                sender,
-                server.id,
+                &server.to_ref(),
                 ClientWsUpdate::ServerUpserted(server),
             )
             .await?;
         }
 
-        FederationWsUpdate::ServerDeleted { server_id } => {
+        FederationWsUpdate::ServerDeleted { server_ref } => {
             fanout_remote_server_update(
                 state,
-                sender,
-                server_id,
-                ClientWsUpdate::ServerDeleted { server_id },
+                &server_ref,
+                ClientWsUpdate::ServerDeleted {
+                    server_ref: server_ref.clone(),
+                },
             )
             .await?;
-            // Only deletes a server cached as the sender's. Cached memberships
-            // go with it.
-            queries::servers::delete_remote(&state.db_pool, server_id, sender)
+            // Cached memberships go with it.
+            queries::servers::delete_remote(&state.db_pool, &server_ref)
                 .await?;
         }
 
         FederationWsUpdate::ChannelUpserted(channel) => {
             fanout_remote_server_update(
                 state,
-                sender,
-                channel.server_id,
+                &channel.server_ref(),
                 ClientWsUpdate::ChannelUpserted(channel),
             )
             .await?;
         }
 
         FederationWsUpdate::ChannelDeleted {
-            server_id,
+            server_ref,
             channel_id,
         } => {
             fanout_remote_server_update(
                 state,
-                sender,
-                server_id,
+                &server_ref,
                 ClientWsUpdate::ChannelDeleted {
-                    server_id,
+                    server_ref: server_ref.clone(),
                     channel_id,
                 },
             )
@@ -203,20 +197,13 @@ pub(super) async fn handle_federation_update(
         FederationWsUpdate::MessageUpserted { server_id, message } => {
             fanout_remote_server_update(
                 state,
-                sender,
-                server_id,
+                &ServerRef::new(message.host.clone(), server_id),
                 ClientWsUpdate::MessageUpserted(message),
             )
             .await?;
         }
 
         FederationWsUpdate::RemoteUserDeleted { user_ref } => {
-            if !hosts_match(&user_ref.host, sender) {
-                return Err(ApiError::Conflict(format!(
-                    "{sender} cannot delete users on {}",
-                    user_ref.host
-                )));
-            }
             // Removes the record and its memberships, then tells clients.
             state
                 .actors
@@ -298,17 +285,19 @@ pub(super) async fn handle_federation_request(
                 .federation_ws_manager
                 .authenticated_host(conn_id)
                 .await;
-            if !sender.is_some_and(|sender| hosts_match(&user.host, &sender)) {
+            if sender.as_ref() != Some(&user.host) {
                 return Err(ApiError::AuthError(
                     "Peers may only add memberships for their own users".into(),
                 ));
             }
+            let new_membership =
+                new_membership.with_host(state.config.public_host().clone());
             let mut session = authorize_federation(
                 state,
                 conn_id,
                 delegated_user_ref,
                 ops::memberships::auth::federated::create(
-                    new_membership.server_id,
+                    new_membership.server_ref.clone(),
                     user.as_ref(),
                     new_membership.role,
                 ),
@@ -317,29 +306,24 @@ pub(super) async fn handle_federation_request(
             let membership = ops::memberships::upsert(
                 state,
                 &mut session,
-                &new_membership.into(),
+                &new_membership,
                 Some(&user),
             )
             .await?;
             Ok(FederationWsReply::MembershipsUpsert(membership))
         }
 
-        FederationWsRequest::MembershipsGetByUser { user_ref } => {
-            let memberships =
-                ops::memberships::get_by_user(state, user_ref).await?;
-            Ok(FederationWsReply::MembershipsGetByUser(memberships))
-        }
-
         FederationWsRequest::MembershipsDelete {
             server_id,
             user_ref,
         } => {
+            let server_ref = state.config.local_ref(server_id);
             let mut session = authorize_federation(
                 state,
                 conn_id,
                 delegated_user_ref,
                 ops::memberships::auth::federated::delete(
-                    server_id,
+                    server_ref.clone(),
                     user_ref.clone(),
                 ),
             )
@@ -347,18 +331,19 @@ pub(super) async fn handle_federation_request(
             ops::memberships::delete(
                 state,
                 &mut session,
-                server_id,
+                &server_ref,
                 user_ref,
-                None,
             )
             .await?;
             Ok(FederationWsReply::MembershipsDelete)
         }
 
         FederationWsRequest::MembershipsGetMembersByServer { server_id } => {
-            let members =
-                ops::memberships::get_members_by_server(state, server_id, None)
-                    .await?;
+            let members = ops::memberships::get_members_by_server(
+                state,
+                &state.config.local_ref(server_id),
+            )
+            .await?;
             Ok(FederationWsReply::MembershipsGetMembersByServer(members))
         }
 
@@ -367,7 +352,9 @@ pub(super) async fn handle_federation_request(
             user_ref,
         } => {
             let member = ops::memberships::get_member_by_user_and_server(
-                state, server_id, user_ref, None,
+                state,
+                &state.config.local_ref(server_id),
+                user_ref,
             )
             .await?;
             Ok(FederationWsReply::MembershipsGetByUserAndServer(member))
@@ -391,32 +378,34 @@ pub(super) async fn handle_federation_request(
             server_id,
             server_update,
         } => {
+            let server_ref = state.config.local_ref(server_id);
             let session = authorize_federation(
                 state,
                 conn_id,
                 delegated_user_ref,
-                ops::servers::auth::federated::update(state, server_id).await?,
+                ops::servers::auth::federated::update(server_ref.clone()),
             )
             .await?;
             let resource = ops::servers::update(
                 state,
                 &session,
-                server_id,
+                &server_ref,
                 &server_update,
-                None,
             )
             .await?;
             Ok(FederationWsReply::ServersUpdate(resource))
         }
+
         FederationWsRequest::ServersDelete { server_id } => {
+            let server_ref = state.config.local_ref(server_id);
             let session = authorize_federation(
                 state,
                 conn_id,
                 delegated_user_ref,
-                ops::servers::auth::federated::delete(server_id),
+                ops::servers::auth::federated::delete(server_ref.clone()),
             )
             .await?;
-            ops::servers::delete(state, &session, server_id, None).await?;
+            ops::servers::delete(state, &session, &server_ref).await?;
             Ok(FederationWsReply::ServersDelete)
         }
 
@@ -426,23 +415,28 @@ pub(super) async fn handle_federation_request(
         }
 
         FederationWsRequest::ServersGetById { server_id } => {
-            let server =
-                ops::servers::get_by_id(state, server_id, None).await?;
+            let server = ops::servers::get_by_id(
+                state,
+                &state.config.local_ref(server_id),
+            )
+            .await?;
             Ok(FederationWsReply::ServersGetById(server))
         }
 
         FederationWsRequest::ServersGetWithChannels { server_id } => {
+            let server_ref = state.config.local_ref(server_id);
             let session = authorize_federation(
                 state,
                 conn_id,
                 delegated_user_ref,
-                ops::servers::auth::federated::get_with_channels(server_id),
+                ops::servers::auth::federated::get_with_channels(
+                    server_ref.clone(),
+                ),
             )
             .await?;
-            let server_with_channels = ops::servers::get_with_channels(
-                state, &session, server_id, None,
-            )
-            .await?;
+            let server_with_channels =
+                ops::servers::get_with_channels(state, &session, &server_ref)
+                    .await?;
             Ok(FederationWsReply::ServersGetWithChannels(
                 server_with_channels,
             ))
@@ -452,19 +446,19 @@ pub(super) async fn handle_federation_request(
             server_id,
             new_channel,
         } => {
+            let server_ref = state.config.local_ref(server_id);
             let session = authorize_federation(
                 state,
                 conn_id,
                 delegated_user_ref,
-                ops::channels::auth::federated::create(server_id),
+                ops::channels::auth::federated::create(server_ref.clone()),
             )
             .await?;
             let channel = ops::channels::create(
                 state,
                 &session,
-                server_id,
+                &server_ref,
                 &new_channel,
-                None,
             )
             .await?;
             Ok(FederationWsReply::ChannelsCreate(channel))
@@ -484,15 +478,18 @@ pub(super) async fn handle_federation_request(
         }
 
         FederationWsRequest::ChannelsGetByServer { server_id } => {
+            let server_ref = state.config.local_ref(server_id);
             let session = authorize_federation(
                 state,
                 conn_id,
                 delegated_user_ref,
-                ops::channels::auth::federated::get_by_server(server_id),
+                ops::channels::auth::federated::get_by_server(
+                    server_ref.clone(),
+                ),
             )
             .await?;
             let channels =
-                ops::channels::get_by_server(state, &session, server_id, None)
+                ops::channels::get_by_server(state, &session, &server_ref)
                     .await?;
             Ok(FederationWsReply::ChannelsGetByServer(channels))
         }
@@ -508,9 +505,12 @@ pub(super) async fn handle_federation_request(
                 requirement,
             )
             .await?;
-            let channel =
-                ops::channels::get_by_id(state, &session, channel_id, None)
-                    .await?;
+            let channel = ops::channels::get_by_id(
+                state,
+                &session,
+                &state.config.local_ref(channel_id),
+            )
+            .await?;
             Ok(FederationWsReply::ChannelsGetById(channel))
         }
 
@@ -518,24 +518,26 @@ pub(super) async fn handle_federation_request(
             channel_id,
             channel_update,
         } => {
+            let requirement =
+                ops::channels::auth::federated::update(state, channel_id)
+                    .await?;
             let session = authorize_federation(
                 state,
                 conn_id,
                 delegated_user_ref,
-                ops::channels::auth::federated::update(state, channel_id)
-                    .await?,
+                requirement,
             )
             .await?;
             let resource = ops::channels::update(
                 state,
                 &session,
-                channel_id,
+                &state.config.local_ref(channel_id),
                 &channel_update,
-                None,
             )
             .await?;
             Ok(FederationWsReply::ChannelsUpdate(resource))
         }
+
         FederationWsRequest::ChannelsDelete { channel_id } => {
             let requirement =
                 ops::channels::auth::federated::delete(state, channel_id)
@@ -547,7 +549,12 @@ pub(super) async fn handle_federation_request(
                 requirement,
             )
             .await?;
-            ops::channels::delete(state, &session, channel_id, None).await?;
+            ops::channels::delete(
+                state,
+                &session,
+                &state.config.local_ref(channel_id),
+            )
+            .await?;
             Ok(FederationWsReply::ChannelsDelete)
         }
 
@@ -568,9 +575,8 @@ pub(super) async fn handle_federation_request(
             let channels = ops::channels::move_channel(
                 state,
                 &session,
-                channel_id,
+                &state.config.local_ref(channel_id),
                 &channel_move,
-                None,
             )
             .await?;
             Ok(FederationWsReply::ChannelsMove(channels))
@@ -596,9 +602,8 @@ pub(super) async fn handle_federation_request(
             let message = ops::messages::create(
                 state,
                 &session,
-                text_channel_id,
+                &state.config.local_ref(text_channel_id),
                 &new_message,
-                None,
             )
             .await?;
             Ok(FederationWsReply::MessagesCreate(message))
@@ -618,15 +623,18 @@ pub(super) async fn handle_federation_request(
         }
 
         FederationWsRequest::MessagesGetByServer { server_id } => {
+            let server_ref = state.config.local_ref(server_id);
             let session = authorize_federation(
                 state,
                 conn_id,
                 delegated_user_ref,
-                ops::messages::auth::federated::get_by_server(server_id),
+                ops::messages::auth::federated::get_by_server(
+                    server_ref.clone(),
+                ),
             )
             .await?;
             let messages =
-                ops::messages::get_by_server(state, &session, server_id, None)
+                ops::messages::get_by_server(state, &session, &server_ref)
                     .await?;
             Ok(FederationWsReply::MessagesGetByServer(messages))
         }
@@ -648,8 +656,7 @@ pub(super) async fn handle_federation_request(
             let messages = ops::messages::get_by_text_channel(
                 state,
                 &session,
-                text_channel_id,
-                None,
+                &state.config.local_ref(text_channel_id),
             )
             .await?;
             Ok(FederationWsReply::MessagesGetByTextChannel(messages))
@@ -666,9 +673,12 @@ pub(super) async fn handle_federation_request(
                 requirement,
             )
             .await?;
-            let message =
-                ops::messages::get_by_id(state, &session, message_id, None)
-                    .await?;
+            let message = ops::messages::get_by_id(
+                state,
+                &session,
+                &state.config.local_ref(message_id),
+            )
+            .await?;
             Ok(FederationWsReply::MessagesGetById(message))
         }
 
@@ -676,9 +686,12 @@ pub(super) async fn handle_federation_request(
             message_id,
             message_update,
         } => {
-            let location =
-                queries::messages::get_location(&state.db_pool, message_id)
-                    .await?;
+            let location = queries::messages::get_location(
+                &state.db_pool,
+                state.config.public_host(),
+                message_id,
+            )
+            .await?;
             let session = authorize_federation(
                 state,
                 conn_id,
@@ -689,17 +702,20 @@ pub(super) async fn handle_federation_request(
             let resource = ops::messages::update(
                 state,
                 &session,
-                message_id,
                 &message_update,
                 ops::messages::MessageTarget::Local(location),
             )
             .await?;
             Ok(FederationWsReply::MessagesUpdate(resource))
         }
+
         FederationWsRequest::MessagesDelete { message_id } => {
-            let location =
-                queries::messages::get_location(&state.db_pool, message_id)
-                    .await?;
+            let location = queries::messages::get_location(
+                &state.db_pool,
+                state.config.public_host(),
+                message_id,
+            )
+            .await?;
             let session = authorize_federation(
                 state,
                 conn_id,
@@ -710,7 +726,6 @@ pub(super) async fn handle_federation_request(
             let message = ops::messages::delete(
                 state,
                 &session,
-                message_id,
                 ops::messages::MessageTarget::Local(location),
             )
             .await?;

@@ -1,6 +1,6 @@
 use reqwest::{Client, StatusCode};
 use runelink_client::requests;
-use runelink_types::UserRef;
+use runelink_types::{Host, UserRef};
 use serde::Serialize;
 use std::io::{ErrorKind, Write};
 use time::OffsetDateTime;
@@ -10,6 +10,7 @@ use crate::cli::input::{can_prompt, read_password};
 use crate::error::CliError;
 use crate::storage::{AccountConfig, AppConfig, TryGetHost, resolve_api_url};
 use crate::storage_auth::{AccountAuth, AuthCache};
+use crate::util::parse_optional_host_input;
 
 const MAX_PASSWORD_ATTEMPTS: u32 = 3;
 
@@ -19,6 +20,8 @@ pub struct CliContext<'a> {
     pub auth_cache: &'a mut AuthCache,
     pub account: Option<&'a AccountConfig>,
     pub strict_input: bool,
+    /// Show each server's host in server lists and prompts
+    pub show_server_hosts: bool,
     /// Print returned data as JSON, and nothing else, on stdout
     pub json: bool,
 }
@@ -58,8 +61,16 @@ impl<'a> CliContext<'a> {
         resolve_api_url(self.client, self.config, &host).await
     }
 
-    pub fn home_host(&self) -> Result<&str, CliError> {
+    pub fn home_host(&self) -> Result<&Host, CliError> {
         self.account.try_get_host()
+    }
+
+    /// The host that `host` names, or the home host if it is not given.
+    pub fn resource_host(&self, host: Option<&str>) -> Result<Host, CliError> {
+        match parse_optional_host_input(host, self.strict_input)? {
+            Some(host) => Ok(host),
+            None => Ok(self.home_host()?.clone()),
+        }
     }
 
     pub async fn get_access_token(&mut self) -> Result<String, CliError> {

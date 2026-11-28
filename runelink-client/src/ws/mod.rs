@@ -62,8 +62,8 @@ use runelink_types::{
         SupportedCapabilities, supported_capabilities,
         versions::NEGOTIATION_VERSION,
     },
+    host::canonical_host,
     ids::RequestId,
-    user::canonical_host,
     ws::{
         ClientWsEnvelope, ClientWsReply, ClientWsRequest, ClientWsUpdate,
         WsError,
@@ -286,7 +286,7 @@ struct Pending {
 }
 
 enum Outcome {
-    Reply(ClientWsReply),
+    Reply(Box<ClientWsReply>),
     HostError(WsError),
     Failed(Error),
 }
@@ -531,7 +531,9 @@ impl Connection {
             .await
             .unwrap_or(Outcome::Failed(Error::Disconnected))
         {
-            Outcome::Reply(reply) if request.expects_reply(&reply) => Ok(reply),
+            Outcome::Reply(reply) if request.expects_reply(&reply) => {
+                Ok(*reply)
+            }
             Outcome::Reply(reply) => Err(Error::protocol(format!(
                 "Unexpected reply type for {}: received {}",
                 type_name(&request),
@@ -1090,7 +1092,7 @@ impl Shared {
             }
             ClientWsEnvelope::Reply {
                 request_id, reply, ..
-            } => ("reply", Some(request_id), Outcome::Reply(reply)),
+            } => ("reply", Some(request_id), Outcome::Reply(Box::new(reply))),
             ClientWsEnvelope::Error {
                 request_id, error, ..
             } => ("error", request_id, Outcome::HostError(error)),

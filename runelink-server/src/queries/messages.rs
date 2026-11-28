@@ -1,7 +1,8 @@
 use runelink_types::{
     channel::TextChannelId,
+    host::Host,
     message::{Message, MessageContent, MessageId, NewMessage},
-    server::ServerId,
+    server::{ServerId, ServerRef},
     user::{User, UserRef},
 };
 use serde::{Deserialize, Serialize};
@@ -29,11 +30,9 @@ pub struct DbMessage {
     pub edited_at: Option<OffsetDateTime>,
 }
 
-impl TryFrom<DbMessage> for Message {
-    type Error = ApiError;
-
-    fn try_from(msg: DbMessage) -> ApiResult<Self> {
-        let content = match (msg.body, msg.deleted_at) {
+impl DbMessage {
+    fn into_message(self, host: &Host) -> ApiResult<Message> {
+        let content = match (self.body, self.deleted_at) {
             (Some(body), None) => MessageContent::Active {
                 body,
                 deleted_at: (),
@@ -49,11 +48,12 @@ impl TryFrom<DbMessage> for Message {
             }
         };
         Ok(Message {
-            id: msg.id,
-            text_channel_id: msg.text_channel_id,
-            author: msg.author.map(|json_user| json_user.0),
-            reply_to: msg.reply_to,
-            metadata: match msg.metadata {
+            id: self.id,
+            host: host.clone(),
+            text_channel_id: self.text_channel_id,
+            author: self.author.map(|json_user| json_user.0),
+            reply_to: self.reply_to,
+            metadata: match self.metadata {
                 None => None,
                 Some(serde_json::Value::Object(metadata)) => Some(metadata),
                 _ => {
@@ -63,9 +63,9 @@ impl TryFrom<DbMessage> for Message {
                 }
             },
             content,
-            created_at: msg.created_at,
-            updated_at: msg.updated_at,
-            edited_at: msg.edited_at,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+            edited_at: self.edited_at,
         })
     }
 }
@@ -87,6 +87,7 @@ pub async fn latest_time(
 /// Insert a message with an ID and creation time chosen by the caller.
 pub async fn insert(
     conn: &mut PgConnection,
+    host: &Host,
     message_id: MessageId,
     text_channel_id: TextChannelId,
     new_message: &NewMessage,
@@ -124,7 +125,7 @@ pub async fn insert(
         message_id.as_uuid(),
         text_channel_id.as_uuid(),
         new_message.author.name,
-        new_message.author.host,
+        new_message.author.host.as_str(),
         new_message.body,
         new_message.reply_to.map(|id| id.as_uuid()),
         new_message.metadata.as_ref().map(Json) as _,
@@ -132,10 +133,10 @@ pub async fn insert(
     )
     .fetch_one(conn)
     .await?;
-    row.try_into()
+    row.into_message(host)
 }
 
-pub async fn get_all(pool: &DbPool) -> ApiResult<Vec<Message>> {
+pub async fn get_all(pool: &DbPool, host: &Host) -> ApiResult<Vec<Message>> {
     let rows = sqlx::query_as!(
         DbMessage,
         r#"
@@ -157,11 +158,12 @@ pub async fn get_all(pool: &DbPool) -> ApiResult<Vec<Message>> {
     )
     .fetch_all(pool)
     .await?;
-    rows.into_iter().map(Message::try_from).collect()
+    rows.into_iter().map(|row| row.into_message(host)).collect()
 }
 
 pub async fn get_by_server(
     pool: &DbPool,
+    host: &Host,
     server_id: ServerId,
 ) -> ApiResult<Vec<Message>> {
     let rows = sqlx::query_as!(
@@ -188,11 +190,12 @@ pub async fn get_by_server(
     )
     .fetch_all(pool)
     .await?;
-    rows.into_iter().map(Message::try_from).collect()
+    rows.into_iter().map(|row| row.into_message(host)).collect()
 }
 
 pub async fn get_by_text_channel(
     pool: &DbPool,
+    host: &Host,
     text_channel_id: TextChannelId,
 ) -> ApiResult<Vec<Message>> {
     let rows = sqlx::query_as!(
@@ -218,11 +221,12 @@ pub async fn get_by_text_channel(
     )
     .fetch_all(pool)
     .await?;
-    rows.into_iter().map(Message::try_from).collect()
+    rows.into_iter().map(|row| row.into_message(host)).collect()
 }
 
 pub async fn get_by_id(
     executor: impl PgExecutor<'_>,
+    host: &Host,
     msg_id: MessageId,
 ) -> ApiResult<Message> {
     let db_message = sqlx::query_as!(
@@ -247,13 +251,14 @@ pub async fn get_by_id(
     )
     .fetch_one(executor)
     .await?;
-    db_message.try_into()
+    db_message.into_message(host)
 }
 
 /// Where a message lives, and its author if they still exist.
 #[derive(Debug)]
 pub struct MessageLocation {
-    pub server_id: ServerId,
+    pub message_id: MessageId,
+    pub server_ref: ServerRef,
     pub text_channel_id: TextChannelId,
     pub author: Option<UserRef>,
 }
@@ -261,6 +266,7 @@ pub struct MessageLocation {
 /// Get where a message lives and who wrote it.
 pub async fn get_location(
     pool: &DbPool,
+    host: &Host,
     message_id: MessageId,
 ) -> ApiResult<MessageLocation> {
     let row = sqlx::query!(
@@ -280,7 +286,8 @@ pub async fn get_location(
         .map(|(name, host)| UserRef::new(name, host))
         .transpose()?;
     Ok(MessageLocation {
-        server_id: row.server_id.into(),
+        message_id,
+        server_ref: ServerRef::new(host.clone(), row.server_id.into()),
         text_channel_id: row.text_channel_id.into(),
         author,
     })
@@ -290,6 +297,7 @@ pub async fn get_location(
 /// deletion time. `now` is the deletion time, chosen by the caller.
 pub async fn delete(
     conn: &mut PgConnection,
+    host: &Host,
     text_channel_id: TextChannelId,
     message_id: MessageId,
     now: OffsetDateTime,
@@ -306,7 +314,7 @@ pub async fn delete(
     )
     .execute(&mut *conn)
     .await?;
-    let message = get_by_id(conn, message_id).await?;
+    let message = get_by_id(conn, host, message_id).await?;
     if message.text_channel_id != text_channel_id {
         return Err(ApiError::NotFound);
     }
@@ -316,6 +324,7 @@ pub async fn delete(
 /// Edit a message. `now` is the edit time, chosen by the caller.
 pub async fn update(
     conn: &mut PgConnection,
+    host: &Host,
     text_channel_id: TextChannelId,
     message_id: MessageId,
     update: &runelink_types::message::MessageUpdate,
@@ -378,7 +387,7 @@ pub async fn update(
         row.updated_at = now;
         row.edited_at = Some(now);
     }
-    row.try_into()
+    row.into_message(host)
 }
 
 #[cfg(test)]
@@ -406,6 +415,7 @@ mod tests {
     #[ignore = "requires DATABASE_URL pointing to a migrated PostgreSQL database"]
     async fn deletion_clears_text_and_preserves_replies() {
         let pool = test_pool().await;
+        let host = &Host::parse("localhost").unwrap();
         let channel: Uuid = sqlx::query_scalar(
             "INSERT INTO text_channels DEFAULT VALUES RETURNING id",
         )
@@ -416,13 +426,18 @@ mod tests {
             .bind(channel).fetch_one(&pool).await.unwrap();
         let reply: Uuid = sqlx::query_scalar("INSERT INTO messages (text_channel_id, body, reply_to) VALUES ($1, 'reply', $2) RETURNING id")
             .bind(channel).bind(original).fetch_one(&pool).await.unwrap();
-        let before = get_by_id(&pool, original.into()).await.unwrap();
+        let before = get_by_id(&pool, host, original.into()).await.unwrap();
         let mut conn = pool.acquire().await.unwrap();
         let deleted_at = before.created_at + time::Duration::seconds(1);
-        let deleted =
-            delete(&mut conn, channel.into(), original.into(), deleted_at)
-                .await
-                .unwrap();
+        let deleted = delete(
+            &mut conn,
+            host,
+            channel.into(),
+            original.into(),
+            deleted_at,
+        )
+        .await
+        .unwrap();
         assert!(matches!(
             deleted.content,
             MessageContent::Deleted { deleted_at: at, .. } if at == deleted_at
@@ -432,18 +447,18 @@ mod tests {
         // A later deletion keeps the first deletion time.
         let later = deleted_at + time::Duration::seconds(1);
         assert_eq!(
-            delete(&mut conn, channel.into(), original.into(), later)
+            delete(&mut conn, host, channel.into(), original.into(), later)
                 .await
                 .unwrap(),
             deleted
         );
         drop(conn);
         assert_eq!(
-            get_by_id(&pool, reply.into()).await.unwrap().reply_to,
+            get_by_id(&pool, host, reply.into()).await.unwrap().reply_to,
             Some(original.into())
         );
         assert_eq!(
-            get_by_text_channel(&pool, channel.into())
+            get_by_text_channel(&pool, host, channel.into())
                 .await
                 .unwrap()
                 .len(),
@@ -465,7 +480,9 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let remaining = get_by_text_channel(&pool, other.into()).await.unwrap();
+        let remaining = get_by_text_channel(&pool, host, other.into())
+            .await
+            .unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].reply_to, None);
         sqlx::query("ROLLBACK").execute(&pool).await.unwrap();

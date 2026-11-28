@@ -2,9 +2,15 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use time::OffsetDateTime;
 
-use crate::{ids::ServerId, metadata::Metadata};
+use crate::{
+    host::Host,
+    ids::{ServerId, ServerRef},
+    metadata::Metadata,
+};
 
-pub use crate::ids::{ServerChannelId, TextChannelId};
+pub use crate::ids::{
+    ServerChannelId, ServerChannelRef, TextChannelId, TextChannelRef,
+};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -24,6 +30,8 @@ pub enum ServerChannelKind {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ServerChannel {
     pub id: ServerChannelId,
+    /// The host of the channel's server.
+    pub host: Host,
     pub server_id: ServerId,
     #[serde(flatten)]
     pub content: ServerChannelContent,
@@ -74,6 +82,24 @@ impl ServerChannel {
         match self.content {
             ServerChannelContent::Text { .. } => ServerChannelKind::Text,
             ServerChannelContent::Category => ServerChannelKind::Category,
+        }
+    }
+
+    pub fn to_ref(&self) -> ServerChannelRef {
+        ServerChannelRef::new(self.host.clone(), self.id)
+    }
+
+    pub fn server_ref(&self) -> ServerRef {
+        ServerRef::new(self.host.clone(), self.server_id)
+    }
+
+    /// The text channel this channel owns, if it is a text channel.
+    pub fn text_channel_ref(&self) -> Option<TextChannelRef> {
+        match self.content {
+            ServerChannelContent::Text { text_channel_id } => {
+                Some(TextChannelRef::new(self.host.clone(), text_channel_id))
+            }
+            ServerChannelContent::Category => None,
         }
     }
 
@@ -139,6 +165,7 @@ mod tests {
     fn channel(content: ServerChannelContent) -> ServerChannel {
         ServerChannel {
             id: ServerChannelId::new(),
+            host: Host::parse("localhost").unwrap(),
             server_id: ServerId::new(),
             content,
             title: "general".into(),

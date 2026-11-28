@@ -2,6 +2,7 @@ use std::{collections::HashMap, path::PathBuf};
 
 use runelink_client::util::get_api_url;
 use runelink_client::validation::validate_config_host;
+use runelink_types::{host::Host, ids::ResourceRef};
 use serde::Deserialize;
 
 pub type ConfigResult<T> = std::result::Result<T, ConfigError>;
@@ -52,6 +53,7 @@ pub enum ConfigError {
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
     pub public_host_raw: String,
+    host: Host,
     pub database_url: String,
     pub public_port: u16,
     pub bind_host: String,
@@ -79,13 +81,30 @@ impl ServerConfig {
         Ok(configs)
     }
 
-    /// Includes port if it's not the default port (7000)
-    pub fn public_host(&self) -> String {
-        if self.public_port == 7000 {
-            self.public_host_raw.clone()
-        } else {
-            self.public_host_with_explicit_port()
+    /// This host, as resources and peers name it: with its port, unless it
+    /// is the default port (7000).
+    pub fn public_host(&self) -> &Host {
+        &self.host
+    }
+
+    /// A host at `localhost` on the default port, for tests.
+    #[cfg(test)]
+    pub fn for_test(database_url: String) -> Self {
+        Self {
+            public_host_raw: "localhost".into(),
+            host: Host::parse("localhost").unwrap(),
+            database_url,
+            public_port: 7000,
+            bind_host: "127.0.0.1".into(),
+            bind_port: 7000,
+            secure: false,
+            key_dir: PathBuf::new(),
         }
+    }
+
+    /// A reference to a resource on this host.
+    pub fn local_ref<Id>(&self, id: Id) -> ResourceRef<Id> {
+        ResourceRef::new(self.host.clone(), id)
     }
 
     /// Always includes port for machine-to-machine communication
@@ -118,8 +137,8 @@ impl ServerConfig {
     }
 
     /// Whether a host is this host or a remote one.
-    pub fn locality<'a>(&self, host: &'a str) -> Locality<'a> {
-        if hosts_match(host, &self.public_host()) {
+    pub fn locality<'a>(&self, host: &'a Host) -> Locality<'a> {
+        if *host == self.host {
             Locality::Local
         } else {
             Locality::Remote(host)
@@ -127,7 +146,7 @@ impl ServerConfig {
     }
 
     /// Like [`Self::locality`], but no target host means this host.
-    pub fn target_locality<'a>(&self, host: Option<&'a str>) -> Locality<'a> {
+    pub fn target_locality<'a>(&self, host: Option<&'a Host>) -> Locality<'a> {
         host.map_or(Locality::Local, |host| self.locality(host))
     }
 }
@@ -135,7 +154,7 @@ impl ServerConfig {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Locality<'a> {
     Local,
-    Remote(&'a str),
+    Remote(&'a Host),
 }
 
 impl Locality<'_> {
@@ -148,15 +167,7 @@ impl Locality<'_> {
     }
 }
 
-pub use runelink_types::user::canonical_host;
-
-/// Whether two host strings name the same host.
-pub fn hosts_match(a: &str, b: &str) -> bool {
-    matches!(
-        (canonical_host(a), canonical_host(b)),
-        (Ok(a), Ok(b)) if a == b
-    )
-}
+pub use runelink_types::host::canonical_host;
 
 #[derive(Deserialize, Debug)]
 struct RootConfig {
@@ -187,6 +198,8 @@ impl RawServerConfig {
         // In the spelling that hosts in requests are canonicalized to.
         let public_host = canonical_host(&public_host)
             .map_err(|error| invalid(error.to_string()))?;
+        let host = Host::parse(&format!("{public_host}:{}", self.public_port))
+            .map_err(|error| invalid(error.to_string()))?;
         let database_url = self.database_url.trim().to_string();
         if database_url.is_empty() {
             return Err(ConfigError::InvalidServerEntry {
@@ -207,6 +220,7 @@ impl RawServerConfig {
             .unwrap_or_else(|| default_key_dir(self.public_port));
         Ok(ServerConfig {
             public_host_raw: public_host,
+            host,
             database_url,
             public_port: self.public_port,
             bind_host,
@@ -272,17 +286,4 @@ fn validate_unique_resources(configs: &[ServerConfig]) -> ConfigResult<()> {
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::hosts_match;
-
-    #[test]
-    fn hosts_match_ignores_default_port_and_case() {
-        assert!(hosts_match("example.com", "example.com:7000"));
-        assert!(hosts_match("Example.COM", "example.com"));
-        assert!(!hosts_match("example.com", "example.com:7001"));
-        assert!(!hosts_match("example.com", "example.org"));
-    }
 }

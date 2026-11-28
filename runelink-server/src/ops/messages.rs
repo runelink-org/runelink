@@ -1,7 +1,8 @@
 use runelink_types::{
-    channel::TextChannelId,
-    message::{Message, MessageId, NewMessage},
-    server::ServerId,
+    channel::{TextChannelId, TextChannelRef},
+    host::Host,
+    message::{Message, MessageId, MessageRef, NewMessage},
+    server::ServerRef,
     user::UserRef,
     ws::{FederationWsReply, FederationWsRequest},
 };
@@ -19,16 +20,15 @@ use crate::{
 pub async fn create(
     state: &AppState,
     session: &Session,
-    text_channel_id: TextChannelId,
+    text_channel_ref: &TextChannelRef,
     new_message: &NewMessage,
-    target_host: Option<&str>,
 ) -> ApiResult<Message> {
-    match state.config.target_locality(target_host) {
+    match state.config.locality(&text_channel_ref.host) {
         Locality::Local => {
             state
                 .actors
                 .create_message(
-                    text_channel_id,
+                    text_channel_ref.id,
                     new_message.clone(),
                     session.authorization(),
                 )
@@ -46,7 +46,7 @@ pub async fn create(
                 host,
                 Some(user_ref.clone()),
                 FederationWsRequest::MessagesCreate {
-                    text_channel_id,
+                    text_channel_id: text_channel_ref.id,
                     new_message: new_message.clone(),
                 },
             )
@@ -65,11 +65,15 @@ pub async fn create(
 pub async fn get_all(
     state: &AppState,
     session: &Session,
-    target_host: Option<&str>,
+    target_host: Option<&Host>,
 ) -> ApiResult<Vec<Message>> {
     match state.config.target_locality(target_host) {
         Locality::Local => {
-            let messages = queries::messages::get_all(&state.db_pool).await?;
+            let messages = queries::messages::get_all(
+                &state.db_pool,
+                state.config.public_host(),
+            )
+            .await?;
             Ok(messages)
         }
         Locality::Remote(host) => {
@@ -100,14 +104,16 @@ pub async fn get_all(
 pub async fn get_by_server(
     state: &AppState,
     session: &Session,
-    server_id: ServerId,
-    target_host: Option<&str>,
+    server_ref: &ServerRef,
 ) -> ApiResult<Vec<Message>> {
-    match state.config.target_locality(target_host) {
+    match state.config.locality(&server_ref.host) {
         Locality::Local => {
-            let messages =
-                queries::messages::get_by_server(&state.db_pool, server_id)
-                    .await?;
+            let messages = queries::messages::get_by_server(
+                &state.db_pool,
+                state.config.public_host(),
+                server_ref.id,
+            )
+            .await?;
             Ok(messages)
         }
         Locality::Remote(host) => {
@@ -121,7 +127,9 @@ pub async fn get_by_server(
                 state,
                 host,
                 Some(user_ref.clone()),
-                FederationWsRequest::MessagesGetByServer { server_id },
+                FederationWsRequest::MessagesGetByServer {
+                    server_id: server_ref.id,
+                },
             )
             .await?;
             let FederationWsReply::MessagesGetByServer(messages) = reply else {
@@ -138,14 +146,14 @@ pub async fn get_by_server(
 pub async fn get_by_text_channel(
     state: &AppState,
     session: &Session,
-    text_channel_id: TextChannelId,
-    target_host: Option<&str>,
+    text_channel_ref: &TextChannelRef,
 ) -> ApiResult<Vec<Message>> {
-    match state.config.target_locality(target_host) {
+    match state.config.locality(&text_channel_ref.host) {
         Locality::Local => {
             let messages = queries::messages::get_by_text_channel(
                 &state.db_pool,
-                text_channel_id,
+                state.config.public_host(),
+                text_channel_ref.id,
             )
             .await?;
             Ok(messages)
@@ -162,7 +170,7 @@ pub async fn get_by_text_channel(
                 host,
                 Some(user_ref.clone()),
                 FederationWsRequest::MessagesGetByTextChannel {
-                    text_channel_id,
+                    text_channel_id: text_channel_ref.id,
                 },
             )
             .await?;
@@ -181,14 +189,16 @@ pub async fn get_by_text_channel(
 pub async fn get_by_id(
     state: &AppState,
     session: &Session,
-    message_id: MessageId,
-    target_host: Option<&str>,
+    message_ref: &MessageRef,
 ) -> ApiResult<Message> {
-    match state.config.target_locality(target_host) {
+    match state.config.locality(&message_ref.host) {
         Locality::Local => {
-            let message =
-                queries::messages::get_by_id(&*state.db_pool, message_id)
-                    .await?;
+            let message = queries::messages::get_by_id(
+                &*state.db_pool,
+                state.config.public_host(),
+                message_ref.id,
+            )
+            .await?;
             Ok(message)
         }
         Locality::Remote(host) => {
@@ -202,7 +212,9 @@ pub async fn get_by_id(
                 state,
                 host,
                 Some(user_ref.clone()),
-                FederationWsRequest::MessagesGetById { message_id },
+                FederationWsRequest::MessagesGetById {
+                    message_id: message_ref.id,
+                },
             )
             .await?;
             let FederationWsReply::MessagesGetById(message) = reply else {
@@ -221,21 +233,25 @@ pub enum MessageTarget<'a> {
     /// A message on this host.
     Local(MessageLocation),
     /// A message on another host, which authorizes the request itself.
-    Remote(&'a str),
+    Remote(&'a MessageRef),
 }
 
 /// Find where an edit or delete goes. A local message's location serves both
 /// its permission check and its routing, so it is looked up once.
 pub async fn locate<'a>(
     state: &AppState,
-    message_id: MessageId,
-    target_host: Option<&'a str>,
+    message_ref: &'a MessageRef,
 ) -> ApiResult<MessageTarget<'a>> {
-    Ok(match state.config.target_locality(target_host) {
+    Ok(match state.config.locality(&message_ref.host) {
         Locality::Local => MessageTarget::Local(
-            queries::messages::get_location(&state.db_pool, message_id).await?,
+            queries::messages::get_location(
+                &state.db_pool,
+                state.config.public_host(),
+                message_ref.id,
+            )
+            .await?,
         ),
-        Locality::Remote(host) => MessageTarget::Remote(host),
+        Locality::Remote(_) => MessageTarget::Remote(message_ref),
     })
 }
 
@@ -243,7 +259,6 @@ pub async fn locate<'a>(
 pub async fn delete(
     state: &AppState,
     session: &Session,
-    message_id: MessageId,
     target: MessageTarget<'_>,
 ) -> ApiResult<Message> {
     match target {
@@ -252,12 +267,13 @@ pub async fn delete(
                 .actors
                 .delete_message(
                     location.text_channel_id,
-                    message_id,
+                    location.message_id,
                     session.authorization(),
                 )
                 .await
         }
-        MessageTarget::Remote(host) => {
+        MessageTarget::Remote(message) => {
+            let host = &message.host;
             let user_ref = session.user_ref.as_ref().ok_or_else(|| {
                 ApiError::Internal(
                     "User reference required for federated message deletion"
@@ -268,7 +284,9 @@ pub async fn delete(
                 state,
                 host,
                 Some(user_ref.clone()),
-                FederationWsRequest::MessagesDelete { message_id },
+                FederationWsRequest::MessagesDelete {
+                    message_id: message.id,
+                },
             )
             .await?;
             let FederationWsReply::MessagesDelete(message) = reply else {
@@ -299,27 +317,27 @@ pub mod auth {
             text_channel_id,
         )
         .await?;
-        Ok(Req::ServerMember(server_id))
+        Ok(Req::ServerMember(state.config.local_ref(server_id)))
     }
 
     async fn message_member(
         state: &AppState,
         message_id: MessageId,
     ) -> ApiResult<Req> {
-        let location =
-            queries::messages::get_location(&state.db_pool, message_id).await?;
-        Ok(Req::ServerMember(location.server_id))
+        let location = queries::messages::get_location(
+            &state.db_pool,
+            state.config.public_host(),
+            message_id,
+        )
+        .await?;
+        Ok(Req::ServerMember(location.server_ref))
     }
 
     fn delete_base(location: &MessageLocation) -> Req {
+        let admin = Req::ServerAdmin(location.server_ref.clone());
         match &location.author {
-            Some(author) => {
-                or!(
-                    Req::User(author.clone()),
-                    Req::ServerAdmin(location.server_id)
-                )
-            }
-            None => Req::ServerAdmin(location.server_id),
+            Some(author) => or!(Req::User(author.clone()), admin),
+            None => admin,
         }
     }
 
@@ -327,7 +345,7 @@ pub mod auth {
         match &location.author {
             Some(author) => crate::and!(
                 Req::User(author.clone()),
-                Req::ServerMember(location.server_id)
+                Req::ServerMember(location.server_ref.clone())
             ),
             None => Req::Never,
         }
@@ -344,12 +362,10 @@ pub mod auth {
     /// Members post as themselves only.
     pub async fn create(
         state: &AppState,
-        text_channel_id: TextChannelId,
+        text_channel_ref: &TextChannelRef,
         author: &UserRef,
-        target_host: Option<&str>,
     ) -> ApiResult<Req> {
-        let base =
-            get_by_text_channel(state, text_channel_id, target_host).await?;
+        let base = get_by_text_channel(state, text_channel_ref).await?;
         Ok(crate::and!(Req::User(author.clone()), base))
     }
 
@@ -357,31 +373,31 @@ pub mod auth {
         Req::HostAdmin.client_only()
     }
 
-    pub fn get_by_server(server_id: ServerId) -> Req {
-        Req::ServerMember(server_id).or_admin().client_only()
+    pub fn get_by_server(server_ref: &ServerRef) -> Req {
+        Req::ServerMember(server_ref.clone())
+            .or_admin()
+            .client_only()
     }
 
     pub async fn get_by_text_channel(
         state: &AppState,
-        text_channel_id: TextChannelId,
-        target_host: Option<&str>,
+        text_channel_ref: &TextChannelRef,
     ) -> ApiResult<Req> {
-        if state.config.target_locality(target_host).is_remote() {
+        if state.config.locality(&text_channel_ref.host).is_remote() {
             return Ok(Req::Client);
         }
-        let base = text_channel_member(state, text_channel_id).await?;
+        let base = text_channel_member(state, text_channel_ref.id).await?;
         Ok(base.or_admin().client_only())
     }
 
     pub async fn get_by_id(
         state: &AppState,
-        message_id: MessageId,
-        target_host: Option<&str>,
+        message_ref: &MessageRef,
     ) -> ApiResult<Req> {
-        if state.config.target_locality(target_host).is_remote() {
+        if state.config.locality(&message_ref.host).is_remote() {
             return Ok(Req::Client);
         }
-        let base = message_member(state, message_id).await?;
+        let base = message_member(state, message_ref.id).await?;
         Ok(base.or_admin().client_only())
     }
 
@@ -414,8 +430,8 @@ pub mod auth {
             Req::Never.federated_only()
         }
 
-        pub fn get_by_server(server_id: ServerId) -> Req {
-            Req::ServerMember(server_id).federated_only()
+        pub fn get_by_server(server_ref: ServerRef) -> Req {
+            Req::ServerMember(server_ref).federated_only()
         }
 
         pub async fn get_by_text_channel(
@@ -445,7 +461,6 @@ pub mod auth {
 pub async fn update(
     state: &AppState,
     session: &Session,
-    message_id: MessageId,
     message_update: &runelink_types::message::MessageUpdate,
     target: MessageTarget<'_>,
 ) -> ApiResult<Message> {
@@ -455,13 +470,14 @@ pub async fn update(
                 .actors
                 .update_message(
                     location.text_channel_id,
-                    message_id,
+                    location.message_id,
                     message_update.clone(),
                     session.authorization(),
                 )
                 .await
         }
-        MessageTarget::Remote(host) => {
+        MessageTarget::Remote(message) => {
+            let host = &message.host;
             let user_ref = session.user_ref.clone().ok_or_else(|| {
                 ApiError::AuthError("User identity required".into())
             })?;
@@ -470,7 +486,7 @@ pub async fn update(
                 host,
                 Some(user_ref),
                 FederationWsRequest::MessagesUpdate {
-                    message_id,
+                    message_id: message.id,
                     message_update: message_update.clone(),
                 },
             )

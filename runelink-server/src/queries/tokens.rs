@@ -79,7 +79,7 @@ pub async fn delete_stale_refresh(
             AND (revoked OR expires_at <= $3)
         "#,
         user_ref.name,
-        user_ref.host,
+        user_ref.host.as_str(),
         now,
     )
     .execute(pool)

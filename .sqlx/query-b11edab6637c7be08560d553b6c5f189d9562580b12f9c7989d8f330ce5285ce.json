@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT DISTINCT remote_server_host AS \"remote_server_host: Host\"\n        FROM user_remote_server_memberships\n        WHERE user_name = $1 AND user_host = $2\n        ORDER BY remote_server_host ASC;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "remote_server_host: Host",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_remote_server_memberships",
+            "name": "remote_server_host"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b11edab6637c7be08560d553b6c5f189d9562580b12f9c7989d8f330ce5285ce"
+}

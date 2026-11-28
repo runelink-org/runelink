@@ -146,7 +146,7 @@ mod tests {
         fs::write(path.join("public_ed25519.der"), STANDARD.decode("MCowBQYDK2VwAyEA11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=").unwrap()).unwrap();
         let keys = KeyManager::load_or_generate(path.clone()).unwrap();
         let claims = ClientAccessClaims::new(
-            &UserRef::new("test".into(), "localhost".into()).unwrap(),
+            &UserRef::new("test".into(), "localhost").unwrap(),
             "test".into(),
             "http://localhost:7000".into(),
             "openid".into(),

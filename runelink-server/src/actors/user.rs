@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use runelink_types::{
-    server::{ServerId, ServerRole},
+    server::{ServerRef, ServerRole},
     user::{NewUser, User, UserRef},
     ws::{ClientWsUpdate, FederationWsUpdate},
 };
@@ -103,7 +103,7 @@ impl Facts for UserFacts<'_> {
 
     async fn server_role(
         &mut self,
-        _server_id: ServerId,
+        _server_ref: &ServerRef,
         _user_ref: &UserRef,
     ) -> ApiResult<Option<ServerRole>> {
         Ok(None)

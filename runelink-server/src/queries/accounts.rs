@@ -6,7 +6,7 @@ use crate::{db::DbPool, error::ApiResult};
 
 pub async fn insert(
     executor: impl PgExecutor<'_>,
-    user: UserRef,
+    user_ref: UserRef,
     password_hash: &str,
 ) -> ApiResult<LocalAccount> {
     let local_account = sqlx::query_as!(
@@ -16,8 +16,8 @@ pub async fn insert(
         VALUES ($1, $2, $3)
         RETURNING user_name, user_host, password_hash, created_at, updated_at;
         "#,
-        user.name,
-        user.host,
+        user_ref.name,
+        user_ref.host.as_str(),
         password_hash,
     )
     .fetch_one(executor)
@@ -27,7 +27,7 @@ pub async fn insert(
 
 pub async fn get_by_user(
     pool: &DbPool,
-    user: UserRef,
+    user_ref: UserRef,
 ) -> ApiResult<LocalAccount> {
     let local_account = sqlx::query_as!(
         LocalAccount,
@@ -36,8 +36,8 @@ pub async fn get_by_user(
         FROM local_accounts
         WHERE user_name = $1 AND user_host = $2;
         "#,
-        user.name,
-        user.host,
+        user_ref.name,
+        user_ref.host.as_str(),
     )
     .fetch_one(pool)
     .await?;
@@ -45,11 +45,11 @@ pub async fn get_by_user(
 }
 
 #[allow(dead_code)]
-pub async fn delete_by_user(pool: &DbPool, user: UserRef) -> ApiResult<()> {
+pub async fn delete_by_user(pool: &DbPool, user_ref: UserRef) -> ApiResult<()> {
     sqlx::query!(
         "DELETE FROM local_accounts WHERE user_name = $1 AND user_host = $2;",
-        user.name,
-        user.host,
+        user_ref.name,
+        user_ref.host.as_str(),
     )
     .execute(pool)
     .await?;

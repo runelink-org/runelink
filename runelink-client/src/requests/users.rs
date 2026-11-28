@@ -2,6 +2,7 @@ use log::info;
 use reqwest::Client;
 use runelink_types::{
     capability::Capability,
+    host::Host,
     user::{NewUser, User, UserRef},
 };
 
@@ -30,7 +31,7 @@ pub async fn create(
 pub async fn fetch_all(
     client: &Client,
     api_url: &str,
-    target_host: Option<&str>,
+    target_host: Option<&Host>,
 ) -> Result<Vec<User>> {
     let mut url = format!("{api_url}/users");
     if let Some(host) = target_host {
@@ -43,12 +44,12 @@ pub async fn fetch_all(
 pub async fn fetch_by_ref(
     client: &Client,
     api_url: &str,
-    user: UserRef,
+    user_ref: UserRef,
 ) -> Result<User> {
     let url = format!(
         "{api_url}/users/{host}/{name}",
-        host = user.host,
-        name = user.name
+        host = user_ref.host,
+        name = user_ref.name
     );
     info!("fetching user: {url}");
     fetch_json::<User>(client, &url, Capability::UsersRead).await
@@ -58,12 +59,12 @@ pub async fn delete(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    user: UserRef,
+    user_ref: UserRef,
 ) -> Result<()> {
     let url = format!(
         "{api_url}/users/{host}/{name}",
-        host = user.host,
-        name = user.name
+        host = user_ref.host,
+        name = user_ref.name
     );
     info!("deleting user: {url}");
     delete_authed(client, &url, access_token, Capability::UsersDelete).await
@@ -73,8 +74,8 @@ pub async fn fetch_associated_hosts(
     client: &Client,
     api_url: &str,
     user_ref: UserRef,
-    target_host: Option<&str>,
-) -> Result<Vec<String>> {
+    target_host: Option<&Host>,
+) -> Result<Vec<Host>> {
     let mut url = format!(
         "{api_url}/users/{host}/{name}/hosts",
         host = user_ref.host,
@@ -84,5 +85,5 @@ pub async fn fetch_associated_hosts(
         url = format!("{url}?target_host={d}");
     }
     info!("fetching user associated hosts: {url}");
-    fetch_json::<Vec<String>>(client, &url, Capability::UsersRead).await
+    fetch_json::<Vec<Host>>(client, &url, Capability::UsersRead).await
 }

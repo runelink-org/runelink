@@ -10,7 +10,7 @@ use runelink_types::{
     },
     server::{
         FullServerMembership, NewServer, NewServerMembership, Server, ServerId,
-        ServerRole, ServerUpdate,
+        ServerRef, ServerRole, ServerUpdate,
     },
     user::{User, UserRef},
     ws::{ClientWsUpdate, FederationWsUpdate},
@@ -70,7 +70,7 @@ enum Change {
     /// The server was created with its admin and any default text channel.
     Create {
         admin: UserRef,
-        text_channel: Option<TextChannelId>,
+        text_channel_id: Option<TextChannelId>,
     },
     AddMember(UserRef, ServerRole),
     RemoveMember(UserRef),
@@ -164,11 +164,11 @@ async fn run(
                     Change::None => {}
                     Change::Create {
                         admin,
-                        text_channel,
+                        text_channel_id,
                     } => {
                         targets.add(&ctx.config, &admin);
                         state.members.insert(admin, ServerRole::Admin);
-                        state.text_channels.extend(text_channel);
+                        state.text_channels.extend(text_channel_id);
                     }
                     Change::AddMember(user, role) => {
                         if !state.members.contains_key(&user) {
@@ -242,7 +242,7 @@ async fn execute(
     let mut tx = ctx.db_pool.begin().await?;
     let mut facts = ActorFacts {
         conn: &mut tx,
-        server_id,
+        server_ref: ctx.config.local_ref(server_id),
         state,
     };
     auth.check(&ctx.config, &mut facts).await?;
@@ -256,6 +256,7 @@ async fn apply(
     conn: &mut PgConnection,
     op: ServerOp,
 ) -> ApiResult<Outcome> {
+    let host = ctx.config.public_host();
     match op {
         ServerOp::Create {
             new_server,
@@ -274,11 +275,16 @@ async fn apply(
 
         ServerOp::Delete => {
             queries::servers::delete(conn, server_id).await?;
+            let server_ref = ServerRef::new(host.clone(), server_id);
             Ok(Outcome::new(
                 ServerOutput::Done,
                 Update {
-                    client: ClientWsUpdate::ServerDeleted { server_id },
-                    federation: FederationWsUpdate::ServerDeleted { server_id },
+                    client: ClientWsUpdate::ServerDeleted {
+                        server_ref: server_ref.clone(),
+                    },
+                    federation: FederationWsUpdate::ServerDeleted {
+                        server_ref,
+                    },
                 },
             )
             .with_change(Change::Delete))
@@ -287,19 +293,19 @@ async fn apply(
         ServerOp::CreateChannel(new_channel) => {
             if let Some(parent_id) = new_channel.parent_channel_id {
                 let parent =
-                    queries::channels::get_by_id(&mut *conn, parent_id)
+                    queries::channels::get_by_id(&mut *conn, host, parent_id)
                         .await
                         .map_err(|error| match error {
-                        ApiError::NotFound => ApiError::BadRequest(
-                            "Parent channel not found in specified server"
-                                .into(),
-                        ),
-                        error => error,
-                    })?;
+                            ApiError::NotFound => ApiError::BadRequest(
+                                "Parent channel not found in specified server"
+                                    .into(),
+                            ),
+                            error => error,
+                        })?;
                 channel_tree::check_parent(server_id, &parent)?;
             }
             let channel =
-                queries::channels::insert(conn, server_id, &new_channel)
+                queries::channels::insert(conn, host, server_id, &new_channel)
                     .await?;
             let change = match channel.content {
                 ServerChannelContent::Text { text_channel_id } => {
@@ -315,9 +321,10 @@ async fn apply(
         }
 
         ServerOp::UpdateChannel { channel_id, update } => {
-            let channel =
-                queries::channels::update(conn, server_id, channel_id, &update)
-                    .await?;
+            let channel = queries::channels::update(
+                conn, host, server_id, channel_id, &update,
+            )
+            .await?;
             Ok(Outcome::new(
                 ServerOutput::Channel(channel.clone()),
                 channel_upserted(channel),
@@ -329,11 +336,13 @@ async fn apply(
             channel_move,
         } => {
             let channels =
-                queries::channels::list(&mut *conn, Some(server_id)).await?;
+                queries::channels::list(&mut *conn, host, Some(server_id))
+                    .await?;
             let planned =
                 channel_tree::plan_move(&channels, channel_id, &channel_move)?;
             let changed =
-                queries::channels::update_placements(conn, &planned).await?;
+                queries::channels::update_placements(conn, host, &planned)
+                    .await?;
             let updates =
                 changed.iter().cloned().map(channel_upserted).collect();
             Ok(Outcome {
@@ -363,11 +372,11 @@ async fn apply(
                 ServerOutput::Done,
                 Update {
                     client: ClientWsUpdate::ChannelDeleted {
-                        server_id,
+                        server_ref: ServerRef::new(host.clone(), server_id),
                         channel_id,
                     },
                     federation: FederationWsUpdate::ChannelDeleted {
-                        server_id,
+                        server_ref: ServerRef::new(host.clone(), server_id),
                         channel_id,
                     },
                 },
@@ -409,11 +418,11 @@ async fn apply(
                 ServerOutput::Done,
                 Update {
                     client: ClientWsUpdate::MembershipDeleted {
-                        server_id,
+                        server_ref: ServerRef::new(host.clone(), server_id),
                         user_ref: user_ref.clone(),
                     },
                     federation: FederationWsUpdate::MembershipDeleted {
-                        server_id,
+                        server_ref: ServerRef::new(host.clone(), server_id),
                         user_ref: user_ref.clone(),
                     },
                 },
@@ -453,8 +462,7 @@ async fn create(
     .await?;
     let new_membership = NewServerMembership {
         user_ref: creator,
-        server_id,
-        server_host: server.host.clone(),
+        server_ref: server.to_ref(),
         role: ServerRole::Admin,
     };
     let membership = upsert_membership(ctx, conn, &new_membership).await?;
@@ -463,7 +471,7 @@ async fn create(
         server_upserted(server.clone()),
         membership_upserted(membership),
     ];
-    let mut text_channel = None;
+    let mut text_channel_id = None;
     if new_server.default_channels {
         let new_channel = NewServerChannel {
             kind: ServerChannelKind::Text,
@@ -472,11 +480,18 @@ async fn create(
             metadata: None,
             parent_channel_id: None,
         };
-        let channel =
-            queries::channels::insert(conn, server_id, &new_channel).await?;
-        if let ServerChannelContent::Text { text_channel_id } = channel.content
+        let channel = queries::channels::insert(
+            conn,
+            ctx.config.public_host(),
+            server_id,
+            &new_channel,
+        )
+        .await?;
+        if let ServerChannelContent::Text {
+            text_channel_id: id,
+        } = channel.content
         {
-            text_channel = Some(text_channel_id);
+            text_channel_id = Some(id);
         }
         updates.push(channel_upserted(channel));
     }
@@ -485,7 +500,7 @@ async fn create(
         updates,
         change: Change::Create {
             admin: new_membership.user_ref,
-            text_channel,
+            text_channel_id,
         },
     })
 }
@@ -500,7 +515,7 @@ async fn upsert_membership(
     let membership = queries::memberships::get_local_by_user_and_server(
         &mut *conn,
         &ctx.config,
-        new_membership.server_id,
+        new_membership.server_ref.id,
         new_membership.user_ref.clone(),
     )
     .await?;

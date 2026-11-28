@@ -3,18 +3,22 @@ use std::fmt;
 use time::OffsetDateTime;
 
 use crate::{
-    ids::TextChannelId,
+    host::Host,
+    ids::{TextChannelId, TextChannelRef},
     metadata::Metadata,
     user::{User, UserRef},
 };
 
-pub use crate::ids::MessageId;
+pub use crate::ids::{MessageId, MessageRef};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Message {
     pub id: MessageId,
+    /// The host of the message's text channel.
+    pub host: Host,
     pub text_channel_id: TextChannelId,
     pub author: Option<User>,
+    /// A message in the same text channel.
     pub reply_to: Option<MessageId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
@@ -63,6 +67,16 @@ impl MessageContent {
     }
 }
 
+impl Message {
+    pub fn to_ref(&self) -> MessageRef {
+        MessageRef::new(self.host.clone(), self.id)
+    }
+
+    pub fn text_channel_ref(&self) -> TextChannelRef {
+        TextChannelRef::new(self.host.clone(), self.text_channel_id)
+    }
+}
+
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(reply_to) = self.reply_to {
@@ -88,6 +102,7 @@ mod tests {
     fn wire_message(body: Value, deleted_at: Value) -> Value {
         json!({
             "id": MessageId::new(),
+            "host": "localhost",
             "text_channel_id": TextChannelId::new(),
             "author": null,
             "reply_to": MessageId::new(),

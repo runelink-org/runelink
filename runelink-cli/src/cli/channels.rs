@@ -2,9 +2,9 @@ use runelink_client::requests;
 use runelink_types::{
     channel::{
         NewServerChannel, ServerChannel, ServerChannelId, ServerChannelKind,
-        ServerChannelMove,
+        ServerChannelMove, ServerChannelRef,
     },
-    server::ServerId,
+    server::{ServerId, ServerRef},
 };
 
 use crate::{
@@ -209,16 +209,15 @@ pub async fn handle_channel_commands(
         ChannelCommands::Edit(edit_args) => {
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
-            let target_host = parse_optional_host_input(
-                edit_args.host.as_deref(),
-                ctx.strict_input,
-            )?;
+            let channel_ref = ServerChannelRef::new(
+                ctx.resource_host(edit_args.host.as_deref())?,
+                edit_args.channel_id,
+            );
             let original = requests::channels::fetch_by_id(
                 ctx.client,
                 &api_url,
                 &access_token,
-                edit_args.channel_id,
-                target_host.as_deref(),
+                &channel_ref,
             )
             .await?;
             let update = runelink_types::channel::ServerChannelUpdate {
@@ -235,9 +234,8 @@ pub async fn handle_channel_commands(
                 ctx.client,
                 &api_url,
                 &access_token,
-                edit_args.channel_id,
+                &channel_ref,
                 &update,
-                target_host.as_deref(),
             )
             .await?;
             ctx.output(&resource, || println!("Updated channel: {resource}"))?;
@@ -259,12 +257,15 @@ pub async fn handle_channel_commands(
                     ));
                 }
                 (Some(server_id), false) => {
+                    let host = match target_host {
+                        Some(host) => host,
+                        None => ctx.home_host()?.clone(),
+                    };
                     requests::channels::fetch_by_server(
                         ctx.client,
                         &api_url,
                         &access_token,
-                        server_id,
-                        target_host.as_deref(),
+                        &ServerRef::new(host, server_id),
                     )
                     .await?
                 }
@@ -273,7 +274,7 @@ pub async fn handle_channel_commands(
                         ctx.client,
                         &api_url,
                         &access_token,
-                        target_host.as_deref(),
+                        target_host.as_ref(),
                     )
                     .await?
                 }
@@ -288,8 +289,7 @@ pub async fn handle_channel_commands(
                         ctx.client,
                         &api_url,
                         &access_token,
-                        server.id,
-                        Some(server.host.as_str()),
+                        &server.to_ref(),
                     )
                     .await?
                 }
@@ -323,52 +323,36 @@ pub async fn handle_channel_commands(
             ctx.account.ok_or(CliError::MissingAccount)?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
-            let target_host = parse_optional_host_input(
-                get_args.host.as_deref(),
-                ctx.strict_input,
-            )?;
+            let channel_ref = ServerChannelRef::new(
+                ctx.resource_host(get_args.host.as_deref())?,
+                get_args.channel_id,
+            );
             let channel = requests::channels::fetch_by_id(
                 ctx.client,
                 &api_url,
                 &access_token,
-                get_args.channel_id,
-                target_host.as_deref(),
+                &channel_ref,
             )
             .await?;
             ctx.output(&channel, || println!("{}", channel.verbose()))?;
         }
 
         ChannelCommands::Create(create_args) => {
-            let account = ctx.account.ok_or(CliError::MissingAccount)?;
+            ctx.account.ok_or(CliError::MissingAccount)?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
-            let target_host = parse_optional_host_input(
-                create_args.host.as_deref(),
-                ctx.strict_input,
-            )?;
-            let server = match create_args.server_id {
-                Some(server_id) => {
-                    requests::servers::fetch_by_id(
-                        ctx.client,
-                        &api_url,
-                        server_id,
-                        target_host.as_deref(),
-                    )
-                    .await?
-                }
-                None => {
-                    get_server_selection(
-                        ctx,
-                        ServerSelectionType::MemberOnly,
-                        "--server-id",
-                    )
-                    .await?
-                }
-            };
-            let target_host = if server.host != account.user_ref.host {
-                Some(server.host.as_str())
-            } else {
-                None
+            let server_ref = match create_args.server_id {
+                Some(server_id) => ServerRef::new(
+                    ctx.resource_host(create_args.host.as_deref())?,
+                    server_id,
+                ),
+                None => get_server_selection(
+                    ctx,
+                    ServerSelectionType::MemberOnly,
+                    "--server-id",
+                )
+                .await?
+                .to_ref(),
             };
             let parent_channel_id =
                 match (create_args.parent_id, create_args.root) {
@@ -379,8 +363,7 @@ pub async fn handle_channel_commands(
                             ctx.client,
                             &api_url,
                             &access_token,
-                            server.id,
-                            target_host,
+                            &server_ref,
                         )
                         .await?;
                         select_parent(&channels, None)?
@@ -432,9 +415,8 @@ pub async fn handle_channel_commands(
                 ctx.client,
                 &api_url,
                 &access_token,
-                server.id,
+                &server_ref,
                 &new_channel,
-                target_host,
             )
             .await?;
             ctx.output(&channel, || {
@@ -450,26 +432,20 @@ pub async fn handle_channel_commands(
             let _account = ctx.account.ok_or(CliError::MissingAccount)?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
-            let target_host = parse_optional_host_input(
-                delete_args.host.as_deref(),
-                ctx.strict_input,
-            )?;
-            let selection = get_channel_selection_with_inputs(
+            let channel = get_channel_selection_with_inputs(
                 ctx,
                 delete_args.channel_id,
                 delete_args.server_id,
-                target_host.as_deref(),
+                delete_args.host.as_deref(),
                 false,
                 "--channel-id",
             )
             .await?;
-            let channel = &selection.channel;
             requests::channels::delete(
                 ctx.client,
                 &api_url,
                 &access_token,
-                channel.id,
-                Some(&selection.host),
+                &channel.to_ref(),
             )
             .await?;
             ctx.message(format!(
@@ -481,20 +457,15 @@ pub async fn handle_channel_commands(
 
         ChannelCommands::Move(move_args) => {
             ctx.account.ok_or(CliError::MissingAccount)?;
-            let target_host = parse_optional_host_input(
-                move_args.host.as_deref(),
-                ctx.strict_input,
-            )?;
-            let selection = get_channel_selection_with_inputs(
+            let channel = get_channel_selection_with_inputs(
                 ctx,
                 move_args.channel_id,
                 move_args.server_id,
-                target_host.as_deref(),
+                move_args.host.as_deref(),
                 false,
                 "--channel-id",
             )
             .await?;
-            let channel = &selection.channel;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
             let parent_channel_id = match (move_args.parent_id, move_args.root)
@@ -506,8 +477,7 @@ pub async fn handle_channel_commands(
                         ctx.client,
                         &api_url,
                         &access_token,
-                        channel.server_id,
-                        Some(&selection.host),
+                        &channel.server_ref(),
                     )
                     .await?;
                     select_parent(&channels, Some(channel.id))?
@@ -525,12 +495,11 @@ pub async fn handle_channel_commands(
                 ctx.client,
                 &api_url,
                 &access_token,
-                channel.id,
+                &channel.to_ref(),
                 &ServerChannelMove {
                     parent_channel_id,
                     index,
                 },
-                Some(&selection.host),
             )
             .await?;
             ctx.output(&changed, || {

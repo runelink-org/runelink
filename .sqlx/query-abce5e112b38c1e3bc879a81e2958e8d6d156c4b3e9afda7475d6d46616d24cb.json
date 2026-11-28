@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO users (name, host, role)\n        VALUES ($1, $2, $3)\n        RETURNING\n            name,\n            host,\n            role AS \"role: UserRole\",\n            created_at,\n            updated_at,\n            synced_at;\n        ",
+  "query": "\n        SELECT\n            name,\n            host AS \"host: Host\",\n            role AS \"role: UserRole\",\n            created_at,\n            updated_at,\n            synced_at\n        FROM users\n        WHERE name = $1 AND host = $2;\n        ",
   "describe": {
     "columns": [
       {
@@ -16,7 +16,7 @@
       },
       {
         "ordinal": 1,
-        "name": "host",
+        "name": "host: Host",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -83,18 +83,7 @@
     "parameters": {
       "Left": [
         "Text",
-        "Text",
-        {
-          "Custom": {
-            "name": "user_role",
-            "kind": {
-              "Enum": [
-                "user",
-                "admin"
-              ]
-            }
-          }
-        }
+        "Text"
       ]
     },
     "nullable": [
@@ -106,5 +95,5 @@
       true
     ]
   },
-  "hash": "76c7cf284fc21992c788721d7b0f30e11fc84a9d66ffedbb1c9ab5c368e58a69"
+  "hash": "abce5e112b38c1e3bc879a81e2958e8d6d156c4b3e9afda7475d6d46616d24cb"
 }

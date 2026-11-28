@@ -1,8 +1,10 @@
 use runelink_types::{
     channel::{
         NewServerChannel, ServerChannel, ServerChannelId, ServerChannelMove,
+        ServerChannelRef,
     },
-    server::ServerId,
+    host::Host,
+    server::ServerRef,
     ws::{FederationWsReply, FederationWsRequest},
 };
 
@@ -20,16 +22,15 @@ use crate::{
 pub async fn create(
     state: &AppState,
     session: &Session,
-    server_id: ServerId,
+    server_ref: &ServerRef,
     new_channel: &NewServerChannel,
-    target_host: Option<&str>,
 ) -> ApiResult<ServerChannel> {
-    match state.config.target_locality(target_host) {
+    match state.config.locality(&server_ref.host) {
         Locality::Local => {
             state
                 .actors
                 .create_channel(
-                    server_id,
+                    server_ref.id,
                     new_channel.clone(),
                     session.authorization(),
                 )
@@ -47,7 +48,7 @@ pub async fn create(
                 host,
                 Some(user_ref),
                 FederationWsRequest::ChannelsCreate {
-                    server_id,
+                    server_id: server_ref.id,
                     new_channel: new_channel.clone(),
                 },
             )
@@ -66,12 +67,16 @@ pub async fn create(
 pub async fn get_all(
     state: &AppState,
     session: &Session,
-    target_host: Option<&str>,
+    target_host: Option<&Host>,
 ) -> ApiResult<Vec<ServerChannel>> {
     match state.config.target_locality(target_host) {
         Locality::Local => {
-            let channels =
-                queries::channels::list(&*state.db_pool, None).await?;
+            let channels = queries::channels::list(
+                &*state.db_pool,
+                state.config.public_host(),
+                None,
+            )
+            .await?;
             Ok(channels)
         }
         Locality::Remote(host) => {
@@ -102,12 +107,16 @@ pub async fn get_all(
 pub async fn get_by_server(
     state: &AppState,
     session: &Session,
-    server_id: ServerId,
-    target_host: Option<&str>,
+    server_ref: &ServerRef,
 ) -> ApiResult<Vec<ServerChannel>> {
-    match state.config.target_locality(target_host) {
+    match state.config.locality(&server_ref.host) {
         Locality::Local => {
-            queries::channels::list(&*state.db_pool, Some(server_id)).await
+            queries::channels::list(
+                &*state.db_pool,
+                state.config.public_host(),
+                Some(server_ref.id),
+            )
+            .await
         }
         Locality::Remote(host) => {
             let user_ref = session.user_ref.clone().ok_or_else(|| {
@@ -120,7 +129,9 @@ pub async fn get_by_server(
                 state,
                 host,
                 Some(user_ref),
-                FederationWsRequest::ChannelsGetByServer { server_id },
+                FederationWsRequest::ChannelsGetByServer {
+                    server_id: server_ref.id,
+                },
             )
             .await?;
             let FederationWsReply::ChannelsGetByServer(channels) = reply else {
@@ -137,12 +148,16 @@ pub async fn get_by_server(
 pub async fn get_by_id(
     state: &AppState,
     session: &Session,
-    channel_id: ServerChannelId,
-    target_host: Option<&str>,
+    channel_ref: &ServerChannelRef,
 ) -> ApiResult<ServerChannel> {
-    match state.config.target_locality(target_host) {
+    match state.config.locality(&channel_ref.host) {
         Locality::Local => {
-            queries::channels::get_by_id(&*state.db_pool, channel_id).await
+            queries::channels::get_by_id(
+                &*state.db_pool,
+                state.config.public_host(),
+                channel_ref.id,
+            )
+            .await
         }
         Locality::Remote(host) => {
             let user_ref = session.user_ref.clone().ok_or_else(|| {
@@ -155,7 +170,9 @@ pub async fn get_by_id(
                 state,
                 host,
                 Some(user_ref),
-                FederationWsRequest::ChannelsGetById { channel_id },
+                FederationWsRequest::ChannelsGetById {
+                    channel_id: channel_ref.id,
+                },
             )
             .await?;
             let FederationWsReply::ChannelsGetById(channel) = reply else {
@@ -172,17 +189,22 @@ pub async fn get_by_id(
 pub async fn delete(
     state: &AppState,
     session: &Session,
-    channel_id: ServerChannelId,
-    target_host: Option<&str>,
+    channel_ref: &ServerChannelRef,
 ) -> ApiResult<()> {
-    match state.config.target_locality(target_host) {
+    match state.config.locality(&channel_ref.host) {
         Locality::Local => {
-            let server_id =
-                queries::channels::get_server_id(&*state.db_pool, channel_id)
-                    .await?;
+            let server_id = queries::channels::get_server_id(
+                &*state.db_pool,
+                channel_ref.id,
+            )
+            .await?;
             state
                 .actors
-                .delete_channel(server_id, channel_id, session.authorization())
+                .delete_channel(
+                    server_id,
+                    channel_ref.id,
+                    session.authorization(),
+                )
                 .await
         }
         Locality::Remote(host) => {
@@ -196,7 +218,9 @@ pub async fn delete(
                 state,
                 host,
                 Some(user_ref),
-                FederationWsRequest::ChannelsDelete { channel_id },
+                FederationWsRequest::ChannelsDelete {
+                    channel_id: channel_ref.id,
+                },
             )
             .await?;
             let FederationWsReply::ChannelsDelete = reply else {
@@ -215,20 +239,21 @@ pub async fn delete(
 pub async fn move_channel(
     state: &AppState,
     session: &Session,
-    channel_id: ServerChannelId,
+    channel_ref: &ServerChannelRef,
     channel_move: &ServerChannelMove,
-    target_host: Option<&str>,
 ) -> ApiResult<Vec<ServerChannel>> {
-    match state.config.target_locality(target_host) {
+    match state.config.locality(&channel_ref.host) {
         Locality::Local => {
-            let server_id =
-                queries::channels::get_server_id(&*state.db_pool, channel_id)
-                    .await?;
+            let server_id = queries::channels::get_server_id(
+                &*state.db_pool,
+                channel_ref.id,
+            )
+            .await?;
             state
                 .actors
                 .move_channel(
                     server_id,
-                    channel_id,
+                    channel_ref.id,
                     channel_move.clone(),
                     session.authorization(),
                 )
@@ -246,7 +271,7 @@ pub async fn move_channel(
                 host,
                 Some(user_ref),
                 FederationWsRequest::ChannelsMove {
-                    channel_id,
+                    channel_id: channel_ref.id,
                     channel_move: channel_move.clone(),
                 },
             )
@@ -266,59 +291,66 @@ pub mod auth {
     use super::*;
     use crate::auth::Requirement as Req;
 
-    pub async fn update(
+    /// The server that owns a local server channel.
+    async fn local_server_ref(
         state: &AppState,
         channel_id: ServerChannelId,
-        target_host: Option<&str>,
-    ) -> ApiResult<Req> {
-        delete(state, channel_id, target_host).await
+    ) -> ApiResult<ServerRef> {
+        let server_id =
+            queries::channels::get_server_id(&*state.db_pool, channel_id)
+                .await?;
+        Ok(state.config.local_ref(server_id))
     }
-    pub fn create(server_id: ServerId) -> Req {
-        Req::ServerAdmin(server_id).or_admin().client_only()
+
+    pub async fn update(
+        state: &AppState,
+        channel_ref: &ServerChannelRef,
+    ) -> ApiResult<Req> {
+        delete(state, channel_ref).await
+    }
+    pub fn create(server_ref: &ServerRef) -> Req {
+        Req::ServerAdmin(server_ref.clone())
+            .or_admin()
+            .client_only()
     }
 
     pub fn get_all() -> Req {
         Req::HostAdmin.client_only()
     }
 
-    pub fn get_by_server(server_id: ServerId) -> Req {
-        Req::ServerMember(server_id).or_admin().client_only()
+    pub fn get_by_server(server_ref: &ServerRef) -> Req {
+        Req::ServerMember(server_ref.clone())
+            .or_admin()
+            .client_only()
     }
 
     pub async fn get_by_id(
         state: &AppState,
-        channel_id: ServerChannelId,
-        target_host: Option<&str>,
+        channel_ref: &ServerChannelRef,
     ) -> ApiResult<Req> {
-        if state.config.target_locality(target_host).is_remote() {
+        if state.config.locality(&channel_ref.host).is_remote() {
             return Ok(Req::Client);
         }
-        let server_id =
-            queries::channels::get_server_id(&*state.db_pool, channel_id)
-                .await?;
-        Ok(Req::ServerMember(server_id).or_admin().client_only())
+        let server_ref = local_server_ref(state, channel_ref.id).await?;
+        Ok(Req::ServerMember(server_ref).or_admin().client_only())
     }
 
     pub async fn delete(
         state: &AppState,
-        channel_id: ServerChannelId,
-        target_host: Option<&str>,
+        channel_ref: &ServerChannelRef,
     ) -> ApiResult<Req> {
-        if state.config.target_locality(target_host).is_remote() {
+        if state.config.locality(&channel_ref.host).is_remote() {
             return Ok(Req::Client);
         }
-        let server_id =
-            queries::channels::get_server_id(&*state.db_pool, channel_id)
-                .await?;
-        Ok(Req::ServerAdmin(server_id).or_admin().client_only())
+        let server_ref = local_server_ref(state, channel_ref.id).await?;
+        Ok(Req::ServerAdmin(server_ref).or_admin().client_only())
     }
 
     pub async fn move_channel(
         state: &AppState,
-        channel_id: ServerChannelId,
-        target_host: Option<&str>,
+        channel_ref: &ServerChannelRef,
     ) -> ApiResult<Req> {
-        delete(state, channel_id, target_host).await
+        delete(state, channel_ref).await
     }
 
     pub mod federated {
@@ -330,36 +362,32 @@ pub mod auth {
         ) -> ApiResult<Req> {
             delete(state, channel_id).await
         }
-        pub fn create(server_id: ServerId) -> Req {
-            Req::ServerAdmin(server_id).federated_only()
+        pub fn create(server_ref: ServerRef) -> Req {
+            Req::ServerAdmin(server_ref).federated_only()
         }
 
         pub fn get_all() -> Req {
             Req::Never.federated_only()
         }
 
-        pub fn get_by_server(server_id: ServerId) -> Req {
-            Req::ServerMember(server_id).federated_only()
+        pub fn get_by_server(server_ref: ServerRef) -> Req {
+            Req::ServerMember(server_ref).federated_only()
         }
 
         pub async fn get_by_id(
             state: &AppState,
             channel_id: ServerChannelId,
         ) -> ApiResult<Req> {
-            let server_id =
-                queries::channels::get_server_id(&*state.db_pool, channel_id)
-                    .await?;
-            Ok(Req::ServerMember(server_id).federated_only())
+            let server_ref = local_server_ref(state, channel_id).await?;
+            Ok(Req::ServerMember(server_ref).federated_only())
         }
 
         pub async fn delete(
             state: &AppState,
             channel_id: ServerChannelId,
         ) -> ApiResult<Req> {
-            let server_id =
-                queries::channels::get_server_id(&*state.db_pool, channel_id)
-                    .await?;
-            Ok(Req::ServerAdmin(server_id).federated_only())
+            let server_ref = local_server_ref(state, channel_id).await?;
+            Ok(Req::ServerAdmin(server_ref).federated_only())
         }
 
         pub async fn move_channel(
@@ -374,11 +402,10 @@ pub mod auth {
 pub async fn update(
     state: &AppState,
     session: &Session,
-    channel_id: ServerChannelId,
+    channel_ref: &ServerChannelRef,
     channel_update: &runelink_types::channel::ServerChannelUpdate,
-    target_host: Option<&str>,
 ) -> ApiResult<ServerChannel> {
-    if let Locality::Remote(host) = state.config.target_locality(target_host) {
+    if let Locality::Remote(host) = state.config.locality(&channel_ref.host) {
         let user_ref = session.user_ref.clone().ok_or_else(|| {
             ApiError::AuthError("User identity required".into())
         })?;
@@ -387,7 +414,7 @@ pub async fn update(
             host,
             Some(user_ref),
             FederationWsRequest::ChannelsUpdate {
-                channel_id,
+                channel_id: channel_ref.id,
                 channel_update: channel_update.clone(),
             },
         )
@@ -398,12 +425,13 @@ pub async fn update(
         return Ok(resource);
     }
     let server_id =
-        queries::channels::get_server_id(&*state.db_pool, channel_id).await?;
+        queries::channels::get_server_id(&*state.db_pool, channel_ref.id)
+            .await?;
     state
         .actors
         .update_channel(
             server_id,
-            channel_id,
+            channel_ref.id,
             channel_update.clone(),
             session.authorization(),
         )

@@ -3,7 +3,7 @@ use reqwest::Client;
 use runelink_types::{
     capability::Capability,
     server::{
-        FullServerMembership, NewServerMembership, ServerId, ServerMembership,
+        FullServerMembership, NewServerMembership, ServerMembership, ServerRef,
     },
     user::UserRef,
 };
@@ -15,12 +15,12 @@ use super::{delete_authed, fetch_json, post_json_authed};
 pub async fn fetch_by_user(
     client: &Client,
     api_url: &str,
-    user: UserRef,
+    user_ref: UserRef,
 ) -> Result<Vec<ServerMembership>> {
     let url = format!(
         "{api_url}/users/{host}/{name}/servers",
-        host = user.host,
-        name = user.name
+        host = user_ref.host,
+        name = user_ref.name
     );
     info!("fetching memberships by user: {url}");
     fetch_json::<Vec<ServerMembership>>(
@@ -34,13 +34,12 @@ pub async fn fetch_by_user(
 pub async fn fetch_members_by_server(
     client: &Client,
     api_url: &str,
-    server_id: ServerId,
-    target_host: Option<&str>,
+    server_ref: &ServerRef,
 ) -> Result<Vec<runelink_types::ServerMember>> {
-    let mut url = format!("{api_url}/servers/{server_id}/users");
-    if let Some(host) = target_host {
-        url = format!("{url}?target_host={host}");
-    }
+    let url = format!(
+        "{api_url}/servers/{}/{}/users",
+        server_ref.host, server_ref.id
+    );
     info!("fetching members by server: {url}");
     fetch_json::<Vec<runelink_types::ServerMember>>(
         client,
@@ -53,18 +52,13 @@ pub async fn fetch_members_by_server(
 pub async fn fetch_member_by_user_and_server(
     client: &Client,
     api_url: &str,
-    server_id: ServerId,
-    user: UserRef,
-    target_host: Option<&str>,
+    server_ref: &ServerRef,
+    user_ref: UserRef,
 ) -> Result<runelink_types::ServerMember> {
-    let mut url = format!(
-        "{api_url}/servers/{server_id}/users/{host}/{name}",
-        host = user.host,
-        name = user.name
+    let url = format!(
+        "{api_url}/servers/{}/{}/users/{}/{}",
+        server_ref.host, server_ref.id, user_ref.host, user_ref.name
     );
-    if let Some(d) = target_host {
-        url = format!("{url}?target_host={d}");
-    }
     info!("fetching member by user and server: {url}");
     fetch_json::<runelink_types::ServerMember>(
         client,
@@ -80,9 +74,10 @@ pub async fn create(
     access_token: &str,
     new_membership: &NewServerMembership,
 ) -> Result<FullServerMembership> {
+    let server_ref = &new_membership.server_ref;
     let url = format!(
-        "{api_url}/servers/{server_id}/users",
-        server_id = new_membership.server_id
+        "{api_url}/servers/{}/{}/users",
+        server_ref.host, server_ref.id
     );
     info!("creating membership: {url}");
     post_json_authed::<NewServerMembership, FullServerMembership>(
@@ -99,18 +94,13 @@ pub async fn delete(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: ServerId,
-    user: UserRef,
-    target_host: Option<&str>,
+    server_ref: &ServerRef,
+    user_ref: UserRef,
 ) -> Result<()> {
-    let mut url = format!(
-        "{api_url}/servers/{server_id}/users/{host}/{name}",
-        host = user.host,
-        name = user.name
+    let url = format!(
+        "{api_url}/servers/{}/{}/users/{}/{}",
+        server_ref.host, server_ref.id, user_ref.host, user_ref.name
     );
-    if let Some(d) = target_host {
-        url = format!("{url}?target_host={d}");
-    }
     info!("deleting server membership: {url}");
     delete_authed(client, &url, access_token, Capability::MembershipsWrite)
         .await

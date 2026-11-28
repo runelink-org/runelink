@@ -1,9 +1,9 @@
 use runelink_client::requests;
 use runelink_types::server::{
-    NewServer, NewServerMembership, ServerId, ServerRole,
+    NewServer, NewServerMembership, ServerId, ServerRef, ServerRole,
 };
 
-use crate::util::{list_label, parse_optional_host_input};
+use crate::util::{parse_optional_host_input, server_label};
 use crate::{error::CliError, util::group_memberships_by_host};
 
 use super::{
@@ -116,15 +116,14 @@ pub async fn handle_server_commands(
         ServerCommands::Edit(edit_args) => {
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
-            let target_host = parse_optional_host_input(
-                edit_args.host.as_deref(),
-                ctx.strict_input,
-            )?;
+            let server_ref = ServerRef::new(
+                ctx.resource_host(edit_args.host.as_deref())?,
+                edit_args.server_id,
+            );
             let original = requests::servers::fetch_by_id(
                 ctx.client,
                 &api_url,
-                edit_args.server_id,
-                target_host.as_deref(),
+                &server_ref,
             )
             .await?;
             let update = runelink_types::edit::DetailsUpdate {
@@ -140,9 +139,8 @@ pub async fn handle_server_commands(
                 ctx.client,
                 &api_url,
                 &access_token,
-                edit_args.server_id,
+                &server_ref,
                 &update,
-                target_host.as_deref(),
             )
             .await?;
             ctx.output(&resource, || println!("Updated server: {resource}"))?;
@@ -161,7 +159,7 @@ pub async fn handle_server_commands(
                 let servers = requests::servers::fetch_all(
                     ctx.client,
                     &api_url,
-                    Some(host.as_str()),
+                    Some(host),
                 )
                 .await?;
                 ctx.output(&servers, || {
@@ -169,7 +167,14 @@ pub async fn handle_server_commands(
                         println!("No servers found in host: {host}");
                     }
                     for server in &servers {
-                        println!("{}", list_label(server, server.id, show_ids));
+                        println!(
+                            "{}",
+                            server_label(
+                                server,
+                                show_ids,
+                                ctx.show_server_hosts
+                            )
+                        );
                     }
                 })?;
             } else {
@@ -202,7 +207,11 @@ pub async fn handle_server_commands(
                             let server = &membership.server;
                             print!(
                                 "    {}",
-                                list_label(server, server.id, show_ids)
+                                server_label(
+                                    server,
+                                    show_ids,
+                                    ctx.show_server_hosts
+                                )
                             );
                             if membership.role == ServerRole::Admin {
                                 println!(" - admin");
@@ -217,15 +226,14 @@ pub async fn handle_server_commands(
 
         ServerCommands::Get(get_args) => {
             let api_url = ctx.home_api_url().await?;
-            let target_host = parse_optional_host_input(
-                get_args.host.as_deref(),
-                ctx.strict_input,
-            )?;
+            let server_ref = ServerRef::new(
+                ctx.resource_host(get_args.host.as_deref())?,
+                get_args.server_id,
+            );
             let server = requests::servers::fetch_by_id(
                 ctx.client,
                 &api_url,
-                get_args.server_id,
-                target_host.as_deref(),
+                &server_ref,
             )
             .await?;
             ctx.output(&server, || {
@@ -268,7 +276,7 @@ pub async fn handle_server_commands(
                 &api_url,
                 &access_token,
                 &new_server,
-                target_host.as_deref(),
+                target_host.as_ref(),
             )
             .await?;
             ctx.output(&server, || {
@@ -280,33 +288,25 @@ pub async fn handle_server_commands(
             let account = ctx.account.ok_or(CliError::MissingAccount)?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
-            let target_host = parse_optional_host_input(
-                join_args.host.as_deref(),
-                ctx.strict_input,
-            )?;
+            let host = ctx.resource_host(join_args.host.as_deref())?;
             let server = if let Some(server_id) = join_args.server_id {
                 requests::servers::fetch_by_id(
                     ctx.client,
                     &api_url,
-                    server_id,
-                    target_host.as_deref(),
+                    &ServerRef::new(host, server_id),
                 )
                 .await?
             } else {
-                let host = target_host
-                    .as_deref()
-                    .unwrap_or(account.user_ref.host.as_str());
                 get_server_selection(
                     ctx,
-                    ServerSelectionType::NonMemberOnly { host },
+                    ServerSelectionType::NonMemberOnly { host: &host },
                     "--server-id",
                 )
                 .await?
             };
             let new_member = NewServerMembership {
                 user_ref: account.user_ref.clone(),
-                server_id: server.id,
-                server_host: server.host.clone(),
+                server_ref: server.to_ref(),
                 role: ServerRole::Member,
             };
             let membership = requests::memberships::create(
@@ -325,16 +325,12 @@ pub async fn handle_server_commands(
             let account = ctx.account.ok_or(CliError::MissingAccount)?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
-            let target_host = parse_optional_host_input(
-                leave_args.host.as_deref(),
-                ctx.strict_input,
-            )?;
             let server = if let Some(server_id) = leave_args.server_id {
+                let host = ctx.resource_host(leave_args.host.as_deref())?;
                 requests::servers::fetch_by_id(
                     ctx.client,
                     &api_url,
-                    server_id,
-                    target_host.as_deref(),
+                    &ServerRef::new(host, server_id),
                 )
                 .await?
             } else {
@@ -349,9 +345,8 @@ pub async fn handle_server_commands(
                 ctx.client,
                 &api_url,
                 &access_token,
-                server.id,
+                &server.to_ref(),
                 account.user_ref.clone(),
-                Some(server.host.as_str()),
             )
             .await?;
             ctx.message(format!("Left server: {}", server.verbose()));
@@ -361,31 +356,28 @@ pub async fn handle_server_commands(
             ctx.account.ok_or(CliError::MissingAccount)?;
             let api_url = ctx.home_api_url().await?;
             let access_token = ctx.get_access_token().await?;
-            let target_host = parse_optional_host_input(
-                delete_args.host.as_deref(),
-                ctx.strict_input,
-            )?;
-            let (server_id, target_host) =
-                if let Some(server_id) = delete_args.server_id {
-                    (server_id, target_host)
-                } else {
-                    let server = get_server_selection(
-                        ctx,
-                        ServerSelectionType::MemberOnly,
-                        "--server-id",
-                    )
-                    .await?;
-                    (server.id, Some(server.host))
-                };
+            let server_ref = if let Some(server_id) = delete_args.server_id {
+                ServerRef::new(
+                    ctx.resource_host(delete_args.host.as_deref())?,
+                    server_id,
+                )
+            } else {
+                get_server_selection(
+                    ctx,
+                    ServerSelectionType::MemberOnly,
+                    "--server-id",
+                )
+                .await?
+                .to_ref()
+            };
             requests::servers::delete(
                 ctx.client,
                 &api_url,
                 &access_token,
-                server_id,
-                target_host.as_deref(),
+                &server_ref,
             )
             .await?;
-            ctx.message(format!("Deleted server: {server_id}"));
+            ctx.message(format!("Deleted server: {}", server_ref.id));
         }
     }
     Ok(())

@@ -1,9 +1,10 @@
 #![allow(dead_code)]
 
 use runelink_types::{
+    host::Host,
     server::{
         NewServerMembership, Server, ServerId, ServerMember, ServerMembership,
-        ServerRole,
+        ServerRef, ServerRole,
     },
     user::{User, UserRef},
 };
@@ -64,9 +65,10 @@ impl ServerMembershipRow {
         self,
         config: &ServerConfig,
     ) -> ApiResult<ServerMembership> {
-        let server_host = self
-            .server_host_from_db
-            .unwrap_or_else(|| config.public_host());
+        let server_host = match self.server_host_from_db {
+            Some(host) => Host::parse(&host)?,
+            None => config.public_host().clone(),
+        };
 
         // Needed because of weird sqlx limitations (or misuse)
         let get_error = || ApiError::Unknown("Sqlx conversion error".into());
@@ -103,16 +105,16 @@ pub async fn upsert_local(
             SET role = EXCLUDED.role,
                 updated_at = NOW();
         "#,
-        new_membership.server_id.as_uuid(),
+        new_membership.server_ref.id.as_uuid(),
         new_membership.user_ref.name,
-        new_membership.user_ref.host,
+        new_membership.user_ref.host.as_str(),
         new_membership.role as ServerRole,
     )
     .execute(&mut *conn)
     .await?;
     get_local_member_by_user_and_server(
         conn,
-        new_membership.server_id,
+        new_membership.server_ref.id,
         new_membership.user_ref.clone(),
     )
     .await
@@ -121,18 +123,20 @@ pub async fn upsert_local(
 /// Cache a local user's membership of a remote server. Returns whether it was
 /// not cached before.
 pub async fn insert_remote(
-    pool: &DbPool,
+    executor: impl PgExecutor<'_>,
     membership: &ServerMembership,
 ) -> ApiResult<bool> {
     // Rows that a conflict updates have a nonzero `xmax`.
     let inserted = sqlx::query_scalar!(
         r#"
         INSERT INTO user_remote_server_memberships (
-            user_name, user_host, remote_server_id, role, remote_created_at,
-            remote_updated_at, synced_at
+            user_name, user_host, remote_server_host, remote_server_id, role,
+            remote_created_at, remote_updated_at, synced_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, NOW())
-        ON CONFLICT (user_name, user_host, remote_server_id) DO UPDATE
+        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+        ON CONFLICT (
+            user_name, user_host, remote_server_host, remote_server_id
+        ) DO UPDATE
             SET role = EXCLUDED.role,
                 remote_created_at = EXCLUDED.remote_created_at,
                 remote_updated_at = EXCLUDED.remote_updated_at,
@@ -140,13 +144,14 @@ pub async fn insert_remote(
         RETURNING (xmax = 0) AS "inserted!"
         "#,
         membership.user_ref.name,
-        membership.user_ref.host,
+        membership.user_ref.host.as_str(),
+        membership.server.host.as_str(),
         membership.server.id.as_uuid(),
         membership.role as ServerRole,
         membership.joined_at,
         membership.updated_at,
     )
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await?;
     Ok(inserted)
 }
@@ -171,7 +176,7 @@ pub async fn get_local_member_by_user_and_server(
         "#,
         server_id.as_uuid(),
         user_ref.name,
-        user_ref.host,
+        user_ref.host.as_str(),
     )
     .fetch_one(executor)
     .await?
@@ -227,59 +232,54 @@ pub async fn get_local_roles(
 /// The local servers a user belongs to.
 pub async fn get_local_server_ids_for_user(
     executor: impl PgExecutor<'_>,
-    user: &UserRef,
+    user_ref: &UserRef,
 ) -> ApiResult<Vec<ServerId>> {
     let ids = sqlx::query_scalar!(
         "SELECT server_id FROM server_users WHERE user_name = $1 AND user_host = $2",
-        user.name,
-        user.host,
+        user_ref.name,
+        user_ref.host.as_str(),
     )
     .fetch_all(executor)
     .await?;
     Ok(ids.into_iter().map(Into::into).collect())
 }
 
-/// A cached remote server's owning host and its cached members.
-pub struct RemoteServerMembers {
-    pub host: String,
-    pub users: Vec<UserRef>,
-}
-
+/// The cached local members of a cached remote server, or `None` for servers
+/// that are not cached.
 pub async fn get_remote_server_members(
     pool: &DbPool,
-    server_id: ServerId,
-) -> ApiResult<Option<RemoteServerMembers>> {
+    server_ref: &ServerRef,
+) -> ApiResult<Option<Vec<UserRef>>> {
     let rows = sqlx::query!(
         r#"
         SELECT
-            s.host,
             m.user_name AS "user_name?",
             m.user_host AS "user_host?"
         FROM cached_remote_servers s
         LEFT JOIN user_remote_server_memberships m
-            ON m.remote_server_id = s.id
-        WHERE s.id = $1
+            ON m.remote_server_host = s.host AND m.remote_server_id = s.id
+        WHERE s.host = $1 AND s.id = $2
         "#,
-        server_id.as_uuid(),
+        server_ref.host.as_str(),
+        server_ref.id.as_uuid(),
     )
     .fetch_all(pool)
     .await?;
-
-    let Some(host) = rows.first().map(|row| row.host.clone()) else {
+    if rows.is_empty() {
         return Ok(None);
-    };
+    }
     let users = rows
         .into_iter()
         .filter_map(|row| Some(UserRef::new(row.user_name?, row.user_host?)))
         .collect::<Result<_, _>>()?;
-    Ok(Some(RemoteServerMembers { host, users }))
+    Ok(Some(users))
 }
 
 pub async fn get_local_by_user_and_server(
     executor: impl PgExecutor<'_>,
     config: &ServerConfig,
     server_id: ServerId,
-    user: UserRef,
+    user_ref: UserRef,
 ) -> ApiResult<ServerMembership> {
     let row = sqlx::query!(
         r#"
@@ -299,8 +299,8 @@ pub async fn get_local_by_user_and_server(
             AND su.user_name = $2 AND su.user_host = $3
         "#,
         server_id.as_uuid(),
-        user.name,
-        user.host,
+        user_ref.name,
+        user_ref.host.as_str(),
     )
     .fetch_one(executor)
     .await?;
@@ -308,13 +308,13 @@ pub async fn get_local_by_user_and_server(
     Ok(ServerMembership {
         server: Server {
             id: row.id.into(),
-            host: config.public_host(),
+            host: config.public_host().clone(),
             title: row.title,
             description: row.description,
             created_at: row.server_created_at,
             updated_at: row.server_updated_at,
         },
-        user_ref: user,
+        user_ref,
         role: row.role,
         joined_at: row.membership_created_at,
         updated_at: row.membership_updated_at,
@@ -324,7 +324,7 @@ pub async fn get_local_by_user_and_server(
 
 pub async fn get_by_user(
     state: &AppState,
-    user: UserRef,
+    user_ref: UserRef,
 ) -> ApiResult<Vec<ServerMembership>> {
     let rows = sqlx::query_as!(
         ServerMembershipRow,
@@ -365,13 +365,14 @@ pub async fn get_by_user(
             ursm.synced_at AS synced_at
         FROM cached_remote_servers crs
         JOIN user_remote_server_memberships ursm
-            ON crs.id = ursm.remote_server_id
+            ON crs.host = ursm.remote_server_host
+                AND crs.id = ursm.remote_server_id
         WHERE ursm.user_name = $1 AND ursm.user_host = $2
 
         ORDER BY server_title ASC
         "#,
-        user.name,
-        user.host,
+        user_ref.name,
+        user_ref.host.as_str(),
     )
     .fetch_all(state.db_pool.as_ref())
     .await?;
@@ -385,7 +386,7 @@ pub async fn get_by_user(
 pub async fn delete_local(
     executor: impl PgExecutor<'_>,
     server_id: ServerId,
-    user: UserRef,
+    user_ref: UserRef,
 ) -> ApiResult<()> {
     let result = sqlx::query!(
         r#"
@@ -393,8 +394,8 @@ pub async fn delete_local(
         WHERE server_id = $1 AND user_name = $2 AND user_host = $3
         "#,
         server_id.as_uuid(),
-        user.name,
-        user.host,
+        user_ref.name,
+        user_ref.host.as_str(),
     )
     .execute(executor)
     .await?;
@@ -406,17 +407,19 @@ pub async fn delete_local(
 
 pub async fn delete_remote(
     pool: &DbPool,
-    server_id: ServerId,
-    user: UserRef,
+    server_ref: &ServerRef,
+    user_ref: UserRef,
 ) -> ApiResult<()> {
     let result = sqlx::query!(
         r#"
         DELETE FROM user_remote_server_memberships
-        WHERE remote_server_id = $1 AND user_name = $2 AND user_host = $3
+        WHERE remote_server_host = $1 AND remote_server_id = $2
+            AND user_name = $3 AND user_host = $4
         "#,
-        server_id.as_uuid(),
-        user.name,
-        user.host,
+        server_ref.host.as_str(),
+        server_ref.id.as_uuid(),
+        user_ref.name,
+        user_ref.host.as_str(),
     )
     .execute(pool)
     .await?;

@@ -2,9 +2,10 @@ use log::info;
 use reqwest::Client;
 use runelink_types::{
     capability::Capability,
-    channel::TextChannelId,
-    message::{Message, MessageId, NewMessage},
-    server::ServerId,
+    channel::TextChannelRef,
+    host::Host,
+    message::{Message, MessageRef, NewMessage},
+    server::ServerRef,
 };
 
 use crate::error::Result;
@@ -15,14 +16,13 @@ pub async fn create(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    text_channel_id: TextChannelId,
+    text_channel_ref: &TextChannelRef,
     new_message: &NewMessage,
-    target_host: Option<&str>,
 ) -> Result<Message> {
-    let mut url = format!("{api_url}/text_channels/{text_channel_id}/messages");
-    if let Some(host) = target_host {
-        url = format!("{url}?target_host={host}");
-    }
+    let url = format!(
+        "{api_url}/text_channels/{}/{}/messages",
+        text_channel_ref.host, text_channel_ref.id
+    );
     info!("creating message: {url}");
     post_json_authed::<NewMessage, Message>(
         client,
@@ -39,7 +39,7 @@ pub async fn fetch_all(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    target_host: Option<&str>,
+    target_host: Option<&Host>,
 ) -> Result<Vec<Message>> {
     let mut url = format!("{api_url}/messages");
     if let Some(host) = target_host {
@@ -60,13 +60,12 @@ pub async fn fetch_by_server(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    server_id: ServerId,
-    target_host: Option<&str>,
+    server_ref: &ServerRef,
 ) -> Result<Vec<Message>> {
-    let mut url = format!("{api_url}/servers/{server_id}/messages");
-    if let Some(host) = target_host {
-        url = format!("{url}?target_host={host}");
-    }
+    let url = format!(
+        "{api_url}/servers/{}/{}/messages",
+        server_ref.host, server_ref.id
+    );
     info!("fetching messages by server: {url}");
     fetch_json_authed::<Vec<Message>>(
         client,
@@ -81,13 +80,12 @@ pub async fn fetch_by_text_channel(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    text_channel_id: TextChannelId,
-    target_host: Option<&str>,
+    text_channel_ref: &TextChannelRef,
 ) -> Result<Vec<Message>> {
-    let mut url = format!("{api_url}/text_channels/{text_channel_id}/messages");
-    if let Some(host) = target_host {
-        url = format!("{url}?target_host={host}");
-    }
+    let url = format!(
+        "{api_url}/text_channels/{}/{}/messages",
+        text_channel_ref.host, text_channel_ref.id
+    );
     info!("fetching messages by channel: {url}");
     fetch_json_authed::<Vec<Message>>(
         client,
@@ -102,13 +100,10 @@ pub async fn fetch_by_id(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    message_id: MessageId,
-    target_host: Option<&str>,
+    message_ref: &MessageRef,
 ) -> Result<Message> {
-    let mut url = format!("{api_url}/messages/{message_id}");
-    if let Some(host) = target_host {
-        url = format!("{url}?target_host={host}");
-    }
+    let url =
+        format!("{api_url}/messages/{}/{}", message_ref.host, message_ref.id);
     info!("fetching message: {url}");
     fetch_json_authed::<Message>(
         client,
@@ -123,13 +118,10 @@ pub async fn delete(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    message_id: MessageId,
-    target_host: Option<&str>,
+    message_ref: &MessageRef,
 ) -> Result<()> {
-    let mut url = format!("{api_url}/messages/{message_id}");
-    if let Some(host) = target_host {
-        url = format!("{url}?target_host={host}");
-    }
+    let url =
+        format!("{api_url}/messages/{}/{}", message_ref.host, message_ref.id);
     info!("deleting message: {url}");
     delete_authed(client, &url, access_token, Capability::MessagesDelete).await
 }
@@ -138,14 +130,11 @@ pub async fn update(
     client: &Client,
     api_url: &str,
     access_token: &str,
-    message_id: MessageId,
+    message_ref: &MessageRef,
     update: &runelink_types::message::MessageUpdate,
-    target_host: Option<&str>,
 ) -> Result<Message> {
-    let mut url = format!("{api_url}/messages/{message_id}");
-    if let Some(host) = target_host {
-        url = format!("{url}?target_host={host}");
-    }
+    let url =
+        format!("{api_url}/messages/{}/{}", message_ref.host, message_ref.id);
     super::patch_json_authed(
         client,
         &url,

@@ -108,7 +108,7 @@ pub async fn signup(
         .map_err(|error| ApiError::BadRequest(error.to_string()))?;
     let new_user = NewUser {
         name,
-        host: state.config.public_host(),
+        host: state.config.public_host().clone(),
         role: UserRole::User,
     };
     // Hashing is slow on purpose, so it runs off the async workers.

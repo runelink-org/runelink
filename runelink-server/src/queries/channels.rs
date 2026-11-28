@@ -3,6 +3,7 @@ use runelink_types::{
         NewServerChannel, ServerChannel, ServerChannelContent, ServerChannelId,
         ServerChannelKind, TextChannelId,
     },
+    host::Host,
     server::ServerId,
 };
 use sqlx::{PgConnection, PgExecutor};
@@ -29,11 +30,9 @@ struct ServerChannelRow {
     updated_at: time::OffsetDateTime,
 }
 
-impl TryFrom<ServerChannelRow> for ServerChannel {
-    type Error = ApiError;
-
-    fn try_from(row: ServerChannelRow) -> ApiResult<Self> {
-        let content = match (row.kind.as_str(), row.text_channel_id) {
+impl ServerChannelRow {
+    fn into_channel(self, host: &Host) -> ApiResult<ServerChannel> {
+        let content = match (self.kind.as_str(), self.text_channel_id) {
             ("text", Some(id)) => ServerChannelContent::Text {
                 text_channel_id: id.into(),
             },
@@ -41,17 +40,18 @@ impl TryFrom<ServerChannelRow> for ServerChannel {
             _ => {
                 return Err(ApiError::Internal(format!(
                     "Invalid channel content for {}",
-                    row.id
+                    self.id
                 )));
             }
         };
-        Ok(Self {
-            id: row.id.into(),
-            server_id: row.server_id.into(),
+        Ok(ServerChannel {
+            id: self.id.into(),
+            host: host.clone(),
+            server_id: self.server_id.into(),
             content,
-            title: row.title,
-            description: row.description,
-            metadata: match row.metadata {
+            title: self.title,
+            description: self.description,
+            metadata: match self.metadata {
                 None => None,
                 Some(serde_json::Value::Object(metadata)) => Some(metadata),
                 _ => {
@@ -60,10 +60,10 @@ impl TryFrom<ServerChannelRow> for ServerChannel {
                     ));
                 }
             },
-            parent_channel_id: row.parent_channel_id.map(Into::into),
-            position: row.position,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
+            parent_channel_id: self.parent_channel_id.map(Into::into),
+            position: self.position,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
         })
     }
 }
@@ -72,6 +72,7 @@ impl TryFrom<ServerChannelRow> for ServerChannel {
 /// it owns if it is a text channel.
 pub async fn insert(
     conn: &mut PgConnection,
+    host: &Host,
     server_id: ServerId,
     new_channel: &NewServerChannel,
 ) -> ApiResult<ServerChannel> {
@@ -114,11 +115,12 @@ pub async fn insert(
     )
     .fetch_one(conn)
     .await?;
-    channel.try_into()
+    channel.into_channel(host)
 }
 
 pub async fn get_by_id(
     executor: impl PgExecutor<'_>,
+    host: &Host,
     channel_id: ServerChannelId,
 ) -> ApiResult<ServerChannel> {
     let channel = sqlx::query_as!(
@@ -131,7 +133,7 @@ pub async fn get_by_id(
     )
     .fetch_one(executor)
     .await?;
-    channel.try_into()
+    channel.into_channel(host)
 }
 
 /// Get the server that owns a server channel.
@@ -165,6 +167,7 @@ pub async fn get_server_id_by_text_channel(
 /// List all channels, optionally restricted to one server.
 pub async fn list(
     executor: impl PgExecutor<'_>,
+    host: &Host,
     server_id: Option<ServerId>,
 ) -> ApiResult<Vec<ServerChannel>> {
     let channels = sqlx::query_as!(
@@ -178,12 +181,16 @@ pub async fn list(
     )
     .fetch_all(executor)
     .await?;
-    channels.into_iter().map(TryInto::try_into).collect()
+    channels
+        .into_iter()
+        .map(|row| row.into_channel(host))
+        .collect()
 }
 
 /// Store the parent and position of each channel.
 pub async fn update_placements(
     conn: &mut PgConnection,
+    host: &Host,
     channels: &[ServerChannel],
 ) -> ApiResult<Vec<ServerChannel>> {
     let ids: Vec<Uuid> = channels.iter().map(|c| c.id.as_uuid()).collect();
@@ -208,7 +215,10 @@ pub async fn update_placements(
     )
     .fetch_all(conn)
     .await?;
-    channels.into_iter().map(TryInto::try_into).collect()
+    channels
+        .into_iter()
+        .map(|row| row.into_channel(host))
+        .collect()
 }
 
 pub async fn has_children(
@@ -270,6 +280,7 @@ pub async fn get_text_channel_ids(
 
 pub async fn update(
     conn: &mut PgConnection,
+    host: &Host,
     server_id: ServerId,
     channel_id: ServerChannelId,
     update: &runelink_types::channel::ServerChannelUpdate,
@@ -311,5 +322,5 @@ pub async fn update(
         row = sqlx::query_as::<_, ServerChannelRow>("UPDATE server_channels SET title = $2, description = $3, metadata = $4 WHERE id = $1 RETURNING *")
             .bind(channel_id).bind(title).bind(description).bind(metadata).fetch_one(&mut *conn).await?;
     }
-    row.try_into()
+    row.into_channel(host)
 }

@@ -3,6 +3,8 @@ use std::{fmt, str::FromStr};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::host::Host;
+
 #[repr(transparent)]
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::Type))]
@@ -34,6 +36,31 @@ pub struct RequestId(Uuid);
 #[repr(transparent)]
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventId(Uuid);
+
+/// A resource's owning host and its ID, which only needs to be unique on that
+/// host. Together they identify the resource across hosts.
+#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceRef<Id> {
+    pub host: Host,
+    pub id: Id,
+}
+
+pub type ServerRef = ResourceRef<ServerId>;
+pub type ServerChannelRef = ResourceRef<ServerChannelId>;
+pub type TextChannelRef = ResourceRef<TextChannelId>;
+pub type MessageRef = ResourceRef<MessageId>;
+
+impl<Id> ResourceRef<Id> {
+    pub fn new(host: Host, id: Id) -> Self {
+        Self { host, id }
+    }
+}
+
+impl<Id: fmt::Display> fmt::Display for ResourceRef<Id> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}@{}", self.id, self.host)
+    }
+}
 
 impl ServerId {
     pub fn new() -> Self {

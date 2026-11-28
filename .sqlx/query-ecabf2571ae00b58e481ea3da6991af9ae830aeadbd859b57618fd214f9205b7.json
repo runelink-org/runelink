@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO users (name, host, role)\n        VALUES ($1, $2, 'user')\n        ON CONFLICT (name, host) DO UPDATE SET updated_at = NOW()\n        RETURNING\n            name,\n            host,\n            role AS \"role: UserRole\",\n            created_at,\n            updated_at,\n            synced_at;\n        ",
+  "query": "\n        SELECT\n            name,\n            host AS \"host: Host\",\n            role AS \"role: UserRole\",\n            created_at,\n            updated_at,\n            synced_at\n        FROM users;\n        ",
   "describe": {
     "columns": [
       {
@@ -16,7 +16,7 @@
       },
       {
         "ordinal": 1,
-        "name": "host",
+        "name": "host: Host",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -81,10 +81,7 @@
       }
     ],
     "parameters": {
-      "Left": [
-        "Text",
-        "Text"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -95,5 +92,5 @@
       true
     ]
   },
-  "hash": "2381721bff8b0aff9220bee9531b131f3243f0489d502fd5ec1dc88fa82d5b53"
+  "hash": "ecabf2571ae00b58e481ea3da6991af9ae830aeadbd859b57618fd214f9205b7"
 }

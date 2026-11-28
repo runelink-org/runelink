@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use runelink_types::{
     channel::TextChannelId,
+    host::Host,
     message::{Message, MessageId, MessageUpdate, NewMessage},
     server::ServerId,
     ws::{ClientWsUpdate, FederationWsUpdate},
@@ -115,18 +116,21 @@ async fn execute(
     let mut tx = ctx.db_pool.begin().await?;
     let mut facts = ActorFacts {
         conn: &mut tx,
-        server_id,
+        server_ref: ctx.config.local_ref(server_id),
         state,
     };
     auth.check(&ctx.config, &mut facts).await?;
     let now = clock.next(&mut tx, text_channel_id).await?;
-    let message = apply(&mut tx, text_channel_id, op, now).await?;
+    let message =
+        apply(&mut tx, ctx.config.public_host(), text_channel_id, op, now)
+            .await?;
     tx.commit().await?;
     Ok(message)
 }
 
 async fn apply(
     conn: &mut PgConnection,
+    host: &Host,
     text_channel_id: TextChannelId,
     op: ChannelOp,
     now: OffsetDateTime,
@@ -134,12 +138,14 @@ async fn apply(
     match op {
         ChannelOp::Create(new_message) => {
             if let Some(reply_to) = new_message.reply_to {
-                check_reply_target(conn, text_channel_id, reply_to).await?;
+                check_reply_target(conn, host, text_channel_id, reply_to)
+                    .await?;
             }
             // The actor, not the database, assigns IDs and times.
             let message_id = MessageId::new();
             queries::messages::insert(
                 conn,
+                host,
                 message_id,
                 text_channel_id,
                 &new_message,
@@ -150,6 +156,7 @@ async fn apply(
         ChannelOp::Update { message_id, update } => {
             queries::messages::update(
                 conn,
+                host,
                 text_channel_id,
                 message_id,
                 &update,
@@ -158,8 +165,14 @@ async fn apply(
             .await
         }
         ChannelOp::Delete(message_id) => {
-            queries::messages::delete(conn, text_channel_id, message_id, now)
-                .await
+            queries::messages::delete(
+                conn,
+                host,
+                text_channel_id,
+                message_id,
+                now,
+            )
+            .await
         }
     }
 }
@@ -168,6 +181,7 @@ async fn apply(
 /// in the schema, to allow broader scopes in the future.
 async fn check_reply_target(
     conn: &mut PgConnection,
+    host: &Host,
     text_channel_id: TextChannelId,
     reply_to: MessageId,
 ) -> ApiResult<()> {
@@ -176,12 +190,12 @@ async fn check_reply_target(
             "Reply target not found in this text channel".into(),
         )
     };
-    let target = queries::messages::get_by_id(conn, reply_to).await.map_err(
-        |error| match error {
+    let target = queries::messages::get_by_id(conn, host, reply_to)
+        .await
+        .map_err(|error| match error {
             ApiError::NotFound => not_found(),
             error => error,
-        },
-    )?;
+        })?;
     if target.text_channel_id != text_channel_id {
         return Err(not_found());
     }
