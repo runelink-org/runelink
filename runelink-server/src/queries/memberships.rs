@@ -49,11 +49,11 @@ struct ServerMembershipRow {
     server_id: Option<ServerId>,
     server_title: Option<String>,
     server_description: Option<String>,
-    server_host_from_db: Option<String>,
+    server_host_from_db: Option<Host>,
     server_created_at: Option<OffsetDateTime>,
     server_updated_at: Option<OffsetDateTime>,
     user_name: Option<String>,
-    user_host: Option<String>,
+    user_host: Option<Host>,
     role: Option<ServerRole>,
     created_at: Option<OffsetDateTime>,
     updated_at: Option<OffsetDateTime>,
@@ -65,10 +65,9 @@ impl ServerMembershipRow {
         self,
         config: &ServerConfig,
     ) -> ApiResult<ServerMembership> {
-        let server_host = match self.server_host_from_db {
-            Some(host) => Host::parse(&host)?,
-            None => config.public_host().clone(),
-        };
+        let server_host = self
+            .server_host_from_db
+            .unwrap_or_else(|| config.public_host().clone());
 
         // Needed because of weird sqlx limitations (or misuse)
         let get_error = || ApiError::Unknown("Sqlx conversion error".into());
@@ -84,7 +83,7 @@ impl ServerMembershipRow {
             user_ref: UserRef::new(
                 self.user_name.ok_or_else(get_error)?,
                 self.user_host.ok_or_else(get_error)?,
-            )?,
+            ),
             role: self.role.ok_or_else(get_error)?,
             joined_at: self.created_at.ok_or_else(get_error)?,
             updated_at: self.updated_at.ok_or_else(get_error)?,
@@ -216,7 +215,7 @@ pub async fn get_local_roles(
 ) -> ApiResult<Vec<(UserRef, ServerRole)>> {
     let rows = sqlx::query!(
         r#"
-        SELECT user_name, user_host, role AS "role: ServerRole"
+        SELECT user_name, user_host AS "user_host: Host", role AS "role: ServerRole"
         FROM server_users
         WHERE server_id = $1;
         "#,
@@ -224,9 +223,10 @@ pub async fn get_local_roles(
     )
     .fetch_all(executor)
     .await?;
-    rows.into_iter()
-        .map(|row| Ok((UserRef::new(row.user_name, row.user_host)?, row.role)))
-        .collect()
+    Ok(rows
+        .into_iter()
+        .map(|row| (UserRef::new(row.user_name, row.user_host), row.role))
+        .collect())
 }
 
 /// The local servers a user belongs to.
@@ -254,7 +254,7 @@ pub async fn get_remote_server_members(
         r#"
         SELECT
             m.user_name AS "user_name?",
-            m.user_host AS "user_host?"
+            m.user_host AS "user_host?: Host"
         FROM cached_remote_servers s
         LEFT JOIN user_remote_server_memberships m
             ON m.remote_server_host = s.host AND m.remote_server_id = s.id
@@ -271,7 +271,7 @@ pub async fn get_remote_server_members(
     let users = rows
         .into_iter()
         .filter_map(|row| Some(UserRef::new(row.user_name?, row.user_host?)))
-        .collect::<Result<_, _>>()?;
+        .collect();
     Ok(Some(users))
 }
 
@@ -334,11 +334,11 @@ pub async fn get_by_user(
             s.id AS "server_id: ServerId",
             s.title AS server_title,
             s.description AS server_description,
-            NULL::TEXT AS server_host_from_db,
+            NULL::TEXT AS "server_host_from_db: Host",
             s.created_at AS server_created_at,
             s.updated_at AS server_updated_at,
             su.user_name AS user_name,
-            su.user_host AS user_host,
+            su.user_host AS "user_host: Host",
             su.role AS "role!: Option<ServerRole>",
             su.created_at,
             su.updated_at,

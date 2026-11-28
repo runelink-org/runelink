@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT user_name, user_host, role AS \"role: ServerRole\"\n        FROM server_users\n        WHERE server_id = $1;\n        ",
+  "query": "\n        SELECT user_name, user_host AS \"user_host: Host\", role AS \"role: ServerRole\"\n        FROM server_users\n        WHERE server_id = $1;\n        ",
   "describe": {
     "columns": [
       {
@@ -16,7 +16,7 @@
       },
       {
         "ordinal": 1,
-        "name": "user_host",
+        "name": "user_host: Host",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -58,5 +58,5 @@
       false
     ]
   },
-  "hash": "74ee6dd013674c9dbbf214eb94482f59ccfe4a77cb847ee440b620e7fcf69f57"
+  "hash": "17dd5eb064964c2641561f3708e774ffde2ad2fdec5594ba027511df8f1c4e45"
 }

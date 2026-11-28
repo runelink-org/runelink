@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT c.server_id, m.text_channel_id, m.author_name, m.author_host\n        FROM messages m\n        JOIN server_channels c ON c.text_channel_id = m.text_channel_id\n        WHERE m.id = $1\n        ",
+  "query": "\n        SELECT c.server_id, m.text_channel_id, m.author_name,\n            m.author_host AS \"author_host: Host\"\n        FROM messages m\n        JOIN server_channels c ON c.text_channel_id = m.text_channel_id\n        WHERE m.id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -38,7 +38,7 @@
       },
       {
         "ordinal": 3,
-        "name": "author_host",
+        "name": "author_host: Host",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -60,5 +60,5 @@
       true
     ]
   },
-  "hash": "f78941ffcddfc52b82c4910245477871f508aec29dc906539100c01e125dc5f2"
+  "hash": "bf59a7822bbda9638844fb2846169c46c90b4782e295165116d18052b3877f5b"
 }

@@ -31,13 +31,13 @@ pub async fn get_members_by_server(
 /// GET /servers/{host}/{id}/users/{user_host}/{name}
 pub async fn get_by_user_and_server(
     State(state): State<AppState>,
-    Path((host, id, user_host, name)): Path<(Host, ServerId, String, String)>,
+    Path((host, id, user_host, name)): Path<(Host, ServerId, Host, String)>,
 ) -> ApiResult<impl IntoResponse> {
     debug!("GET /servers/{host}/{id}/users/{user_host}/{name}");
     let member = ops::memberships::get_member_by_user_and_server(
         &state,
         &ServerRef::new(host, id),
-        UserRef::new(name, user_host)?,
+        UserRef::new(name, user_host),
     )
     .await?;
     Ok((StatusCode::OK, Json(member)))
@@ -74,10 +74,10 @@ pub async fn create(
 /// GET /users/{host}/{name}/memberships
 pub async fn get_by_user(
     State(state): State<AppState>,
-    Path((host, name)): Path<(String, String)>,
+    Path((host, name)): Path<(Host, String)>,
 ) -> ApiResult<impl IntoResponse> {
     debug!("GET /users/{host}/{name}/servers");
-    let user_ref = UserRef::new(name, host)?;
+    let user_ref = UserRef::new(name, host);
     let memberships = ops::memberships::get_by_user(&state, user_ref).await?;
     Ok((StatusCode::OK, Json(memberships)))
 }
@@ -86,11 +86,11 @@ pub async fn get_by_user(
 pub async fn delete(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((host, id, user_host, name)): Path<(Host, ServerId, String, String)>,
+    Path((host, id, user_host, name)): Path<(Host, ServerId, Host, String)>,
 ) -> ApiResult<impl IntoResponse> {
     debug!("DELETE /servers/{host}/{id}/users/{user_host}/{name}");
     let server_ref = ServerRef::new(host, id);
-    let user_ref = UserRef::new(name, user_host)?;
+    let user_ref = UserRef::new(name, user_host);
     let mut session = authorize(
         &state,
         Principal::from_client_headers(&headers, &state)?,

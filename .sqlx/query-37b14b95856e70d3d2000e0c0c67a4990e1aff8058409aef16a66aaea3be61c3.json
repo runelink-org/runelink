@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT user_name, user_host, password_hash, created_at, updated_at\n        FROM local_accounts\n        WHERE user_name = $1 AND user_host = $2;\n        ",
+  "query": "\n        INSERT INTO local_accounts (user_name, user_host, password_hash)\n        VALUES ($1, $2, $3)\n        RETURNING user_name, user_host AS \"user_host: Host\", password_hash,\n                  created_at, updated_at;\n        ",
   "describe": {
     "columns": [
       {
@@ -16,7 +16,7 @@
       },
       {
         "ordinal": 1,
-        "name": "user_host",
+        "name": "user_host: Host",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -62,6 +62,7 @@
     "parameters": {
       "Left": [
         "Text",
+        "Text",
         "Text"
       ]
     },
@@ -73,5 +74,5 @@
       false
     ]
   },
-  "hash": "23ab9990728cce70590f762b4187203ee6a682ab91588057e2fc9ac30504c555"
+  "hash": "37b14b95856e70d3d2000e0c0c67a4990e1aff8058409aef16a66aaea3be61c3"
 }

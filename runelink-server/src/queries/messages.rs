@@ -271,7 +271,8 @@ pub async fn get_location(
 ) -> ApiResult<MessageLocation> {
     let row = sqlx::query!(
         r#"
-        SELECT c.server_id, m.text_channel_id, m.author_name, m.author_host
+        SELECT c.server_id, m.text_channel_id, m.author_name,
+            m.author_host AS "author_host: Host"
         FROM messages m
         JOIN server_channels c ON c.text_channel_id = m.text_channel_id
         WHERE m.id = $1
@@ -283,8 +284,7 @@ pub async fn get_location(
     let author = row
         .author_name
         .zip(row.author_host)
-        .map(|(name, host)| UserRef::new(name, host))
-        .transpose()?;
+        .map(|(name, host)| UserRef::new(name, host));
     Ok(MessageLocation {
         message_id,
         server_ref: ServerRef::new(host.clone(), row.server_id.into()),

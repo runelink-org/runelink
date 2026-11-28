@@ -3,13 +3,13 @@ use rand::{TryRng, rngs::SysRng};
 use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
 
-use crate::user::UserRef;
+use crate::{host::Host, user::UserRef};
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
 pub struct LocalAccount {
     pub user_name: String,
-    pub user_host: String,
+    pub user_host: Host,
     pub password_hash: String,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
@@ -28,7 +28,7 @@ pub struct SignupRequest {
 pub struct RefreshToken {
     pub token: String,
     pub user_name: String,
-    pub user_host: String,
+    pub user_host: Host,
     pub client_id: String,
     #[serde(with = "time::serde::rfc3339")]
     pub issued_at: OffsetDateTime,
@@ -107,7 +107,7 @@ impl RefreshToken {
         Self {
             token: token_str,
             user_name: user_ref.name,
-            user_host: user_ref.host.into(),
+            user_host: user_ref.host,
             client_id,
             issued_at: now,
             expires_at: now + lifetime,

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use time::OffsetDateTime;
 
-use crate::host::{Host, InvalidHost};
+use crate::host::Host;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -88,14 +88,8 @@ impl fmt::Display for UserRef {
 }
 
 impl UserRef {
-    pub fn new(
-        name: String,
-        host: impl AsRef<str>,
-    ) -> Result<Self, InvalidHost> {
-        Ok(Self {
-            name,
-            host: Host::parse(host.as_ref())?,
-        })
+    pub fn new(name: String, host: Host) -> Self {
+        Self { name, host }
     }
 
     /// Format as "name@host" for use in JWT subject claims.
@@ -106,7 +100,7 @@ impl UserRef {
     /// Parse "name@host" string into UserRef. Returns None if format is invalid.
     pub fn parse_subject(s: &str) -> Option<Self> {
         let (name, host) = s.split_once('@')?;
-        let user_ref = Self::new(name.to_string(), host).ok()?;
+        let user_ref = Self::new(name.to_string(), Host::parse(host).ok()?);
         (!user_ref.name.is_empty()).then_some(user_ref)
     }
 }
@@ -121,11 +115,6 @@ mod tests {
             name: "alice".into(),
             host: Host::parse("example.com").unwrap(),
         };
-        assert_eq!(
-            UserRef::new("alice".into(), "Example.COM:7000"),
-            Ok(expected.clone())
-        );
-        assert!(UserRef::new("alice".into(), "x:7000:7000").is_err());
         let parsed: UserRef = serde_json::from_str(
             r#"{"name":"alice","host":"EXAMPLE.com:7000"}"#,
         )

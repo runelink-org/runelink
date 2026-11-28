@@ -4,7 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use runelink_client::Error as ClientError;
-use runelink_types::{host::InvalidHost, ws::WsError};
+use runelink_types::ws::WsError;
 use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinError;
@@ -68,12 +68,6 @@ impl From<sqlx::Error> for ApiError {
 
             _ => ApiError::Unknown(e.to_string()),
         }
-    }
-}
-
-impl From<InvalidHost> for ApiError {
-    fn from(e: InvalidHost) -> Self {
-        ApiError::BadRequest(e.to_string())
     }
 }
 

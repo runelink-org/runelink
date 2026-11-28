@@ -298,7 +298,7 @@ pub mod auth {
         use runelink_types::server::ServerId;
 
         fn user() -> UserRef {
-            UserRef::new("alice".into(), "example.com").unwrap()
+            UserRef::parse_subject("alice@example.com").unwrap()
         }
 
         fn server_ref() -> ServerRef {

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO refresh_tokens (token, user_name, user_host, client_id, issued_at,\n                                    expires_at, revoked)\n        VALUES ($1, $2, $3, $4, $5, $6, $7)\n        RETURNING token, user_name, user_host, client_id, issued_at, expires_at, revoked\n        ",
+  "query": "\n        INSERT INTO refresh_tokens (token, user_name, user_host, client_id, issued_at,\n                                    expires_at, revoked)\n        VALUES ($1, $2, $3, $4, $5, $6, $7)\n        RETURNING token, user_name, user_host AS \"user_host: Host\", client_id,\n                  issued_at, expires_at, revoked\n        ",
   "describe": {
     "columns": [
       {
@@ -27,7 +27,7 @@
       },
       {
         "ordinal": 2,
-        "name": "user_host",
+        "name": "user_host: Host",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -102,5 +102,5 @@
       false
     ]
   },
-  "hash": "ff5f65e683cb12b8dc7bb8f659866c7fc2dba2f643ee1a62c4848bdd51bc3400"
+  "hash": "d9ee122de2b1b44574882ea5194ecbf4184fa98c03d6a16e76d888689a50f27e"
 }

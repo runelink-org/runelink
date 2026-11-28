@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT token, user_name, user_host, client_id, issued_at, expires_at, revoked\n        FROM refresh_tokens\n        WHERE token = $1\n        ",
+  "query": "\n        SELECT token, user_name, user_host AS \"user_host: Host\", client_id,\n               issued_at, expires_at, revoked\n        FROM refresh_tokens\n        WHERE token = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -27,7 +27,7 @@
       },
       {
         "ordinal": 2,
-        "name": "user_host",
+        "name": "user_host: Host",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -96,5 +96,5 @@
       false
     ]
   },
-  "hash": "185826ee1dfd61799b33113a44a15488fd98c3de8a474424f6aed42ed8b087d8"
+  "hash": "e1539b67e1acc8d3dd4e27b4dd26f0f23ac8b5fbe5e1c11534bfe2e66c30db3a"
 }

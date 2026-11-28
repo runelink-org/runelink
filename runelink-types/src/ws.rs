@@ -833,7 +833,7 @@ mod tests {
     #[test]
     fn updates_are_owned_by_the_host_of_their_resource() {
         let (a, b) = (host("a.example"), host("b.example"));
-        let user_ref = UserRef::new("alice".into(), "b.example").unwrap();
+        let user_ref = UserRef::parse_subject("alice@b.example").unwrap();
         let server_ref = ServerRef::new(a.clone(), ServerId::new());
         for update in [
             FederationWsUpdate::ServerUpserted(server(&a)),
