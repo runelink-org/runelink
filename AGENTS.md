@@ -39,7 +39,7 @@ The same applies to each kind of resource (`channel`, `text_channel`, `message`)
 
 Hosts are `Host` values, which only parsing creates and which are always canonical: lowercase, without the default port (`DEFAULT_PORT`). Compare and store them as `Host`s, and never add or strip ports by hand. Use `Host::api_url`, `Host::client_ws_url`, or `Host::federation_ws_url` to connect to a host, and `Host::authority` only where the port must always be spelled out. Parse hosts that people enter with `runelink_client::validation::validate_host`.
 
-Connect to peers only with `AppState::http_client` or at addresses from `PeerPolicy::resolve`, which refuse private addresses unless this host is itself private.
+Connect to peers only at addresses that `PeerPolicy` allows: with `AppState::http_client`, whose resolver checks host names, after checking literal IPs with `PeerPolicy::allows_literal`, or at addresses from `PeerPolicy::resolve`. Unless this host is itself private, it refuses loopback, private, and link-local addresses.
 
 ### Tests
 

@@ -93,11 +93,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             db_pool: db_pool.clone(),
             // Keys are fetched from an issuer's exact API URL, never from
             // where it redirects or through a proxy, and only at addresses
-            // the peer policy allows.
+            // the peer policy allows. A stalled peer can't hold a request.
             http_client: reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
                 .no_proxy()
                 .dns_resolver(peer_policy)
+                .timeout(std::time::Duration::from_secs(10))
                 .build()?,
             peer_policy,
             client_ws_manager,

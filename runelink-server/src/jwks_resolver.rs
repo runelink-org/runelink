@@ -13,26 +13,11 @@ use crate::{
     state::AppState,
 };
 
-/// Kid -> raw public key bytes (currently ed25519 raw 32 bytes).
-type KeysByKid = HashMap<String, Vec<u8>>;
-
 #[derive(Debug, Clone)]
 pub struct CachedJwks {
     fetched_at: OffsetDateTime,
-    /// The issuer's keys, or `None` if fetching them failed.
-    keys_by_kid: Option<KeysByKid>,
-}
-
-impl CachedJwks {
-    fn is_fresh(&self, now: OffsetDateTime) -> bool {
-        // Failures are cached briefly, so that repeated tokens from an
-        // unreachable issuer don't each fetch its keys again.
-        let ttl = match self.keys_by_kid {
-            Some(_) => Duration::minutes(10),
-            None => Duration::minutes(1),
-        };
-        self.fetched_at + ttl > now
-    }
+    // kid -> raw public key bytes (currently ed25519 raw 32 bytes)
+    keys_by_kid: HashMap<String, Vec<u8>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,96 +45,88 @@ fn parse_iss_unverified(token: &str) -> ApiResult<String> {
     Ok(parsed.iss)
 }
 
-/// Fetches an issuer's keys, or the reason it failed, which is only logged,
-/// since the issuer is unverified and its response must not reach whoever
-/// sent the token.
-async fn fetch_jwks(
-    state: &AppState,
-    issuer: &Host,
-) -> Result<KeysByKid, String> {
-    // The HTTP client's resolver checks host names, but not literal IPs.
-    if !state.peer_policy.allows_literal(issuer) {
-        return Err("federation may not connect to its address".into());
-    }
+async fn fetch_jwks(state: &AppState, issuer: &Host) -> ApiResult<CachedJwks> {
     let url = format!(
         "{}/.well-known/jwks.json",
         issuer.api_url(state.config.secure)
     );
+    // Only logged, since the issuer is unverified and its response must not
+    // reach whoever sent the token.
+    let failed = |reason: String| {
+        log::warn!("Failed fetching JWKS from {issuer}: {reason}");
+        ApiError::AuthError("could not fetch the issuer's signing keys".into())
+    };
+    // The HTTP client's resolver checks host names, but not literal IPs.
+    if !state.peer_policy.allows_literal(issuer) {
+        return Err(failed("the peer policy refuses its address".into()));
+    }
     let response = state
         .http_client
         .get(url)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| failed(e.to_string()))?;
     let status = response.status();
     if !status.is_success() {
-        return Err(status.to_string());
+        return Err(failed(status.to_string()));
     }
     let jwks: JwksResponse =
-        response.json().await.map_err(|e| e.to_string())?;
+        response.json().await.map_err(|e| failed(e.to_string()))?;
 
     let mut keys_by_kid = HashMap::new();
     for key in jwks.keys {
         // For now we only support Ed25519 OKP keys as produced by KeyManager.
         // Future: validate kty/crv/alg/use_ and support rotation.
-        let pub_bytes =
-            URL_SAFE_NO_PAD.decode(key.x).map_err(|e| e.to_string())?;
+        let pub_bytes = URL_SAFE_NO_PAD
+            .decode(key.x)
+            .map_err(|e| failed(e.to_string()))?;
         keys_by_kid.insert(key.kid, pub_bytes);
     }
-    Ok(keys_by_kid)
+
+    Ok(CachedJwks {
+        fetched_at: OffsetDateTime::now_utc(),
+        keys_by_kid,
+    })
 }
 
 async fn get_cached_jwks(
     state: &AppState,
     issuer: &Host,
-) -> ApiResult<KeysByKid> {
-    let now = OffsetDateTime::now_utc();
-    let cached = state
-        .jwks_cache
-        .read()
-        .await
-        .get(issuer)
-        .filter(|entry| entry.is_fresh(now))
-        .cloned();
-    let entry = match cached {
-        Some(entry) => entry,
-        None => {
-            let keys_by_kid = fetch_jwks(state, issuer)
-                .await
-                .inspect_err(|reason| {
-                    log::warn!("Failed fetching JWKS from {issuer}: {reason}")
-                })
-                .ok();
-            let entry = CachedJwks {
-                fetched_at: now,
-                keys_by_kid,
-            };
-            let mut cache = state.jwks_cache.write().await;
-            // Issuers are unverified, so stale entries are dropped rather
-            // than kept for every issuer ever named.
-            cache.retain(|_, entry| entry.is_fresh(now));
-            cache.insert(issuer.clone(), entry.clone());
-            entry
+) -> ApiResult<CachedJwks> {
+    // Simple time-based cache. This will be expanded later with better
+    // negative caching and rotation support.
+    let ttl = Duration::minutes(10);
+    {
+        let cache = state.jwks_cache.read().await;
+        if let Some(entry) = cache.get(issuer)
+            && entry.fetched_at + ttl > OffsetDateTime::now_utc()
+        {
+            return Ok(entry.clone());
         }
-    };
-    entry.keys_by_kid.ok_or_else(|| {
-        ApiError::AuthError("could not fetch the issuer's signing keys".into())
-    })
+    }
+
+    let fetched = fetch_jwks(state, issuer).await?;
+    {
+        let mut cache = state.jwks_cache.write().await;
+        cache.insert(issuer.clone(), fetched.clone());
+    }
+    Ok(fetched)
 }
 
 fn select_public_key_bytes<'a>(
-    keys_by_kid: &'a KeysByKid,
+    cached: &'a CachedJwks,
     kid: Option<&str>,
 ) -> ApiResult<&'a [u8]> {
     if let Some(kid) = kid {
-        return keys_by_kid
+        return cached
+            .keys_by_kid
             .get(kid)
             .map(|v| v.as_slice())
             .ok_or_else(|| ApiError::AuthError("unknown jwk kid".into()));
     }
 
-    if keys_by_kid.len() == 1 {
-        return Ok(keys_by_kid.values().next().unwrap().as_slice());
+    if cached.keys_by_kid.len() == 1 {
+        return Ok(cached.keys_by_kid.values().next().unwrap().as_slice());
     }
 
     Err(ApiError::AuthError(
@@ -181,9 +158,8 @@ pub async fn decode_federation_jwt(
             )
         })?;
 
-    let keys_by_kid = get_cached_jwks(state, &issuer).await?;
-    let pub_bytes =
-        select_public_key_bytes(&keys_by_kid, header.kid.as_deref())?;
+    let cached = get_cached_jwks(state, &issuer).await?;
+    let pub_bytes = select_public_key_bytes(&cached, header.kid.as_deref())?;
 
     if pub_bytes.len() != 32 {
         return Err(ApiError::AuthError(
