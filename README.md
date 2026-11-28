@@ -40,7 +40,7 @@ RuneLink separates **user authentication** from **server-to-server federation**:
 - **Clients authenticate only with their home host** (user sessions are local).
 - When a home host needs to interact with a remote host, it uses **server-to-server requests** authenticated with **short-lived JWTs**.
 - Remote hosts validate those JWTs by discovering public keys via **JWKS** published at `/.well-known/jwks.json`.
-- A host refuses to connect to peers at loopback, private, or link-local addresses, unless its own `public_host` is itself one of those (or resolves to one), as in local development.
+- A host refuses to connect to peers at loopback, private, or link-local addresses, unless its own `public_host` is itself one of those or resolves only to those, as in local development.
 - Every server, channel, and message is owned by one host, and is identified by that host together with an ID that is only unique on it. Resources and references to them include the host unless it's implied, such as in requests sent to the owning host itself, and hosts only accept updates and replies from a peer about that peer's own resources.
 
 More detailed federation/authentication documentation is planned.
