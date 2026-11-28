@@ -483,7 +483,7 @@ impl FederationWsManager {
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
             info!("Opening federation websocket to {host}");
-            let claims = FederationClaims::new_server_only(
+            let claims = FederationClaims::new(
                 state.config.api_url(),
                 host.api_url(state.config.secure),
                 Duration::minutes(5),

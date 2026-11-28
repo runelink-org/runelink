@@ -42,6 +42,7 @@ use super::handlers::{
 use crate::{
     auth::Principal,
     auth_service,
+    bearer_auth::FederationAuth,
     capabilities::{
         client_websocket, federation_websocket, log_version_mismatches,
     },
@@ -276,13 +277,8 @@ async fn federation_ws_upgrade_loop(
     headers: HeaderMap,
     socket: WebSocket,
 ) {
-    let auth = match Principal::from_federation_headers(&headers, &state).await
-    {
-        Ok(Principal::Federation(auth)) => auth,
-        Ok(Principal::Client(_)) => {
-            log::warn!("Rejected federation websocket with client credentials");
-            return;
-        }
+    let auth = match FederationAuth::from_headers(&headers, &state).await {
+        Ok(auth) => auth,
         Err(error) => {
             log::warn!(
                 "Rejected unauthenticated federation websocket: {error}"

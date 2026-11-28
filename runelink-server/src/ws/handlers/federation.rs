@@ -266,8 +266,7 @@ pub(super) async fn handle_federation_request(
                 ops::users::auth::federated::delete(user_ref.clone()),
             )
             .await?;
-            ops::users::delete_remote_user_record(state, &session, &user_ref)
-                .await?;
+            ops::users::delete_remote_user_record(state, &session).await?;
             Ok(FederationWsReply::UsersDelete)
         }
 
