@@ -13,6 +13,7 @@ use runelink_types::capability::{
         users,
     },
 };
+use runelink_types::host::Host;
 use serde::Serialize;
 
 use crate::capabilities::{client_websocket, federation_websocket, http};
@@ -28,12 +29,13 @@ pub async fn discovery() -> Json<CapabilityDiscovery> {
 }
 
 pub async fn require_capability(request: Request, next: Next) -> Response {
-    let server = request
+    // Canonical, as clients may name the default port
+    let host = request
         .headers()
         .get(HOST)
         .and_then(|host| host.to_str().ok())
-        .unwrap_or("This server")
-        .to_owned();
+        .and_then(|host| Host::parse(host).ok())
+        .map_or_else(|| "This host".to_owned(), |host| host.to_string());
     let Some(path) = request.extensions().get::<MatchedPath>() else {
         return next.run(request).await;
     };
@@ -89,7 +91,7 @@ pub async fn require_capability(request: Request, next: Next) -> Response {
         return unsupported_capability(
             &required.capability,
             format!(
-                "{server}: {} for {} (requested {})",
+                "{host}: {} for {} (requested {})",
                 runelink_types::capability::incompatibility_reason(
                     &[version],
                     supported_versions

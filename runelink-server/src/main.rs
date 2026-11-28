@@ -91,10 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         app_state.federation_ws_manager.set_state(app_state.clone());
 
         MIGRATOR.run(db_pool.as_ref()).await?;
-        log::info!(
-            "Migrations are up to date for {}.",
-            config.public_host_with_explicit_port()
-        );
+        log::info!("Migrations are up to date for {}.", config.public_host());
 
         let app = api::router().with_state(app_state);
 
@@ -107,13 +104,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     log::warn!("Failed setting TCP_NODELAY: {error}");
                 }
             });
-        let host = config.public_host_with_explicit_port();
+        let host = config.public_host().clone();
 
-        log::info!("Starting server {host} on {bind_addr}");
+        log::info!("Starting host {host} on {bind_addr}");
         join_set.spawn(async move {
             axum::serve(listener, app)
                 .await
-                .map_err(|e| format!("server {host} exited with error: {e}"))
+                .map_err(|e| format!("host {host} exited with error: {e}"))
         });
     }
 
