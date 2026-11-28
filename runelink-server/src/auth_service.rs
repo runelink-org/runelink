@@ -138,7 +138,7 @@ pub async fn issue_password_token(
 
     let user = queries::users::get_by_ref(
         &*state.db_pool,
-        UserRef::new(username, state.config.public_host())?,
+        UserRef::new(username, state.config.public_host().clone()),
     )
     .await?;
 
@@ -173,7 +173,7 @@ pub async fn issue_refresh_token(
     let user_ref = UserRef::new(
         refresh_token.user_name.clone(),
         refresh_token.user_host.clone(),
-    )?;
+    );
     let client_id =
         request.client_id.unwrap_or(refresh_token.client_id.clone());
     let scope = request.scope.unwrap_or_else(|| "openid".into());

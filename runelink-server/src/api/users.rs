@@ -49,10 +49,10 @@ pub async fn get_all(
 /// GET /users/{host}/{name}
 pub async fn get_by_ref(
     State(state): State<AppState>,
-    Path((host, name)): Path<(String, String)>,
+    Path((host, name)): Path<(Host, String)>,
 ) -> ApiResult<impl IntoResponse> {
     debug!("GET /users/{host}/{name}");
-    let user_ref = UserRef::new(name, host)?;
+    let user_ref = UserRef::new(name, host);
     let user = ops::users::get_by_ref(&state, user_ref).await?;
     Ok((StatusCode::OK, Json(user)))
 }
@@ -60,14 +60,14 @@ pub async fn get_by_ref(
 /// GET /users/{host}/{name}/hosts
 pub async fn get_associated_hosts(
     State(state): State<AppState>,
-    Path((host, name)): Path<(String, String)>,
+    Path((host, name)): Path<(Host, String)>,
     Query(params): Query<UserQueryParams>,
 ) -> ApiResult<impl IntoResponse> {
     debug!(
         "GET /users/{host}/{name}/hosts?target_host={:?}",
         params.target_host
     );
-    let user_ref = UserRef::new(name, host)?;
+    let user_ref = UserRef::new(name, host);
     let hosts = ops::users::get_associated_hosts(
         &state,
         user_ref,
@@ -81,9 +81,9 @@ pub async fn get_associated_hosts(
 pub async fn delete(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((host, name)): Path<(String, String)>,
+    Path((host, name)): Path<(Host, String)>,
 ) -> ApiResult<impl IntoResponse> {
-    let user_ref = UserRef::new(name.clone(), host.clone())?;
+    let user_ref = UserRef::new(name.clone(), host.clone());
     debug!("DELETE /users/{host}/{name}");
     let session = authorize(
         &state,

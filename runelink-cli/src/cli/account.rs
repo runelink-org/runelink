@@ -600,7 +600,7 @@ mod tests {
     use serde_json::json;
 
     fn alice() -> UserRef {
-        UserRef::new("alice".into(), "localhost").unwrap()
+        UserRef::parse_subject("alice@localhost").unwrap()
     }
 
     #[test]

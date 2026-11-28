@@ -1,4 +1,4 @@
-use runelink_types::{LocalAccount, UserRef};
+use runelink_types::{Host, LocalAccount, UserRef};
 
 use sqlx::PgExecutor;
 
@@ -14,7 +14,8 @@ pub async fn insert(
         r#"
         INSERT INTO local_accounts (user_name, user_host, password_hash)
         VALUES ($1, $2, $3)
-        RETURNING user_name, user_host, password_hash, created_at, updated_at;
+        RETURNING user_name, user_host AS "user_host: Host", password_hash,
+                  created_at, updated_at;
         "#,
         user_ref.name,
         user_ref.host.as_str(),
@@ -32,7 +33,8 @@ pub async fn get_by_user(
     let local_account = sqlx::query_as!(
         LocalAccount,
         r#"
-        SELECT user_name, user_host, password_hash, created_at, updated_at
+        SELECT user_name, user_host AS "user_host: Host", password_hash,
+               created_at, updated_at
         FROM local_accounts
         WHERE user_name = $1 AND user_host = $2;
         "#,

@@ -69,11 +69,10 @@ pub fn parse_user_ref_input(
     host: &str,
     strict: bool,
 ) -> Result<UserRef, CliError> {
-    UserRef::new(
+    Ok(UserRef::new(
         parse_username_input(name, strict)?,
         parse_host_input(host, strict)?,
-    )
-    .map_err(|error| CliError::InvalidArgument(error.to_string()))
+    ))
 }
 
 /// Format an optional full ID consistently across CLI lists.

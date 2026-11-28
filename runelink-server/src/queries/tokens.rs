@@ -1,4 +1,4 @@
-use runelink_types::{RefreshToken, UserRef};
+use runelink_types::{Host, RefreshToken, UserRef};
 use time::OffsetDateTime;
 
 use crate::{db::DbPool, error::ApiResult};
@@ -13,11 +13,12 @@ pub async fn insert_refresh(
         INSERT INTO refresh_tokens (token, user_name, user_host, client_id, issued_at,
                                     expires_at, revoked)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING token, user_name, user_host, client_id, issued_at, expires_at, revoked
+        RETURNING token, user_name, user_host AS "user_host: Host", client_id,
+                  issued_at, expires_at, revoked
         "#,
         rt.token,
         rt.user_name,
-        rt.user_host,
+        rt.user_host.as_str(),
         rt.client_id,
         rt.issued_at,
         rt.expires_at,
@@ -35,7 +36,8 @@ pub async fn get_refresh(
     let refresh_token = sqlx::query_as!(
         RefreshToken,
         r#"
-        SELECT token, user_name, user_host, client_id, issued_at, expires_at, revoked
+        SELECT token, user_name, user_host AS "user_host: Host", client_id,
+               issued_at, expires_at, revoked
         FROM refresh_tokens
         WHERE token = $1
         "#,
