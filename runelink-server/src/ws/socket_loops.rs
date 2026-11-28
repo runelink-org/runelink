@@ -1,4 +1,4 @@
-use std::{pin::Pin, sync::Arc, time::Duration};
+use std::{fmt, pin::Pin, sync::Arc, time::Duration};
 
 use axum::{
     extract::{
@@ -26,6 +26,7 @@ use serde::Deserialize;
 use tokio::{
     net::TcpStream,
     sync::{Semaphore, mpsc},
+    time::{Instant, Interval, MissedTickBehavior},
 };
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
@@ -55,6 +56,37 @@ pub(super) const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 // How long to wait for the peer's close reply, so the close frame is not lost
 // to a connection reset.
 const CLOSE_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(1);
+// How often a socket is pinged, so that an idle peer still sends pongs.
+const PING_INTERVAL: Duration = Duration::from_secs(5);
+// How long a socket may receive nothing, not even a pong, before it is closed,
+// so that a peer that went away without closing it is noticed. It is longer
+// than the ping interval, which leaves the peer time to answer a ping.
+//
+// A socket is not read while a received message is handled, so the timeout
+// is not checked then, and starts over once handling ends. Hosts keep pinging
+// while they handle a message, so their peers keep receiving something.
+const RECEIVE_TIMEOUT: Duration = Duration::from_secs(10);
+// How long a send may take before the socket is closed, so that a peer that
+// stopped reading cannot hold up the loop.
+const SEND_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// When to ping a socket, starting one interval from now.
+fn ping_interval() -> Interval {
+    let mut pings =
+        tokio::time::interval_at(Instant::now() + PING_INTERVAL, PING_INTERVAL);
+    pings.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    pings
+}
+
+/// Sends on a socket within [`SEND_TIMEOUT`].
+async fn send_within<E: fmt::Display>(
+    send: impl Future<Output = Result<(), E>>,
+) -> Result<(), String> {
+    match tokio::time::timeout(SEND_TIMEOUT, send).await {
+        Ok(result) => result.map_err(|error| error.to_string()),
+        Err(_) => Err("timed out".into()),
+    }
+}
 
 pub enum FederationSocket {
     Inbound(Box<WebSocket>),
@@ -80,6 +112,19 @@ impl FederationSocket {
                 .map_err(|error| error.to_string()),
             FederationSocket::Outbound(socket) => socket
                 .send(WsMessage::Text(payload.into()))
+                .await
+                .map_err(|error| error.to_string()),
+        }
+    }
+
+    async fn send_ping(&mut self) -> Result<(), String> {
+        match self {
+            FederationSocket::Inbound(socket) => socket
+                .send(AxumMessage::Ping(Default::default()))
+                .await
+                .map_err(|error| error.to_string()),
+            FederationSocket::Outbound(socket) => socket
+                .send(WsMessage::Ping(Default::default()))
                 .await
                 .map_err(|error| error.to_string()),
         }
@@ -203,16 +248,21 @@ async fn client_ws_loop(
 
     let in_flight = Arc::new(Semaphore::new(MAX_IN_FLIGHT_CLIENT_REQUESTS));
     let mut handling: Option<Handling<'_>> = None;
+    let mut pings = ping_interval();
+    let mut receive_deadline = Instant::now() + RECEIVE_TIMEOUT;
     loop {
         tokio::select! {
-            () = finish(&mut handling), if handling.is_some() => handling = None,
+            () = finish(&mut handling), if handling.is_some() => {
+                handling = None;
+                receive_deadline = Instant::now() + RECEIVE_TIMEOUT;
+            }
             outbound = outbound_rx.recv() => {
                 let Some(envelope) = outbound else {
                     break;
                 };
                 match serde_json::to_string(&envelope) {
                     Ok(payload) => {
-                        if let Err(error) = socket.send(AxumMessage::Text(payload.into())).await {
+                        if let Err(error) = send_within(socket.send(AxumMessage::Text(payload.into()))).await {
                             log::warn!("Client websocket send error: {error}");
                             break;
                         }
@@ -222,7 +272,19 @@ async fn client_ws_loop(
                     }
                 }
             }
-            incoming = socket.recv(), if handling.is_none() => {
+            _ = pings.tick() => {
+                if let Err(error) = send_within(socket.send(AxumMessage::Ping(Default::default()))).await {
+                    log::warn!("Client websocket ping error: {error}");
+                    break;
+                }
+            }
+            // A message that is already waiting is read before the timeout.
+            incoming = tokio::time::timeout_at(receive_deadline, socket.recv()), if handling.is_none() => {
+                let Ok(incoming) = incoming else {
+                    log::info!("Closing a client websocket that sent nothing for {RECEIVE_TIMEOUT:?}");
+                    break;
+                };
+                receive_deadline = Instant::now() + RECEIVE_TIMEOUT;
                 match incoming {
                     Some(Ok(AxumMessage::Text(payload))) => {
                         match serde_json::from_str::<ClientWsEnvelope>(&payload) {
@@ -247,6 +309,8 @@ async fn client_ws_loop(
             }
         }
     }
+    // Closed before waiting on the message being handled.
+    drop(socket);
     if let Some(handling) = handling {
         handling.await;
     }
@@ -302,10 +366,10 @@ async fn federation_ws_upgrade_loop(
 
     let _ = state
         .federation_ws_manager
-        .authenticate_connection(conn_id, host)
+        .authenticate_connection(conn_id, host.clone())
         .await;
 
-    federation_socket_loop(state, conn_id, socket, outbound_rx).await;
+    federation_socket_loop(state, conn_id, host, socket, outbound_rx).await;
 }
 
 async fn negotiate_client_socket(
@@ -361,7 +425,9 @@ async fn negotiate_client_socket(
         server_version: env!("CARGO_PKG_VERSION").to_string(),
     });
     let payload = serde_json::to_string(&welcome).ok()?;
-    socket.send(AxumMessage::Text(payload.into())).await.ok()?;
+    send_within(socket.send(AxumMessage::Text(payload.into())))
+        .await
+        .ok()?;
     Some(capabilities)
 }
 
@@ -455,8 +521,7 @@ async fn negotiate_federation_socket(
         capabilities: capabilities.clone(),
         server_version: env!("CARGO_PKG_VERSION").to_string(),
     });
-    socket
-        .send_text(serde_json::to_string(&welcome).ok()?)
+    send_within(socket.send_text(serde_json::to_string(&welcome).ok()?))
         .await
         .ok()?;
     Some(capabilities)
@@ -465,20 +530,26 @@ async fn negotiate_federation_socket(
 pub async fn federation_socket_loop(
     state: AppState,
     conn_id: ConnId,
+    host: Host,
     mut socket: FederationSocket,
     mut outbound_rx: mpsc::UnboundedReceiver<FederationWsEnvelope>,
 ) {
     let mut handling: Option<Handling<'_>> = None;
+    let mut pings = ping_interval();
+    let mut receive_deadline = Instant::now() + RECEIVE_TIMEOUT;
     loop {
         tokio::select! {
-            () = finish(&mut handling), if handling.is_some() => handling = None,
+            () = finish(&mut handling), if handling.is_some() => {
+                handling = None;
+                receive_deadline = Instant::now() + RECEIVE_TIMEOUT;
+            }
             outbound = outbound_rx.recv() => {
                 let Some(envelope) = outbound else {
                     break;
                 };
                 match serde_json::to_string(&envelope) {
                     Ok(payload) => {
-                        if let Err(error) = socket.send_text(payload).await {
+                        if let Err(error) = send_within(socket.send_text(payload)).await {
                             log::warn!("Federation websocket send error: {error}");
                             break;
                         }
@@ -488,7 +559,19 @@ pub async fn federation_socket_loop(
                     }
                 }
             }
-            incoming = socket.recv_event(), if handling.is_none() => {
+            _ = pings.tick() => {
+                if let Err(error) = send_within(socket.send_ping()).await {
+                    log::warn!("Federation websocket ping error: {error}");
+                    break;
+                }
+            }
+            // A message that is already waiting is read before the timeout.
+            incoming = tokio::time::timeout_at(receive_deadline, socket.recv_event()), if handling.is_none() => {
+                let Ok(incoming) = incoming else {
+                    log::info!("Closing the federation websocket with {host}, which sent nothing for {RECEIVE_TIMEOUT:?}");
+                    break;
+                };
+                receive_deadline = Instant::now() + RECEIVE_TIMEOUT;
                 match incoming {
                     FederationIncomingEvent::Text(payload) => {
                         match serde_json::from_str::<FederationWsEnvelope>(&payload) {
@@ -498,8 +581,7 @@ pub async fn federation_socket_loop(
                             Err(error) => {
                                 log::warn!("Failed to parse federation websocket message: {error}");
                                 if let Some((request_id, error)) = parse_error_reply(&payload, &error) {
-                                    let host = state.federation_ws_manager.authenticated_host(conn_id).await;
-                                    let _ = state.federation_ws_manager.send_error(conn_id, host.as_ref(), Some(request_id), error).await;
+                                    let _ = state.federation_ws_manager.send_error(conn_id, Some(&host), Some(request_id), error).await;
                                 }
                             }
                         }
@@ -514,6 +596,8 @@ pub async fn federation_socket_loop(
             }
         }
     }
+    // Closed before waiting on the message being handled.
+    drop(socket);
     if let Some(handling) = handling {
         handling.await;
     }
