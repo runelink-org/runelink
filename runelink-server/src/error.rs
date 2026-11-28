@@ -154,13 +154,15 @@ mod tests {
             ApiError::Conflict("x".into()),
         ] {
             let sent = WsError::from(error);
+            let code = sent.code.clone();
             let received = FederationRequestError::Remote {
                 code: sent.code.clone(),
                 message: sent.message.clone(),
                 error: Box::new(sent),
             }
             .into_api_error(&host);
-            assert_eq!(WsError::from(received).message, "x");
+            let resent = WsError::from(received);
+            assert_eq!((resent.code, resent.message), (code, "x".into()));
         }
     }
 }
