@@ -1,4 +1,4 @@
-use runelink_types::{ids::RequestId, ws::WsError};
+use runelink_types::{host::Host, ids::RequestId, ws::WsError};
 use thiserror::Error;
 
 use crate::error::ApiError;
@@ -8,11 +8,11 @@ pub type FederationRequestResult<T> = Result<T, FederationRequestError>;
 #[derive(Debug, Error)]
 pub enum FederationRequestError {
     #[error("No active federation connection for host '{host}'")]
-    HostUnavailable { host: String },
+    HostUnavailable { host: Host },
     #[error("{host} does not support the {capability} capability")]
-    UnsupportedCapability { host: String, capability: String },
+    UnsupportedCapability { host: Host, capability: String },
     #[error("Timed out waiting for request '{request_id}' reply from '{host}'")]
-    Timeout { host: String, request_id: RequestId },
+    Timeout { host: Host, request_id: RequestId },
     #[error("Request '{request_id}' waiter dropped before completion")]
     ChannelClosed { request_id: RequestId },
     #[error("Remote federation error [{code}]: {message}")]
@@ -24,7 +24,7 @@ pub enum FederationRequestError {
 }
 
 impl FederationRequestError {
-    pub fn into_api_error(self, host: &str) -> ApiError {
+    pub fn into_api_error(self, host: &Host) -> ApiError {
         match self {
             FederationRequestError::HostUnavailable { .. } => {
                 ApiError::Internal(format!(

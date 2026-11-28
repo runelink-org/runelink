@@ -1,3 +1,4 @@
+use runelink_types::host::{Host, InvalidHost};
 use std::{error::Error, fmt};
 
 pub const MAX_USERNAME_LENGTH: usize = 32;
@@ -6,11 +7,6 @@ pub const MAX_USERNAME_LENGTH: usize = 32;
 pub enum ValidationError {
     UsernameEmpty,
     UsernameTooLong,
-    HostEmpty,
-    HostInvalidCharacters,
-    HostMultiplePorts,
-    HostPortNotAllowed,
-    HostInvalidPort,
 }
 
 impl fmt::Display for ValidationError {
@@ -21,20 +17,6 @@ impl fmt::Display for ValidationError {
                 f,
                 "Username cannot be longer than {MAX_USERNAME_LENGTH} characters."
             ),
-            Self::HostEmpty => write!(f, "Host cannot be empty."),
-            Self::HostInvalidCharacters => write!(
-                f,
-                "Host may only contain lowercase letters, digits, dots, hyphens, and an optional :port.",
-            ),
-            Self::HostMultiplePorts => {
-                write!(f, "Host can include at most one port separator.")
-            }
-            Self::HostPortNotAllowed => {
-                write!(f, "Host must not include a port here.")
-            }
-            Self::HostInvalidPort => {
-                write!(f, "Host port must contain digits only.")
-            }
         }
     }
 }
@@ -65,15 +47,6 @@ pub fn normalize_username(input: &str) -> String {
     normalized
 }
 
-pub fn normalize_host_input(input: &str) -> String {
-    let lowercased = input.trim().to_ascii_lowercase();
-    lowercased
-        .trim_start_matches("http://")
-        .trim_start_matches("https://")
-        .trim_end_matches('/')
-        .to_string()
-}
-
 pub fn validate_username(input: &str) -> Result<String, ValidationError> {
     let normalized = normalize_username(input);
     if normalized.is_empty() {
@@ -85,57 +58,16 @@ pub fn validate_username(input: &str) -> Result<String, ValidationError> {
     Ok(normalized)
 }
 
-pub fn validate_host(input: &str) -> Result<String, ValidationError> {
-    validate_host_internal(input, true)
-}
-
-pub fn validate_config_host(input: &str) -> Result<String, ValidationError> {
-    validate_host_internal(input, false)
-}
-
-fn validate_host_internal(
-    input: &str,
-    allow_port: bool,
-) -> Result<String, ValidationError> {
-    let normalized = normalize_host_input(input);
-
-    if normalized.is_empty() {
-        return Err(ValidationError::HostEmpty);
-    }
-
-    let colon_count = normalized.chars().filter(|ch| *ch == ':').count();
-    if colon_count > 1 {
-        return Err(ValidationError::HostMultiplePorts);
-    }
-
-    let (host_part, port_part) = match normalized.split_once(':') {
-        Some((host_part, port_part)) => {
-            if !allow_port {
-                return Err(ValidationError::HostPortNotAllowed);
-            }
-            (host_part, Some(port_part))
-        }
-        None => (normalized.as_str(), None),
-    };
-
-    if host_part.is_empty() {
-        return Err(ValidationError::HostEmpty);
-    }
-
-    if !host_part.chars().all(|ch| {
-        ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '.' || ch == '-'
-    }) {
-        return Err(ValidationError::HostInvalidCharacters);
-    }
-
-    if let Some(port_part) = port_part
-        && (port_part.is_empty()
-            || !port_part.chars().all(|ch| ch.is_ascii_digit()))
-    {
-        return Err(ValidationError::HostInvalidPort);
-    }
-
-    Ok(normalized)
+/// Parses a host that a person entered, which may also have a URL scheme or
+/// a trailing slash.
+pub fn validate_host(input: &str) -> Result<Host, InvalidHost> {
+    let input = input.trim().to_ascii_lowercase();
+    let host = input
+        .strip_prefix("https://")
+        .or_else(|| input.strip_prefix("http://"))
+        .unwrap_or(&input);
+    Host::parse(host.strip_suffix('/').unwrap_or(host))
+        .map_err(|_| InvalidHost(input.clone()))
 }
 
 #[cfg(test)]
@@ -168,39 +100,18 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_and_validates_hosts() {
-        assert_eq!(
-            validate_host(" HTTPS://Example.COM:7000/ ").unwrap(),
-            "example.com:7000"
-        );
-        assert_eq!(validate_config_host("Example.COM").unwrap(), "example.com");
-    }
-
-    #[test]
-    fn rejects_invalid_ports() {
-        assert_eq!(
-            validate_host("example.com:abc").unwrap_err(),
-            ValidationError::HostInvalidPort
-        );
-        assert_eq!(
-            validate_host("example.com:7000:1").unwrap_err(),
-            ValidationError::HostMultiplePorts
-        );
-    }
-
-    #[test]
-    fn rejects_ports_in_config_hosts() {
-        assert_eq!(
-            validate_config_host("example.com:7000").unwrap_err(),
-            ValidationError::HostPortNotAllowed
-        );
-    }
-
-    #[test]
-    fn rejects_invalid_host_characters() {
-        assert_eq!(
-            validate_host("exa$mple.com").unwrap_err(),
-            ValidationError::HostInvalidCharacters
-        );
+    fn validates_entered_hosts() {
+        for (input, host) in [
+            (" HTTPS://Example.COM:7000/ ", "example.com"),
+            ("http://localhost:7001", "localhost:7001"),
+            ("[::1]:7000", "[::1]"),
+        ] {
+            assert_eq!(validate_host(input).unwrap().as_str(), host, "{input}");
+        }
+        for input in
+            ["example.com:abc", "example.com:7000:1", "exa$mple.com", ""]
+        {
+            assert!(validate_host(input).is_err(), "{input}");
+        }
     }
 }

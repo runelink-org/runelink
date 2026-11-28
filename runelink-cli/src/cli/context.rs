@@ -57,7 +57,7 @@ impl<'a> CliContext<'a> {
     }
 
     pub async fn home_api_url(&mut self) -> Result<String, CliError> {
-        let host = self.account.try_get_host()?.to_string();
+        let host = self.account.try_get_host()?.clone();
         resolve_api_url(self.client, self.config, &host).await
     }
 

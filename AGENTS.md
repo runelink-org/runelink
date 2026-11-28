@@ -34,3 +34,7 @@ Servers, channels, text channels, and messages are identified by their owning ho
 - `server_ref`: a `ServerRef` (`ResourceRef<ServerId>`), the host and ID that name a resource on any host. Use it wherever the host isn't implied.
 
 The same applies to each kind of resource (`channel`, `text_channel`, `message`). Users have no bare ID, so a `UserRef` is named `user_ref`, or for its role, such as `author` or `creator`.
+
+### Hosts
+
+Hosts are `Host` values, which only parsing creates and which are always canonical: lowercase, without the default port (`DEFAULT_PORT`). Compare and store them as `Host`s, and never add or strip ports by hand. Use `Host::api_url`, `Host::client_ws_url`, or `Host::federation_ws_url` to connect to a host, and `Host::authority` only where the port must always be spelled out. Parse hosts that people enter with `runelink_client::validation::validate_host`.

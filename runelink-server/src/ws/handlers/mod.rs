@@ -249,7 +249,7 @@ async fn handle_federation_request(
         .federation_ws_manager
         .authenticated_host(conn_id)
         .await;
-    let host = host.as_deref();
+    let host = host.as_ref();
     let capability = request.capability();
     let version = preferred_version(federation_websocket, &capability);
     let Some(required) =

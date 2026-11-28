@@ -47,7 +47,7 @@ pub async fn insert(
 async fn lock_unless_recently_deleted(
     conn: &mut PgConnection,
     name: &str,
-    host: &str,
+    host: &Host,
     reuse_delay: Duration,
 ) -> ApiResult<()> {
     lock_user_name(conn, name, host).await?;
@@ -60,7 +60,7 @@ async fn lock_unless_recently_deleted(
         ) AS "exists!";
         "#,
         name,
-        host,
+        host.as_str(),
         reuse_delay.as_seconds_f64(),
     )
     .fetch_one(conn)
@@ -78,7 +78,7 @@ async fn lock_unless_recently_deleted(
 async fn lock_user_name(
     conn: &mut PgConnection,
     name: &str,
-    host: &str,
+    host: &Host,
 ) -> ApiResult<()> {
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
         .bind(format!("{name}@{host}"))

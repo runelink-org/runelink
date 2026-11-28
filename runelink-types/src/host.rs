@@ -1,5 +1,8 @@
 use serde::{Deserialize, Deserializer, Serialize};
-use std::{fmt, ops::Deref, str::FromStr};
+use std::{fmt, str::FromStr};
+
+/// The port of a host that names no port.
+pub const DEFAULT_PORT: u16 = 7000;
 
 /// A host name or IP address with an optional port, in its canonical
 /// spelling: lowercase, without the default port.
@@ -31,13 +34,40 @@ impl Host {
     pub fn as_str(&self) -> &str {
         &self.0
     }
-}
 
-impl Deref for Host {
-    type Target = str;
+    /// The host with its port, even the default one, for connecting to it.
+    pub fn authority(&self) -> String {
+        // An unported IPv6 address ends with its closing bracket.
+        match self.0.rsplit_once(':') {
+            Some((_, port)) if !port.contains(']') => self.0.clone(),
+            _ => format!("{}:{DEFAULT_PORT}", self.0),
+        }
+    }
 
-    fn deref(&self) -> &str {
-        &self.0
+    /// The base URL of the host's HTTP API, which also names it in tokens.
+    pub fn api_url(&self, secure: bool) -> String {
+        let scheme = if secure { "https" } else { "http" };
+        format!("{scheme}://{}", self.authority())
+    }
+
+    /// The host whose API URL is exactly `url`.
+    pub fn from_api_url(url: &str, secure: bool) -> Option<Self> {
+        let scheme = if secure { "https://" } else { "http://" };
+        let host = Self::parse(url.strip_prefix(scheme)?).ok()?;
+        (host.api_url(secure) == url).then_some(host)
+    }
+
+    pub fn client_ws_url(&self, secure: bool) -> String {
+        self.ws_url(secure, "client")
+    }
+
+    pub fn federation_ws_url(&self, secure: bool) -> String {
+        self.ws_url(secure, "federation")
+    }
+
+    fn ws_url(&self, secure: bool, kind: &str) -> String {
+        let scheme = if secure { "wss" } else { "ws" };
+        format!("{scheme}://{}/ws/{kind}", self.authority())
     }
 }
 
@@ -127,7 +157,7 @@ mod sqlx_impls {
 
 /// Parses a host name or IP address with an optional port into its canonical
 /// spelling: lowercase, without the default port.
-pub fn canonical_host(host: &str) -> Result<String, InvalidHost> {
+fn canonical_host(host: &str) -> Result<String, InvalidHost> {
     let invalid = || InvalidHost(host.to_string());
     let (name, port) = match host.rsplit_once(':') {
         // The last colon of an unported IPv6 address is inside its brackets.
@@ -151,7 +181,7 @@ pub fn canonical_host(host: &str) -> Result<String, InvalidHost> {
         None => None,
     };
     Ok(match port {
-        None | Some(7000) => parsed.to_string(),
+        None | Some(DEFAULT_PORT) => parsed.to_string(),
         Some(port) => format!("{parsed}:{port}"),
     })
 }
@@ -206,6 +236,50 @@ mod tests {
                 expected,
                 "{host}"
             );
+        }
+    }
+
+    #[test]
+    fn hosts_name_their_urls_with_ports() {
+        for (host, authority) in [
+            ("example.com", "example.com:7000"),
+            ("example.com:8080", "example.com:8080"),
+            ("[::1]", "[::1]:7000"),
+            ("[::1]:4321", "[::1]:4321"),
+        ] {
+            let host = Host::parse(host).unwrap();
+            assert_eq!(host.authority(), authority);
+            assert_eq!(host.api_url(false), format!("http://{authority}"));
+            assert_eq!(
+                Host::from_api_url(&host.api_url(true), true),
+                Some(host.clone())
+            );
+        }
+        let host = Host::parse("example.com").unwrap();
+        assert_eq!(host.api_url(true), "https://example.com:7000");
+        assert_eq!(
+            host.client_ws_url(true),
+            "wss://example.com:7000/ws/client"
+        );
+        assert_eq!(
+            host.federation_ws_url(false),
+            "ws://example.com:7000/ws/federation"
+        );
+    }
+
+    #[test]
+    fn only_exact_api_urls_name_hosts() {
+        for url in [
+            "https://example.com",
+            "https://Example.com:7000",
+            "https://example.com:7000/",
+            "http://example.com:7000",
+            "https://example.com:07000",
+            "https://https://example.com:7000",
+            "https://example.com:7000@evil.com",
+            "https://evil.com:7000/path",
+        ] {
+            assert_eq!(Host::from_api_url(url, true), None, "{url}");
         }
     }
 
