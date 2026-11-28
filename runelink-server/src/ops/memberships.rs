@@ -258,18 +258,7 @@ pub mod auth {
         }
     }
 
-    pub fn create(
-        state: &AppState,
-        new_membership: &NewServerMembership,
-    ) -> Req {
-        // The owning host enforces the rules for remote servers
-        if state
-            .config
-            .locality(&new_membership.server_ref.host)
-            .is_remote()
-        {
-            return Req::Client;
-        }
+    pub fn create(new_membership: &NewServerMembership) -> Req {
         upsert_base(
             Req::User(new_membership.user_ref.clone()),
             new_membership.server_ref.clone(),

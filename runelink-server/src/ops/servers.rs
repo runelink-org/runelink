@@ -230,10 +230,7 @@ pub mod auth {
     use super::*;
     use crate::auth::Requirement as Req;
 
-    pub fn update(state: &AppState, server_ref: &ServerRef) -> Req {
-        if state.config.locality(&server_ref.host).is_remote() {
-            return Req::Client;
-        }
+    pub fn update(server_ref: &ServerRef) -> Req {
         Req::ServerAdmin(server_ref.clone())
             .or_admin()
             .client_only()

@@ -158,15 +158,21 @@ impl Requirement {
                 }
             }
 
-            Requirement::ServerMember(server) => {
-                let role = auth.server_role(facts, server).await?;
+            // The owning host checks roles in its own servers, and requests
+            // for a remote server are forwarded to it.
+            Requirement::ServerMember(server_ref)
+            | Requirement::ServerAdmin(server_ref)
+                if config.locality(&server_ref.host).is_remote() => {}
+
+            Requirement::ServerMember(server_ref) => {
+                let role = auth.server_role(facts, server_ref).await?;
                 if role.is_none() {
                     return Ok(Some("Server member only".into()));
                 }
             }
 
-            Requirement::ServerAdmin(server) => {
-                let role = auth.server_role(facts, server).await?;
+            Requirement::ServerAdmin(server_ref) => {
+                let role = auth.server_role(facts, server_ref).await?;
                 if role != Some(ServerRole::Admin) {
                     return Ok(Some("Server admin only".into()));
                 }
