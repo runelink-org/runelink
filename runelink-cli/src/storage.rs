@@ -18,7 +18,7 @@ pub struct AppConfig {
     pub active_account: Option<UserRef>,
     pub default_server: Option<Uuid>,
     pub accounts: Vec<AccountConfig>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_canonical_hosts")]
     pub hosts: HashMap<Host, HostConfig>,
     /// Hosts approved for HTTP by `--dangerously-allow-http` for this run
     #[serde(skip)]
@@ -208,6 +208,23 @@ fn confirm_insecure_host(host: &Host) -> Result<(), CliError> {
     Ok(())
 }
 
+/// Saved hosts must already be canonical, so that spellings of one host can't
+/// merge their HTTP approvals. Other spellings fail the config, which is then
+/// backed up.
+fn deserialize_canonical_hosts<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<HashMap<Host, HostConfig>, D::Error> {
+    HashMap::<String, HostConfig>::deserialize(deserializer)?
+        .into_iter()
+        .map(|(key, config)| match Host::parse(&key) {
+            Ok(host) if host.as_str() == key => Ok((host, config)),
+            _ => Err(serde::de::Error::custom(format!(
+                "saved host {key:?} isn't canonical"
+            ))),
+        })
+        .collect()
+}
+
 fn default_secure() -> bool {
     true
 }
@@ -249,15 +266,22 @@ where
     if !file_path.exists() {
         return Ok(T::default());
     }
-    let data_str = fs::read_to_string(&file_path)?;
-    if data_str.trim().is_empty() {
+    let data = fs::read(&file_path)?;
+    if data.iter().all(u8::is_ascii_whitespace) {
         return Ok(T::default());
     }
-    match serde_json::from_str(&data_str) {
+    match serde_json::from_slice(&data) {
         Ok(data) => Ok(data),
         // Such as one saved by an older version, which isn't migrated
         Err(error) => {
-            let backup_path = file_path.with_extension("json.bak");
+            // Without replacing an earlier backup
+            let mut backup_path = file_path.with_extension("json.bak");
+            let mut index = 1;
+            while backup_path.exists() {
+                backup_path =
+                    file_path.with_extension(format!("json.bak.{index}"));
+                index += 1;
+            }
             fs::rename(&file_path, &backup_path)?;
             eprintln!(
                 "Couldn't read {} ({error}), so it was moved to {} and a new one will be created.",
@@ -294,9 +318,18 @@ mod tests {
     }
 
     #[test]
+    fn saved_hosts_must_be_canonical() {
+        // Otherwise two spellings of a host could merge their HTTP approvals.
+        let config = serde_json::from_str::<AppConfig>(
+            r#"{"accounts":[],"hosts":{"localhost:7000":{"secure":false,"allow_insecure":true}}}"#,
+        );
+        assert!(config.is_err());
+    }
+
+    #[test]
     fn approval_is_per_host_and_survives_secure_discovery() {
         let mut config: AppConfig = serde_json::from_str(
-            r#"{"accounts":[],"hosts":{"localhost:7000":{"secure":false,"allow_insecure":true}}}"#,
+            r#"{"accounts":[],"hosts":{"localhost":{"secure":false,"allow_insecure":true}}}"#,
         )
         .unwrap();
         let localhost = Host::parse("localhost").unwrap();
